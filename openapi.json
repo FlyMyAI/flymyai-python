@@ -1,0 +1,16 @@
+{
+  "properties": {
+    "495_821": {
+      "description": "495_821",
+      "items": {},
+      "optional": false,
+      "title": "495 821",
+      "type": "array"
+    }
+  },
+  "required": [
+    "495_821"
+  ],
+  "title": "DynamicHandleModel",
+  "type": "object"
+}
