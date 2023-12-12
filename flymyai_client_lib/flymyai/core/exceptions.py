@@ -1,6 +1,11 @@
 import httpx
 
-from flymyai_client.src.flymyai_client.core.models import FlyMyAI401Response, FlyMyAI422Response, Base4xxResponse
+from core.models import (
+    FlyMyAI401Response,
+    FlyMyAI422Response,
+    Base4xxResponse,
+    FlyMyAI400Response,
+)
 
 
 class BaseFlyMyAIException(Exception):
@@ -22,21 +27,25 @@ class BaseFlyMyAIException(Exception):
             502: lambda: cls(msg, True),
             503: lambda: cls(msg, False),
             504: lambda: cls(msg, True),
-            524: lambda: cls(msg, True)
+            524: lambda: cls(msg, True),
         }
-        return internal_error_mapping.get(response.status_code, lambda: cls(msg, False))()
+        return internal_error_mapping.get(
+            response.status_code, lambda: cls(msg, False)
+        )()
 
     @classmethod
     def from_4xx(cls, response: httpx.Response):
         response_validation_templates = {
+            400: FlyMyAI400Response,
             401: FlyMyAI401Response,
             422: FlyMyAI422Response,
         }
         response_4xx = response_validation_templates.get(
-            response.status_code,
-            Base4xxResponse
+            response.status_code, Base4xxResponse
         ).from_response(response)
-        return cls(msg=response_4xx.to_msg(), requires_retry=response_4xx.requires_retry)
+        return cls(
+            msg=response_4xx.to_msg(), requires_retry=response_4xx.requires_retry
+        )
 
     @classmethod
     def from_response(cls, response: httpx.Response):
@@ -45,14 +54,20 @@ class BaseFlyMyAIException(Exception):
         if response.status_code >= 500:
             return cls.from_5xx(response)
 
+    def __str__(self):
+        return self.msg
+
 
 class FlyMyAIPredictException(BaseFlyMyAIException):
     ...
 
 
-class FlyMyAIExceptionGroup(ExceptionGroup):
-    def __new__(cls, errors: list[BaseFlyMyAIException]):
-        exceptions_message = "\n".join([str(err) for err in errors])
-        com_exception_message = f'FlyMyAI exception history: {exceptions_message}'
-        self = super().__new__(cls, com_exception_message, errors)
-        return self
+class FlyMyAIExceptionGroup(Exception):
+    def __init__(self, errors: list[BaseFlyMyAIException], **kwargs):
+        self.errors = errors
+        exceptions_message = ";".join([str(err) for err in errors])
+        self.message = f"FlyMyAI exception history: {exceptions_message}"
+        super().__init__(self.message)
+
+    def __str__(self):
+        return self.message

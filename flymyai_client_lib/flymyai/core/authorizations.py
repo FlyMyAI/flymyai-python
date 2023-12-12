@@ -4,7 +4,6 @@ import httpx
 
 
 class ClientInfo:
-
     @property
     def authorization_headers(self):
         raise NotImplemented()
@@ -30,19 +29,19 @@ class APIKeyClientInfo(ClientInfo):
 
     @property
     def authorization_headers(self):
-        return {'API_KEY': self.apikey}
+        return {"X-API-KEY": self.apikey}
 
     @property
     def _project_path(self):
-        return httpx.URL(f'/api/v1/{self.username}/{self.project_name}/')
+        return httpx.URL(f"/api/v1/{self.username}/{self.project_name}/")
 
     @property
     def prediction_path(self):
-        return self._project_path.join(httpx.URL('predict'))
+        return self._project_path.join(httpx.URL("predict"))
 
     @property
     def openapi_schema_path(self):
-        return self._project_path.join(httpx.URL('openapi.json'))
+        return self._project_path.join(httpx.URL("openapi.json"))
 
 
 class ClientInfoFactory:
@@ -52,7 +51,7 @@ class ClientInfoFactory:
         self._raw_client_info = raw_client_info
 
     def _build_client_info(self) -> ClientInfo:
-        if 'apikey' in self._raw_client_info:
+        if "apikey" in self._raw_client_info:
             return APIKeyClientInfo(**self._raw_client_info)
         else:
             raise NotImplemented("This type of authorization is not implemented yet!")

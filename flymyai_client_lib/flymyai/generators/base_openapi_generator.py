@@ -22,11 +22,11 @@ class BaseOpenapiGenerator:
         try:
             subprocess.check_call(
                 [
-                    'datamodel-codegen',
-                    f'--output_file {self.output_file}',
-                    f'--input-file-type jsonschema'
+                    "datamodel-codegen",
+                    f"--output_file {self.output_file}",
+                    f"--input-file-type jsonschema",
                 ],
-                stdin=schemas_data
+                stdin=schemas_data,
             )
         except subprocess.CalledProcessError as e:
             raise ModelGenerationError(*e.args)

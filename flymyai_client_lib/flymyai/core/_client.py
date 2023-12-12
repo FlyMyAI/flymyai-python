@@ -1,17 +1,19 @@
-import dataclasses
 import os
 from typing import Callable, Awaitable, Generic, TypeVar, Union, overload
 
 import httpx
 
-from flymyai_client.src.flymyai_client.core.authorizations import APIKeyClientInfo, ClientInfoFactory
-from flymyai_client.src.flymyai_client.core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
-from flymyai_client.src.flymyai_client.core.models import PredictionResponse, OpenAPISchemaResponse
-from flymyai_client.src.flymyai_client.utils.utils import retryable_callback, aretryable_callback
+from api_field.payload import MultipartPayload
+from core.authorizations import APIKeyClientInfo, ClientInfoFactory
+from core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
+from core.models import PredictionResponse, OpenAPISchemaResponse
+from utils.utils import retryable_callback, aretryable_callback
 
-DEFAULT_RETRY_COUNT = os.getenv('FLYMYAI_MAX_RETRIES', 2)
+DEFAULT_RETRY_COUNT = os.getenv("FLYMYAI_MAX_RETRIES", 2)
 
-_PossibleClients = TypeVar("_PossibleClients", bound=Union[httpx.Client, httpx.AsyncClient])
+_PossibleClients = TypeVar(
+    "_PossibleClients", bound=Union[httpx.Client, httpx.AsyncClient]
+)
 
 
 class BaseClient(Generic[_PossibleClients]):
@@ -64,13 +66,19 @@ class BaseClient(Generic[_PossibleClients]):
 
 
 class BaseSyncClient(BaseClient[httpx.Client]):
-
-    def __init__(self, client_info: APIKeyClientInfo, max_retries=DEFAULT_RETRY_COUNT):
+    def __init__(
+        self, client_info: dict | APIKeyClientInfo, max_retries=DEFAULT_RETRY_COUNT
+    ):
         super().__init__()
-        self.client_info = client_info
+        if isinstance(client_info, dict):
+            self.client_info = ClientInfoFactory(client_info).build_client_info()
+        elif isinstance(client_info, APIKeyClientInfo):
+            self.client_info = client_info
+        else:
+            raise TypeError("Invalid credentials. dict required!")
         self._client = httpx.Client(
-            headers=client_info.authorization_headers,
-            base_url=os.getenv('FLYMYAI_DSN', 'http://localhost:9006'),  # todo
+            headers=self.client_info.authorization_headers,
+            base_url=os.getenv("FLYMYAI_DSN", "http://localhost:9006"),
         )
         self.max_retries = max_retries
 
@@ -80,28 +88,31 @@ class BaseSyncClient(BaseClient[httpx.Client]):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._client.close()
 
-    def _predict(self, input_data: dict):
+    def _predict(self, payload: MultipartPayload):
         return self._wrap_request(
             lambda: self._client.post(
                 self.client_info.prediction_path,
-                data=input_data,
-                headers={'Content-Type': 'multipart/form-data'}
+                **payload.serialize(),
+                timeout=None,
+                headers=self.client_info.authorization_headers,
             )
         )
 
-    def predict(self, input_data: dict, max_retries=None):
+    def predict(self, payload: dict, max_retries=None):
+        payload = MultipartPayload(payload)
         history, response = retryable_callback(
-            lambda: self._predict(input_data),
+            lambda: self._predict(payload),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
-            FlyMyAIExceptionGroup
+            FlyMyAIExceptionGroup,
         )
         return PredictionResponse(history, response.json())
 
     def _openapi_schema(self):
         return self._wrap_request(
             lambda: self._client.get(
-                self.client_info.openapi_schema_path
+                self.client_info.openapi_schema_path,
+                headers=self.client_info.authorization_headers,
             )
         )
 
@@ -110,7 +121,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             lambda: self._openapi_schema(),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
-            FlyMyAIExceptionGroup
+            FlyMyAIExceptionGroup,
         )
         return OpenAPISchemaResponse(history, response.json())
 
@@ -122,19 +133,28 @@ class BaseSyncClient(BaseClient[httpx.Client]):
 
 
 class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
-
-    def __init__(self, client_info: APIKeyClientInfo, max_retries=DEFAULT_RETRY_COUNT):
+    def __init__(
+        self, client_info: APIKeyClientInfo | dict, max_retries=DEFAULT_RETRY_COUNT
+    ):
         super().__init__()
+        if isinstance(client_info, APIKeyClientInfo):
+            self.client_info = client_info
+        elif isinstance(client_info, dict):
+            self.client_info = ClientInfoFactory(
+                raw_client_info=client_info
+            ).build_client_info()
+        else:
+            raise TypeError("Invalid client info type. dict required ")
         self._client = httpx.AsyncClient(
             headers=client_info.authorization_headers,
-            base_url=os.getenv('FLYMYAI_DSN', 'http://localhost:9006'),  # todo
+            base_url=os.getenv("FLYMYAI_DSN", "http://localhost:9006"),
         )
         self.max_retries = max_retries
 
-    def __aenter__(self):
+    async def __aenter__(self):
         return self
 
-    def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
         if hasattr(self, "_client"):
             await self._client.aclose()
 
@@ -143,15 +163,34 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             self._openapi_schema,
             max_retries or self.max_retries,
             FlyMyAIPredictException,
-            FlyMyAIExceptionGroup
+            FlyMyAIExceptionGroup,
         )
         return OpenAPISchemaResponse(history, response.json())
 
     async def _openapi_schema(self):
         return self._wrap_request(
             self._client.get(
-                self.client_info.openapi_schema_path
+                self.client_info.openapi_schema_path,
+                headers=self.client_info.authorization_headers,
             )
+        )
+
+    async def _predict(self, payload: MultipartPayload):
+        return self._wrap_request(
+            self._client.post(
+                self.client_info.prediction_path,
+                **payload.serialize(),
+                headers=self.client_info.authorization_headers,
+            )
+        )
+
+    async def predict(self, payload: dict, max_retries=None):
+        payload = MultipartPayload(input_data=payload)
+        history, response = await aretryable_callback(
+            self._predict,
+            max_retries or self.max_retries,
+            FlyMyAIPredictException,
+            FlyMyAIExceptionGroup,
         )
 
     @staticmethod

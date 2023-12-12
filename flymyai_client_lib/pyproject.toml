@@ -4,7 +4,7 @@ version = "0.1.0"
 description = ""
 authors = ["D1akaDivan <d1akadivan@amber.iss>"]
 readme = "README.md"
-packages = [{include = "vli_client", from = "src"}]
+packages = [{include = "flymyai"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"

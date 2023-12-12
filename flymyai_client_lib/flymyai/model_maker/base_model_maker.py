@@ -2,8 +2,12 @@ import json
 import pathlib
 from typing import Type
 
-from flymyai_client.src.flymyai_client.generators.base_openapi_generator import BaseOpenapiGenerator
-from flymyai_client.src.flymyai_client.schema_obtainers.base_schema_loader import BaseSchemaLoader
+from generators.base_openapi_generator import (
+    BaseOpenapiGenerator,
+)
+from schema_obtainers.base_schema_loader import (
+    BaseSchemaLoader,
+)
 
 
 class BaseModelMaker:

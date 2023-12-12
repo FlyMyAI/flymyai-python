@@ -13,23 +13,23 @@ class BaseSchemaLoader:
 
     @property
     def openapi_schema(self):
-        if not hasattr(self, '_openapi_schema'):
+        if not hasattr(self, "_openapi_schema"):
             self._openapi_schema = json.loads(self._get_openapi_schema())
         return self._openapi_schema
 
     @property
     def dynamic_input_model(self):
-        return self._openapi_schema['components']['schemas']['DynamicInputModel']
+        return self._openapi_schema["components"]["schemas"]["DynamicInputModel"]
 
     @property
     def dynamic_output_model(self):
-        return self._openapi_schema['components']['schemas']['DynamicOutputModel']
+        return self._openapi_schema["components"]["schemas"]["DynamicOutputModel"]
 
     @property
     def dynamic_schemas(self):
         return {
-            'schemas': {
-                'DynamicInputModel': self.dynamic_input_model,
-                'DynamicOutputModel': self.dynamic_input_model
+            "schemas": {
+                "DynamicInputModel": self.dynamic_input_model,
+                "DynamicOutputModel": self.dynamic_input_model,
             }
         }
