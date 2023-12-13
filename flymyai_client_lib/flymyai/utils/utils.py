@@ -1,4 +1,6 @@
-from typing import Callable, Awaitable, Type, Any
+from typing import Callable, Awaitable, Type, Any, Coroutine
+
+import httpx
 
 
 def retryable_callback(
@@ -24,7 +26,7 @@ def retryable_callback(
 
 
 async def aretryable_callback(
-    cb: Callable[[], Awaitable[Any]],
+    cb: Callable[..., Awaitable[httpx.Response]],
     retries,
     append_on_exception_cls: Type[Exception],
     exception_group_cls: Type[Exception],
@@ -39,7 +41,7 @@ async def aretryable_callback(
             if e.requires_retry:
                 continue
             else:
-                break
+                raise exception_group_cls(retries_history)
     else:
         exception_gr = exception_group_cls(retries_history)
         raise exception_gr

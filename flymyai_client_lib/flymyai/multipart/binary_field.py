@@ -5,7 +5,7 @@ import uuid
 from io import BytesIO
 from typing import Union, BinaryIO, Any
 
-from flymyai.api_field.base_field import BaseField
+from .base_field import BaseField
 import mimetypes
 
 
@@ -41,11 +41,15 @@ class BinaryField(BaseField):
     def to_io(value: _BinaryInput) -> _IOOutput:
         if isinstance(value, bytes):
             io_obj = io.BytesIO(value)
-            io_obj.name = uuid.uuid4()
+            io_obj.name = uuid.uuid4().hex
         elif isinstance(value, (pathlib.Path, str)):
             io_obj = open(value, "rb")
+        elif isinstance(value, io.BufferedIOBase):
+            io_obj = value
         else:
-            raise TypeError()
+            raise TypeError(
+                f"Required one of: bytes, str, pathlib.Path, got {type(value)}"
+            )
         return io_obj
 
     def serialize(

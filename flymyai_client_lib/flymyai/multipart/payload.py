@@ -1,8 +1,8 @@
 import io
 import pathlib
 
-from api_field.binary_field import BinaryField
-from api_field.simple_field import SimpleField
+from .binary_field import BinaryField
+from .simple_field import SimpleField
 
 
 class MultipartPayload:
@@ -34,5 +34,5 @@ class MultipartPayload:
             elif isinstance(value, (pathlib.Path, io.BufferedIOBase)):
                 files[key] = self._serialize_simple(value)
             else:
-                raise TypeError("Unsupported type for field {}".format(key))
+                data[key] = self._serialize_simple(value)
         return {"files": files, "data": data}

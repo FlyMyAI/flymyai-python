@@ -3,7 +3,7 @@ from typing import Callable, Awaitable, Generic, TypeVar, Union, overload
 
 import httpx
 
-from api_field.payload import MultipartPayload
+from multipart.payload import MultipartPayload
 from core.authorizations import APIKeyClientInfo, ClientInfoFactory
 from core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
 from core.models import PredictionResponse, OpenAPISchemaResponse
@@ -16,10 +16,25 @@ _PossibleClients = TypeVar(
 )
 
 
+_predict_timeout = httpx.Timeout(None, connect=10)
+
+
 class BaseClient(Generic[_PossibleClients]):
     _client: _PossibleClients
     max_retries: int
     client_info: APIKeyClientInfo
+
+    def __init__(
+        self, client_info: APIKeyClientInfo | dict, max_retries=DEFAULT_RETRY_COUNT
+    ):
+        if isinstance(client_info, dict):
+            self.client_info = ClientInfoFactory(client_info).build_client_info()
+        elif isinstance(client_info, APIKeyClientInfo):
+            self.client_info = client_info
+        else:
+            raise TypeError("Invalid credentials. dict required!")
+        self._client = self._construct_client()
+        self.max_retries = max_retries
 
     @overload
     async def predict(self, input_data: dict, max_retries=None) -> PredictionResponse:
@@ -48,7 +63,7 @@ class BaseClient(Generic[_PossibleClients]):
         response = request_callback()
         try:
             return response.raise_for_status()
-        except httpx.HTTPError:  # todo replace
+        except httpx.HTTPError:
             raise FlyMyAIPredictException.from_response(response)
 
     def is_closed(self) -> bool:
@@ -64,23 +79,16 @@ class BaseClient(Generic[_PossibleClients]):
         if hasattr(self, "_client"):
             self._client.close()
 
+    def _construct_client(self):
+        raise NotImplemented
+
 
 class BaseSyncClient(BaseClient[httpx.Client]):
-    def __init__(
-        self, client_info: dict | APIKeyClientInfo, max_retries=DEFAULT_RETRY_COUNT
-    ):
-        super().__init__()
-        if isinstance(client_info, dict):
-            self.client_info = ClientInfoFactory(client_info).build_client_info()
-        elif isinstance(client_info, APIKeyClientInfo):
-            self.client_info = client_info
-        else:
-            raise TypeError("Invalid credentials. dict required!")
-        self._client = httpx.Client(
+    def _construct_client(self):
+        return httpx.Client(
             headers=self.client_info.authorization_headers,
-            base_url=os.getenv("FLYMYAI_DSN", "http://localhost:9006"),
+            base_url=os.getenv("FLYMYAI_DSN", "https://flymy.ai/"),
         )
-        self.max_retries = max_retries
 
     def __enter__(self):
         return self
@@ -93,7 +101,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             lambda: self._client.post(
                 self.client_info.prediction_path,
                 **payload.serialize(),
-                timeout=None,
+                timeout=_predict_timeout,
                 headers=self.client_info.authorization_headers,
             )
         )
@@ -133,23 +141,11 @@ class BaseSyncClient(BaseClient[httpx.Client]):
 
 
 class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
-    def __init__(
-        self, client_info: APIKeyClientInfo | dict, max_retries=DEFAULT_RETRY_COUNT
-    ):
-        super().__init__()
-        if isinstance(client_info, APIKeyClientInfo):
-            self.client_info = client_info
-        elif isinstance(client_info, dict):
-            self.client_info = ClientInfoFactory(
-                raw_client_info=client_info
-            ).build_client_info()
-        else:
-            raise TypeError("Invalid client info type. dict required ")
-        self._client = httpx.AsyncClient(
-            headers=client_info.authorization_headers,
-            base_url=os.getenv("FLYMYAI_DSN", "http://localhost:9006"),
+    def _construct_client(self):
+        return httpx.AsyncClient(
+            headers=self.client_info.authorization_headers,
+            base_url=os.getenv("FLYMYAI_DSN", "https://flymy.ai/"),
         )
-        self.max_retries = max_retries
 
     async def __aenter__(self):
         return self
@@ -160,25 +156,26 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
 
     async def openapi_schema(self, max_retries=None):
         history, response = await aretryable_callback(
-            self._openapi_schema,
+            lambda: self._openapi_schema(),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
         return OpenAPISchemaResponse(history, response.json())
 
-    async def _openapi_schema(self):
+    def _openapi_schema(self):
         return self._wrap_request(
-            self._client.get(
+            lambda: self._client.get(
                 self.client_info.openapi_schema_path,
                 headers=self.client_info.authorization_headers,
             )
         )
 
-    async def _predict(self, payload: MultipartPayload):
+    def _predict(self, payload: MultipartPayload):
         return self._wrap_request(
-            self._client.post(
+            lambda: self._client.post(
                 self.client_info.prediction_path,
+                timeout=_predict_timeout,
                 **payload.serialize(),
                 headers=self.client_info.authorization_headers,
             )
@@ -187,15 +184,16 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
     async def predict(self, payload: dict, max_retries=None):
         payload = MultipartPayload(input_data=payload)
         history, response = await aretryable_callback(
-            self._predict,
+            lambda: self._predict(payload),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
+        return PredictionResponse(history, response.json())
 
     @staticmethod
-    async def _wrap_request(request_callback: Awaitable[httpx.Response]):
-        response = await request_callback
+    async def _wrap_request(request_callback: Callable[..., Awaitable[httpx.Response]]):
+        response = await request_callback()
         try:
             return response.raise_for_status()
         except httpx.HTTPStatusError:

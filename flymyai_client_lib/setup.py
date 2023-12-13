@@ -15,6 +15,7 @@ setup(
         "generators",
         "model_maker",
         "schema_obtainers",
+        "multipart",
     ],
     package_dir={"": str((_BASE_PATH / "flymyai").absolute())},
     license="",

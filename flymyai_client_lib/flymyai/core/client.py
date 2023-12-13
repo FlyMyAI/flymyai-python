@@ -1,4 +1,4 @@
-from core._client import (
+from ._client import (
     BaseSyncClient,
     BaseAsyncClient,
 )

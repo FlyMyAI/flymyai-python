@@ -1,6 +1,6 @@
 import httpx
 
-from core.models import (
+from .models import (
     FlyMyAI401Response,
     FlyMyAI422Response,
     Base4xxResponse,

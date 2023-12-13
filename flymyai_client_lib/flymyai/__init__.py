@@ -1,8 +1,8 @@
 import httpx
 
-from core.authorizations import ClientInfoFactory
-from core.client import FlyMyAI, AsyncFlyMyAI
-from core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
+from .core.authorizations import ClientInfoFactory
+from .core.client import FlyMyAI, AsyncFlyMyAI
+from .core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
 
 
 __all__ = [

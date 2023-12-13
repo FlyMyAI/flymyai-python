@@ -1,7 +1,7 @@
 import json
 from typing import Any
 
-from flymyai.api_field.base_field import BaseField
+from .base_field import BaseField
 
 
 class SimpleField(BaseField):
@@ -9,7 +9,7 @@ class SimpleField(BaseField):
         super().__init__(value)
 
     def validate(self, value: Any = None):
-        pass
+        json.dumps(value or self.value)
 
     def serialize(self, value: Any = None):
-        return json.dumps(value or self.value)
+        return value or self.value
