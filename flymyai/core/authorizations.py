@@ -45,16 +45,16 @@ class APIKeyClientInfo(ClientInfo):
 
 
 class ClientInfoFactory:
-    _raw_client_info: dict
+    _raw_auth: dict
 
-    def __init__(self, raw_client_info: dict):
-        self._raw_client_info = raw_client_info
+    def __init__(self, raw_auth: dict):
+        self._raw_auth = raw_auth
 
-    def _build_client_info(self) -> ClientInfo:
-        if "apikey" in self._raw_client_info:
-            return APIKeyClientInfo(**self._raw_client_info)
+    def _build_auth(self) -> ClientInfo:
+        if "apikey" in self._raw_auth:
+            return APIKeyClientInfo(**self._raw_auth)
         else:
             raise NotImplemented("This type of authorization is not implemented yet!")
 
-    def build_client_info(self):
-        return self._build_client_info()
+    def build_auth(self):
+        return self._build_auth()

@@ -22,15 +22,13 @@ _predict_timeout = httpx.Timeout(None, connect=10)
 class BaseClient(Generic[_PossibleClients]):
     _client: _PossibleClients
     max_retries: int
-    client_info: APIKeyClientInfo
+    auth: APIKeyClientInfo
 
-    def __init__(
-        self, client_info: APIKeyClientInfo | dict, max_retries=DEFAULT_RETRY_COUNT
-    ):
-        if isinstance(client_info, dict):
-            self.client_info = ClientInfoFactory(client_info).build_client_info()
-        elif isinstance(client_info, APIKeyClientInfo):
-            self.client_info = client_info
+    def __init__(self, auth: APIKeyClientInfo | dict, max_retries=DEFAULT_RETRY_COUNT):
+        if isinstance(auth, dict):
+            self.auth = ClientInfoFactory(auth).build_auth()
+        elif isinstance(auth, APIKeyClientInfo):
+            self.auth = auth
         else:
             raise TypeError("Invalid credentials. dict required!")
         self._client = self._construct_client()
@@ -86,7 +84,7 @@ class BaseClient(Generic[_PossibleClients]):
 class BaseSyncClient(BaseClient[httpx.Client]):
     def _construct_client(self):
         return httpx.Client(
-            headers=self.client_info.authorization_headers,
+            headers=self.auth.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://flymy.ai/"),
         )
 
@@ -99,10 +97,10 @@ class BaseSyncClient(BaseClient[httpx.Client]):
     def _predict(self, payload: MultipartPayload):
         return self._wrap_request(
             lambda: self._client.post(
-                self.client_info.prediction_path,
+                self.auth.prediction_path,
                 **payload.serialize(),
                 timeout=_predict_timeout,
-                headers=self.client_info.authorization_headers,
+                headers=self.auth.authorization_headers,
             )
         )
 
@@ -119,8 +117,8 @@ class BaseSyncClient(BaseClient[httpx.Client]):
     def _openapi_schema(self):
         return self._wrap_request(
             lambda: self._client.get(
-                self.client_info.openapi_schema_path,
-                headers=self.client_info.authorization_headers,
+                self.auth.openapi_schema_path,
+                headers=self.auth.authorization_headers,
             )
         )
 
@@ -134,16 +132,16 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         return OpenAPISchemaResponse(history, response.json())
 
     @classmethod
-    def run_predict(cls, client_info: dict, payload: dict):
-        client_info = ClientInfoFactory(raw_client_info=client_info).build_client_info()
-        with cls(client_info) as client:
+    def run_predict(cls, auth: dict, payload: dict):
+        auth = ClientInfoFactory(raw_auth=auth).build_auth()
+        with cls(auth) as client:
             return client.predict(payload)
 
 
 class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
     def _construct_client(self):
         return httpx.AsyncClient(
-            headers=self.client_info.authorization_headers,
+            headers=self.auth.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://flymy.ai/"),
         )
 
@@ -166,18 +164,18 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
     def _openapi_schema(self):
         return self._wrap_request(
             lambda: self._client.get(
-                self.client_info.openapi_schema_path,
-                headers=self.client_info.authorization_headers,
+                self.auth.openapi_schema_path,
+                headers=self.auth.authorization_headers,
             )
         )
 
     def _predict(self, payload: MultipartPayload):
         return self._wrap_request(
             lambda: self._client.post(
-                self.client_info.prediction_path,
+                self.auth.prediction_path,
                 timeout=_predict_timeout,
                 **payload.serialize(),
-                headers=self.client_info.authorization_headers,
+                headers=self.auth.authorization_headers,
             )
         )
 
@@ -203,7 +201,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         await self._client.aclose()
 
     @classmethod
-    async def arun_predict(cls, client_info: dict, payload: dict):
-        client_info = ClientInfoFactory(raw_client_info=client_info).build_client_info()
-        async with cls(client_info) as client:
+    async def arun_predict(cls, auth: dict, payload: dict):
+        auth = ClientInfoFactory(raw_auth=auth).build_auth()
+        async with cls(auth) as client:
             return await client.predict(payload)

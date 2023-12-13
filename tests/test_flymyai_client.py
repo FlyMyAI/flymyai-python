@@ -29,14 +29,14 @@ def client_auth_fixture():
 
 def test_flymyai_client(address_fixture, fake_payload_fixture, client_auth_fixture):
     response = flymyai_sync_run(
-        client_info=client_auth_fixture,
+        auth=client_auth_fixture,
         payload=fake_payload_fixture,
     )
     assert response
 
 
 def test_flymyai_openapi(address_fixture, client_auth_fixture):
-    response = flymyai_client(client_info=client_auth_fixture).openapi_schema()
+    response = flymyai_client(auth=client_auth_fixture).openapi_schema()
     assert response
 
 
@@ -45,6 +45,6 @@ async def test_flymyai_async_run(
     address_fixture, client_auth_fixture, fake_payload_fixture
 ):
     response = await flymyai_async_run(
-        client_info=client_auth_fixture, payload=fake_payload_fixture
+        auth=client_auth_fixture, payload=fake_payload_fixture
     )
     assert response
