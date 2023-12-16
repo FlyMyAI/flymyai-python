@@ -3,11 +3,11 @@ from typing import Callable, Awaitable, Generic, TypeVar, Union, overload
 
 import httpx
 
-from multipart.payload import MultipartPayload
-from core.authorizations import APIKeyClientInfo, ClientInfoFactory
-from core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
-from core.models import PredictionResponse, OpenAPISchemaResponse
-from utils.utils import retryable_callback, aretryable_callback
+from flymyai.multipart.payload import MultipartPayload
+from flymyai.core.authorizations import APIKeyClientInfo, ClientInfoFactory
+from flymyai.core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
+from flymyai.core.models import PredictionResponse, OpenAPISchemaResponse
+from flymyai.utils.utils import retryable_callback, aretryable_callback
 
 DEFAULT_RETRY_COUNT = os.getenv("FLYMYAI_MAX_RETRIES", 2)
 
