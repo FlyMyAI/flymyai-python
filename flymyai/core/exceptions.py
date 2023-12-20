@@ -1,5 +1,4 @@
-import httpx
-
+from ._response import FlyMyAIResponse
 from .models import (
     FlyMyAI401Response,
     FlyMyAI422Response,
@@ -17,7 +16,7 @@ class BaseFlyMyAIException(Exception):
         self.requires_retry = requires_retry
 
     @classmethod
-    def from_5xx(cls, response: httpx.Response):
+    def from_5xx(cls, response: FlyMyAIResponse):
         msg = f"""
                 INTERNAL SERVER ERROR ({response.status_code}):
                 REQUEST URL: {response.url};
@@ -34,7 +33,7 @@ class BaseFlyMyAIException(Exception):
         )()
 
     @classmethod
-    def from_4xx(cls, response: httpx.Response):
+    def from_4xx(cls, response: FlyMyAIResponse):
         response_validation_templates = {
             400: FlyMyAI400Response,
             401: FlyMyAI401Response,
@@ -48,7 +47,7 @@ class BaseFlyMyAIException(Exception):
         )
 
     @classmethod
-    def from_response(cls, response: httpx.Response):
+    def from_response(cls, response: FlyMyAIResponse):
         if 400 <= response.status_code < 500:
             return cls.from_4xx(response)
         if response.status_code >= 500:

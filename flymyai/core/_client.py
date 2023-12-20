@@ -1,11 +1,28 @@
 import os
-from typing import Callable, Awaitable, Generic, TypeVar, Union, overload
+from typing import (
+    Callable,
+    Awaitable,
+    Generic,
+    TypeVar,
+    Union,
+    overload,
+    Iterator,
+    AsyncGenerator,
+    AsyncIterator,
+    AsyncContextManager,
+)
 
 import httpx
 
+from flymyai.core._response_factory import ResponseFactory
+from flymyai.core._streaming import SSEDecoder
 from flymyai.multipart.payload import MultipartPayload
 from flymyai.core.authorizations import APIKeyClientInfo, ClientInfoFactory
-from flymyai.core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
+from flymyai.core.exceptions import (
+    FlyMyAIPredictException,
+    FlyMyAIExceptionGroup,
+    BaseFlyMyAIException,
+)
 from flymyai.core.models import PredictionResponse, OpenAPISchemaResponse
 from flymyai.utils.utils import retryable_callback, aretryable_callback
 
@@ -59,10 +76,7 @@ class BaseClient(Generic[_PossibleClients]):
     @staticmethod
     def _wrap_request(request_callback: Callable):
         response = request_callback()
-        try:
-            return response.raise_for_status()
-        except httpx.HTTPError:
-            raise FlyMyAIPredictException.from_response(response)
+        return ResponseFactory(httpx_response=response).construct()
 
     def is_closed(self) -> bool:
         return self._client.is_closed
@@ -94,10 +108,22 @@ class BaseSyncClient(BaseClient[httpx.Client]):
     def __exit__(self, exc_type, exc_val, exc_tb):
         self._client.close()
 
+    @classmethod
+    def _sse_instant(cls, stream_iter_func: Callable[[], Iterator[httpx.Response]]):
+        with stream_iter_func() as stream:
+            stream: httpx.Response
+            response = ResponseFactory(
+                sse=next(SSEDecoder().iter(stream.iter_lines())),
+                httpx_request=stream.request,
+                httpx_response=stream,
+            ).construct()
+            return response
+
     def _predict(self, payload: MultipartPayload):
-        return self._wrap_request(
-            lambda: self._client.post(
-                self.auth.prediction_path,
+        return self._sse_instant(
+            lambda: self._client.stream(
+                method="post",
+                url=self.auth.prediction_path,
                 **payload.serialize(),
                 timeout=_predict_timeout,
                 headers=self.auth.authorization_headers,
@@ -112,7 +138,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return PredictionResponse(history, response.json())
+        return PredictionResponse(exc_history=history, output_data=response.json())
 
     def _openapi_schema(self):
         return self._wrap_request(
@@ -129,7 +155,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return OpenAPISchemaResponse(history, response.json())
+        return OpenAPISchemaResponse(exc_history=history, schema=response.json())
 
     @classmethod
     def run_predict(cls, auth: dict, payload: dict):
@@ -159,7 +185,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return OpenAPISchemaResponse(history, response.json())
+        return OpenAPISchemaResponse(exc_history=history, schema=response.json())
 
     def _openapi_schema(self):
         return self._wrap_request(
@@ -169,10 +195,22 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             )
         )
 
+    @classmethod
+    async def _sse_instant(
+        cls, async_response_stream: Callable[[], AsyncContextManager[httpx.Response]]
+    ):
+        async with async_response_stream() as stream:
+            sse = await anext(SSEDecoder().aiter(stream.aiter_lines()))
+            response = ResponseFactory(
+                sse=sse, httpx_request=stream.request, httpx_response=stream
+            ).construct()
+            return response
+
     def _predict(self, payload: MultipartPayload):
-        return self._wrap_request(
-            lambda: self._client.post(
-                self.auth.prediction_path,
+        return self._sse_instant(
+            lambda: self._client.stream(
+                method="post",
+                url=self.auth.prediction_path,
                 timeout=_predict_timeout,
                 **payload.serialize(),
                 headers=self.auth.authorization_headers,
@@ -187,15 +225,12 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return PredictionResponse(history, response.json())
+        return PredictionResponse(exc_history=history, output_data=response.json())
 
     @staticmethod
     async def _wrap_request(request_callback: Callable[..., Awaitable[httpx.Response]]):
         response = await request_callback()
-        try:
-            return response.raise_for_status()
-        except httpx.HTTPStatusError:
-            raise FlyMyAIPredictException.from_response(response)
+        return ResponseFactory(httpx_response=response).construct()
 
     async def close(self):
         await self._client.aclose()
