@@ -22,6 +22,7 @@ from flymyai.core.exceptions import (
     FlyMyAIPredictException,
     FlyMyAIExceptionGroup,
     BaseFlyMyAIException,
+    FlyMyAIOpenAPIException,
 )
 from flymyai.core.models import PredictionResponse, OpenAPISchemaResponse
 from flymyai.utils.utils import retryable_callback, aretryable_callback
@@ -120,15 +121,18 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             return response
 
     def _predict(self, payload: MultipartPayload):
-        return self._sse_instant(
-            lambda: self._client.stream(
-                method="post",
-                url=self.auth.prediction_path,
-                **payload.serialize(),
-                timeout=_predict_timeout,
-                headers=self.auth.authorization_headers,
+        try:
+            return self._sse_instant(
+                lambda: self._client.stream(
+                    method="post",
+                    url=self.auth.prediction_path,
+                    **payload.serialize(),
+                    timeout=_predict_timeout,
+                    headers=self.auth.authorization_headers,
+                )
             )
-        )
+        except BaseFlyMyAIException as e:
+            raise FlyMyAIPredictException.from_response(e.response)
 
     def predict(self, payload: dict, max_retries=None):
         payload = MultipartPayload(payload)
@@ -143,12 +147,15 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         )
 
     def _openapi_schema(self):
-        return self._wrap_request(
-            lambda: self._client.get(
-                self.auth.openapi_schema_path,
-                headers=self.auth.authorization_headers,
+        try:
+            return self._wrap_request(
+                lambda: self._client.get(
+                    self.auth.openapi_schema_path,
+                    headers=self.auth.authorization_headers,
+                )
             )
-        )
+        except BaseFlyMyAIException as e:
+            raise FlyMyAIOpenAPIException.from_response(e.response)
 
     def openapi_schema(self, max_retries=None):
         history, response = retryable_callback(
@@ -194,12 +201,15 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         )
 
     def _openapi_schema(self):
-        return self._wrap_request(
-            lambda: self._client.get(
-                self.auth.openapi_schema_path,
-                headers=self.auth.authorization_headers,
+        try:
+            return self._wrap_request(
+                lambda: self._client.get(
+                    self.auth.openapi_schema_path,
+                    headers=self.auth.authorization_headers,
+                )
             )
-        )
+        except BaseFlyMyAIException as e:
+            raise FlyMyAIOpenAPIException.from_response(e.response)
 
     @classmethod
     async def _sse_instant(
@@ -213,15 +223,18 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             return response
 
     def _predict(self, payload: MultipartPayload):
-        return self._sse_instant(
-            lambda: self._client.stream(
-                method="post",
-                url=self.auth.prediction_path,
-                timeout=_predict_timeout,
-                **payload.serialize(),
-                headers=self.auth.authorization_headers,
+        try:
+            return self._sse_instant(
+                lambda: self._client.stream(
+                    method="post",
+                    url=self.auth.prediction_path,
+                    timeout=_predict_timeout,
+                    **payload.serialize(),
+                    headers=self.auth.authorization_headers,
+                )
             )
-        )
+        except BaseFlyMyAIException as e:
+            raise FlyMyAIPredictException.from_response(e.response)
 
     async def predict(self, payload: dict, max_retries=None):
         payload = MultipartPayload(input_data=payload)

@@ -17,6 +17,10 @@ class BaseFlyMyAIException(Exception):
         self.requires_retry = requires_retry
         self._response = response
 
+    @property
+    def response(self):
+        return self._response
+
     @classmethod
     def from_5xx(cls, response: FlyMyAIResponse):
         msg = f"""
@@ -62,6 +66,10 @@ class BaseFlyMyAIException(Exception):
 
 
 class FlyMyAIPredictException(BaseFlyMyAIException):
+    ...
+
+
+class FlyMyAIOpenAPIException(BaseFlyMyAIException):
     ...
 
 
