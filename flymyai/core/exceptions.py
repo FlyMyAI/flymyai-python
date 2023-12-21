@@ -10,10 +10,12 @@ from .models import (
 class BaseFlyMyAIException(Exception):
     msg: str
     requires_retry: bool
+    _response: FlyMyAIResponse
 
-    def __init__(self, msg, requires_retry=False):
+    def __init__(self, msg, requires_retry=False, response=None):
         self.msg = msg
         self.requires_retry = requires_retry
+        self._response = response
 
     @classmethod
     def from_5xx(cls, response: FlyMyAIResponse):
@@ -22,11 +24,11 @@ class BaseFlyMyAIException(Exception):
                 REQUEST URL: {response.url};
             """
         internal_error_mapping = {
-            500: lambda: cls(msg, False),
-            502: lambda: cls(msg, True),
-            503: lambda: cls(msg, False),
-            504: lambda: cls(msg, True),
-            524: lambda: cls(msg, True),
+            500: lambda: cls(msg, False, response=response),
+            502: lambda: cls(msg, True, response=response),
+            503: lambda: cls(msg, False, response=response),
+            504: lambda: cls(msg, True, response=response),
+            524: lambda: cls(msg, True, response=response),
         }
         return internal_error_mapping.get(
             response.status_code, lambda: cls(msg, False)
@@ -43,7 +45,9 @@ class BaseFlyMyAIException(Exception):
             response.status_code, Base4xxResponse
         ).from_response(response)
         return cls(
-            msg=response_4xx.to_msg(), requires_retry=response_4xx.requires_retry
+            msg=response_4xx.to_msg(),
+            requires_retry=response_4xx.requires_retry,
+            response=response,
         )
 
     @classmethod

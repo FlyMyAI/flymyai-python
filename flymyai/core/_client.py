@@ -138,7 +138,9 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return PredictionResponse(exc_history=history, output_data=response.json())
+        return PredictionResponse(
+            exc_history=history, output_data=response.json(), response=response
+        )
 
     def _openapi_schema(self):
         return self._wrap_request(
@@ -155,7 +157,9 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return OpenAPISchemaResponse(exc_history=history, schema=response.json())
+        return OpenAPISchemaResponse(
+            exc_history=history, schema=response.json(), response=response
+        )
 
     @classmethod
     def run_predict(cls, auth: dict, payload: dict):
@@ -185,7 +189,9 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return OpenAPISchemaResponse(exc_history=history, schema=response.json())
+        return OpenAPISchemaResponse(
+            exc_history=history, schema=response.json(), response=response
+        )
 
     def _openapi_schema(self):
         return self._wrap_request(
@@ -225,7 +231,9 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return PredictionResponse(exc_history=history, output_data=response.json())
+        return PredictionResponse(
+            exc_history=history, output_data=response.json(), response=response
+        )
 
     @staticmethod
     async def _wrap_request(request_callback: Callable[..., Awaitable[httpx.Response]]):

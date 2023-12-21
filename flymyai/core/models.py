@@ -4,7 +4,9 @@ from typing import TypeVar, Union, Any
 
 import httpx
 import pydantic
+from pydantic import PrivateAttr
 
+from flymyai.core._response import FlyMyAIResponse
 from flymyai.core._streaming import ServerSentEvent
 
 
@@ -68,6 +70,7 @@ class UnTypedResponse(pydantic.BaseModel):
 class PredictionResponse(pydantic.BaseModel):
     exc_history: list | None
     output_data: dict
+    _response: FlyMyAIResponse = PrivateAttr()
 
     @classmethod
     def from_untyped(cls, untyped_response: UnTypedResponse):
@@ -80,6 +83,7 @@ class PredictionResponse(pydantic.BaseModel):
 class OpenAPISchemaResponse(pydantic.BaseModel):
     exc_history: list | None
     schema: dict
+    _response: FlyMyAIResponse = PrivateAttr()
 
     @classmethod
     def from_untyped(cls, untyped_response: UnTypedResponse):
