@@ -61,23 +61,18 @@ class FlyMyAI422Response(Base4xxResponse):
         return msg
 
 
-class UnTypedResponse(pydantic.BaseModel):
-    exc_history: list | None
-    data: Any
-    status_code: int
-
-
 class PredictionResponse(pydantic.BaseModel):
     exc_history: list | None
     output_data: dict
     _response: FlyMyAIResponse = PrivateAttr()
 
-    @classmethod
-    def from_untyped(cls, untyped_response: UnTypedResponse):
-        return cls(
-            exc_history=untyped_response.exc_history,
-            output_data=untyped_response.output_data,
-        )
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._response = data.get("response")
+
+    @property
+    def response(self):
+        return self._response
 
 
 class OpenAPISchemaResponse(pydantic.BaseModel):
@@ -85,8 +80,10 @@ class OpenAPISchemaResponse(pydantic.BaseModel):
     schema: dict
     _response: FlyMyAIResponse = PrivateAttr()
 
-    @classmethod
-    def from_untyped(cls, untyped_response: UnTypedResponse):
-        return cls(
-            exc_history=untyped_response.exc_history, schema=untyped_response.data
-        )
+    def __init__(self, **data):
+        super().__init__(**data)
+        self._response = data.get("response")
+
+    @property
+    def response(self):
+        return self._response
