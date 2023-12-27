@@ -1,13 +1,11 @@
 import dataclasses
 import json
-from typing import TypeVar, Union, Any
 
 import httpx
 import pydantic
 from pydantic import PrivateAttr
 
 from flymyai.core._response import FlyMyAIResponse
-from flymyai.core._streaming import ServerSentEvent
 
 
 @dataclasses.dataclass
@@ -77,7 +75,7 @@ class PredictionResponse(pydantic.BaseModel):
 
 class OpenAPISchemaResponse(pydantic.BaseModel):
     exc_history: list | None
-    schema: dict
+    openapi_schema: dict
     _response: FlyMyAIResponse = PrivateAttr()
 
     def __init__(self, **data):

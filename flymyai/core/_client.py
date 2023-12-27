@@ -165,7 +165,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             FlyMyAIExceptionGroup,
         )
         return OpenAPISchemaResponse(
-            exc_history=history, schema=response.json(), response=response
+            exc_history=history, openapi_schema=response.json(), response=response
         )
 
     @classmethod
@@ -197,7 +197,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             FlyMyAIExceptionGroup,
         )
         return OpenAPISchemaResponse(
-            exc_history=history, schema=response.json(), response=response
+            exc_history=history, openapi_schema=response.json(), response=response
         )
 
     def _openapi_schema(self):
