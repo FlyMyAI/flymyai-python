@@ -10,6 +10,10 @@ class ResponseFactoryException(Exception):
 
 
 class ResponseFactory(object):
+    """
+    Factory for FlyMyAIResponse objects
+    """
+
     def __init__(
         self,
         httpx_response: httpx.Response = None,

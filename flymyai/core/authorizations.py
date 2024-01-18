@@ -4,6 +4,11 @@ import httpx
 
 
 class ClientInfo:
+
+    """
+    Base class for all ClientInfo objects
+    """
+
     @property
     def authorization_headers(self):
         raise NotImplemented()
@@ -23,6 +28,12 @@ class ClientInfo:
 
 @dataclasses.dataclass
 class APIKeyClientInfo(ClientInfo):
+
+    """
+    Encapsulates information about a project.
+    Uses X-API-KEY header to perform an auth
+    """
+
     apikey: str
     username: str
     project_name: str
@@ -51,6 +62,9 @@ class ClientInfoFactory:
         self._raw_auth = raw_auth
 
     def _build_auth(self) -> ClientInfo:
+        """
+        Build authorization
+        """
         if "apikey" in self._raw_auth:
             return APIKeyClientInfo(**self._raw_auth)
         else:

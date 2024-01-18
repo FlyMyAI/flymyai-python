@@ -1,13 +1,11 @@
-import copy
 import io
+import mimetypes
 import pathlib
 import uuid
 from io import BytesIO
 from typing import Union, BinaryIO, Any
 
 from .base_field import BaseField
-import mimetypes
-
 
 _BinaryInput = Union[bytes, pathlib.Path, BinaryIO, str]
 _IOOutput = Union[BinaryIO, io.BytesIO]
@@ -29,6 +27,11 @@ def is_binary_input(value: _BinaryInput) -> bool:
 
 
 class BinaryField(BaseField):
+
+    """
+    Primitive that handles a binary input
+    """
+
     def __init__(self, value: _BinaryInput):
         super().__init__(value)
 

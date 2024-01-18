@@ -5,6 +5,11 @@ from .base_field import BaseField
 
 
 class SimpleField(BaseField):
+
+    """
+    Primitive field that stores a single jsonable-value
+    """
+
     def __init__(self, value):
         super().__init__(value)
 

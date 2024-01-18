@@ -8,15 +8,11 @@ packages = [{include = "flymyai"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-datamodel-code-generator = "^0.25.1"
 httpx = "^0.25.2"
-websockets = "^12.0"
 
 [tool.poetry.dev-dependencies]
 python = "^3.10"
-datamodel-code-generator = "^0.25.1"
 httpx = "^0.25.2"
-websockets = "^12.0"
 pytest = "^6.2.5"
 
 

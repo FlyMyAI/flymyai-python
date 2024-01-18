@@ -1,11 +1,9 @@
 # Note: initially copied from https://github.com/florimondmanca/httpx-sse/blob/master/src/httpx_sse/_decoders.py
 from __future__ import annotations
 
-import dataclasses
 import json
 from typing import Any, Iterator, AsyncIterator
 
-import httpx
 from typing_extensions import override
 
 

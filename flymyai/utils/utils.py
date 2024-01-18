@@ -9,6 +9,9 @@ def retryable_callback(
     append_on_exception_cls: Type[Exception],
     exception_group_cls: Type[Exception],
 ):
+    """
+    Decorator to retry a function
+    """
     retries_history = []
     for _ in range(retries):
         try:
@@ -31,6 +34,9 @@ async def aretryable_callback(
     append_on_exception_cls: Type[Exception],
     exception_group_cls: Type[Exception],
 ):
+    """
+    Decorator to retry a function
+    """
     retries_history = []
     for _ in range(retries):
         try:

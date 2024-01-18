@@ -6,7 +6,9 @@ from .core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
 
 
 __all__ = [
+    "run",
     "httpx",
+    "async_run",
     "FlyMyAI",
     "AsyncFlyMyAI",
     "ClientInfoFactory",
