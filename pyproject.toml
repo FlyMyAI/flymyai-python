@@ -8,12 +8,12 @@ packages = [{include = "flymyai"}]
 
 [tool.poetry.dependencies]
 python = "^3.10"
-httpx = "^0.25.2"
+httpx = {extras = ["http2"], version = "^0.26.0"}
 
 [tool.poetry.dev-dependencies]
 python = "^3.10"
-httpx = "^0.25.2"
-pytest = "^6.2.5"
+httpx = "^0.26.0"
+pytest = "^7.4.3"
 
 
 [build-system]

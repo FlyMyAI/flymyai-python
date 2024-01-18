@@ -4,27 +4,24 @@ import pytest
 from flymyai import run as flymyai_sync_run
 from flymyai import async_run as flymyai_async_run
 from flymyai import client as flymyai_client
+from .FixtureFactory import FixtureFactory
+
+factory = FixtureFactory(__file__)
 
 
 @pytest.fixture
 def address_fixture():
-    os.environ["FLYMYAI_DSN"] = "http://localhost:8088"
+    os.environ["FLYMYAI_DSN"] = factory("address_fixture")
 
 
 @pytest.fixture
-def fake_payload_fixture():
-    image_path = "/home/oleg/Downloads/Telegram Desktop/image_2023-12-07_23-42-17.png"
-    payload = {"i_image": image_path}
-    return payload
+def fake_payload_fixture() -> dict:
+    return factory("fake_payload_fixture")
 
 
 @pytest.fixture
-def client_auth_fixture():
-    return {
-        "apikey": "fly-12e2wqfusodigih",
-        "username": "d1",
-        "project_name": "test2",
-    }
+def client_auth_fixture() -> dict:
+    return factory("client_auth_fixture")
 
 
 def test_flymyai_client(address_fixture, fake_payload_fixture, client_auth_fixture):

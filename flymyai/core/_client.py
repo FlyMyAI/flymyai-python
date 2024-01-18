@@ -103,8 +103,9 @@ class BaseClient(Generic[_PossibleClients]):
 class BaseSyncClient(BaseClient[httpx.Client]):
     def _construct_client(self):
         return httpx.Client(
+            #  http2=True,
             headers=self.auth.authorization_headers,
-            base_url=os.getenv("FLYMYAI_DSN", "https://flymy.ai/"),
+            base_url=os.getenv("FLYMYAI_DSN", "https://api.flymy.ai/"),
         )
 
     def __enter__(self):
@@ -217,6 +218,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
 class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
     def _construct_client(self):
         return httpx.AsyncClient(
+            http2=True,
             headers=self.auth.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://flymy.ai/"),
         )
