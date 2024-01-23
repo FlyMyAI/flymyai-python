@@ -9,6 +9,8 @@ packages = [{include = "flymyai"}]
 [tool.poetry.dependencies]
 python = "^3.10"
 httpx = {extras = ["http2"], version = "^0.26.0"}
+pydantic = "^2.5.2"
+typing-extensions = "^4.9.0"
 
 [tool.poetry.dev-dependencies]
 python = "^3.10"
