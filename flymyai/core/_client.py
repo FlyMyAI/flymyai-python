@@ -165,7 +165,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             FlyMyAIExceptionGroup,
         )
         return PredictionResponse(
-            exc_history=history, output_data=response.json(), response=response
+            exc_history=history, response=response, **response.json()
         )
 
     def _openapi_schema(self):
@@ -316,7 +316,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             FlyMyAIExceptionGroup,
         )
         return PredictionResponse(
-            exc_history=history, output_data=response.json(), response=response
+            exc_history=history, response=response, **response.json()
         )
 
     @staticmethod

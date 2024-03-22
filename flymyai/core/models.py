@@ -87,6 +87,8 @@ class PredictionResponse(pydantic.BaseModel):
     output_data: dict
     _response: FlyMyAIResponse = PrivateAttr()
 
+    inference_time: float | None = None
+
     def __init__(self, **data):
         super().__init__(**data)
         self._response = data.get("response")
