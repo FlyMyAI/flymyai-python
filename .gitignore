@@ -141,4 +141,5 @@ dmypy.json
 .dat
 .dir
 .idea/*
-poetry.locktests/fixtures/
+poetry.lock
+tests/fixtures/
