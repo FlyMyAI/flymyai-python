@@ -8,7 +8,6 @@ setup(
     name="flymyai",
     version="0.1.3",
     packages=[
-        "conf",
         "core",
         "utils",
         "multipart",
