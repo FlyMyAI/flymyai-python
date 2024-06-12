@@ -3,7 +3,7 @@
 This is a Python client for [FlyMyAI](https://flymy.ai).
 ## Requirements
 
-- Python 3.8+
+- Python 3.10+
 
 ## Install
 

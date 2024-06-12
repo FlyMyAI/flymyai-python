@@ -1,6 +1,6 @@
 [tool.poetry]
-name = "flymyai-client"
-version = "0.1.0"
+name = "flymyai"
+version = "0.1.3"
 description = ""
 authors = ["D1-3105 <lyerhd@gmail.com>"]
 readme = "README.md"
