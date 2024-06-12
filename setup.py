@@ -12,7 +12,7 @@ setup(
         "utils",
         "multipart",
     ],
-    package_dir={"": str((_BASE_PATH / "flymyai").absolute())},
+    package_dir={"": str((_BASE_PATH / "flymyai"))},
     license="",
     author="oleg",
     author_email="lyerhd@gmail.com",
