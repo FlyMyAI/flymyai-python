@@ -29,3 +29,6 @@ packages = [{include = ["flymyai", "tests"]}]
 minversion = 6.0
 testpaths = ["./tests"]
 pythonpath = 'flymyai'
+
+[tool.hatch.build.targets.wheel]
+packages = ["./flymyai"]
