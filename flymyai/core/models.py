@@ -89,7 +89,7 @@ class PredictionResponse(pydantic.BaseModel):
 
     inference_time: float | None = None
 
-    def __init__(self, **data):
+    def __init__(self, response=None, **data):
         super().__init__(**data)
         self._response = data.get("response")
 
@@ -107,9 +107,9 @@ class OpenAPISchemaResponse(pydantic.BaseModel):
     openapi_schema: dict
     _response: FlyMyAIResponse = PrivateAttr()
 
-    def __init__(self, **data):
+    def __init__(self, response=None, **data):
         super().__init__(**data)
-        self._response = data.get("response")
+        self._response = response
 
     @property
     def response(self):

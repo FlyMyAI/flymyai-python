@@ -1,5 +1,8 @@
 import json
+import os
 import pathlib
+
+fixture_dir = os.getenv("FIXTURE_DIR", "fixtures")
 
 
 class FixtureFactory:
@@ -10,7 +13,7 @@ class FixtureFactory:
             test_module_name = pathlib.Path(test_module_name)
         test_module_name = test_module_name.name
         self.fixture_file_path = (
-            pathlib.Path(__file__).parent / "fixtures" / f"{test_module_name}.json"
+            pathlib.Path(__file__).parent / fixture_dir / f"{test_module_name}.json"
         )
         assert self.fixture_file_path.exists(), self.fixture_file_path
 

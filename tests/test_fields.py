@@ -14,8 +14,8 @@ def binary_field_path() -> pathlib.Path:
 
 
 @pytest.fixture
-def binary_field_desc():
-    return open(factory(binary_field_desc), "rb")
+def binary_field_desc(binary_field_path):
+    return open(binary_field_path, "rb")
 
 
 @pytest.fixture

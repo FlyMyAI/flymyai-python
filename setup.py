@@ -6,7 +6,7 @@ _BASE_PATH = pathlib.Path(__file__).parent
 
 setup(
     name="flymyai",
-    version="0.1.9",
+    version="0.1.10",
     packages=[
         "core",
         "utils",

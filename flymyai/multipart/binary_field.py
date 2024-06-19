@@ -45,7 +45,7 @@ class BinaryField(BaseField):
         if isinstance(value, bytes):
             io_obj = io.BytesIO(value)
             io_obj.name = uuid.uuid4().hex
-        elif isinstance(value, (pathlib.Path, str)):
+        elif isinstance(value, pathlib.Path):
             io_obj = open(value, "rb")
         elif isinstance(value, io.BufferedIOBase):
             io_obj = value

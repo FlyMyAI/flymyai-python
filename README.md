@@ -32,13 +32,14 @@ Receive binaries as inputs. To pass a file as an input, use a file stream or fil
 
 ```python
 >>> import flymyai
+>>> import pathlib
 >>> flymyai.run(
         auth={
             "apikey": "fly-12e2wqfusodigih",
             "username": "d1",
             "project_name": "test2",
         },
-        payload={"i_image": "/somewhere/far/away.png"}
+        payload={"i_image": pathlib.Path("/somewhere/far/away.png")}
     )
     PredictionResponse(exc_history=[...], output_data={"o_image": b'...'})
 ```

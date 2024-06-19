@@ -1,4 +1,5 @@
 import os
+import pathlib
 
 import pytest
 from flymyai import run as flymyai_sync_run
@@ -15,8 +16,18 @@ def address_fixture():
 
 
 @pytest.fixture
-def fake_payload_fixture() -> dict:
-    return factory("fake_payload_fixture")
+def binary_file_paths():
+    return factory("binary_file_paths")
+
+
+@pytest.fixture
+def fake_payload_fixture(binary_file_paths) -> dict:
+    files = {}
+    for k, v in binary_file_paths.items():
+        files[k] = pathlib.Path(v)
+    payload = factory("fake_payload_fixture")
+    payload.update(files)
+    return payload
 
 
 @pytest.fixture

@@ -220,7 +220,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         return httpx.AsyncClient(
             http2=True,
             headers=self.auth.authorization_headers,
-            base_url=os.getenv("FLYMYAI_DSN", "https://flymy.ai/"),
+            base_url=os.getenv("FLYMYAI_DSN", "https://api.flymy.ai/"),
         )
 
     async def __aenter__(self):

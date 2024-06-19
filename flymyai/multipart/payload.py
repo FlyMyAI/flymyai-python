@@ -32,13 +32,8 @@ class MultipartPayload:
         data = {}
 
         for key, value in self.data.items():
-            if isinstance(value, str):
-                if pathlib.Path(value).is_file():
-                    files[key] = self._serialize_bin(value)
-                else:
-                    data[key] = self._serialize_simple(value)
-            elif isinstance(value, (pathlib.Path, io.BufferedIOBase)):
-                files[key] = self._serialize_simple(value)
+            if isinstance(value, (pathlib.Path, io.BufferedIOBase, bytes)):
+                files[key] = self._serialize_bin(value)
             else:
                 data[key] = self._serialize_simple(value)
         return {"files": files, "data": data}
