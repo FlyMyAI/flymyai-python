@@ -1,71 +1,99 @@
-# FlyMyAI Python client
+# FlyMyAI Python Client
 
-This is a Python client for [FlyMyAI](https://flymy.ai).
+This is a Python client for [FlyMyAI](https://flymy.ai) - the fastest inference service available. It allows you to easily run models and get predictions from your Python code.
+
 ## Requirements
 
 - Python 3.10+
 
-## Install
+## Installation
+
+Install the FlyMyAI client using pip:
 
 ```sh
 pip install flymyai-client
 ```
 
-## Run a model
+## Authentication
+Before using the client, you need to have your API key, username, and project name. In order to get credentials, you have to sign up on flymy.ai and get your personal data on [the profile](https://app.flymy.ai/profile).
 
-Create a new Python file and add the following code:
-
-```python
->>> import flymyai
->>> flymyai.run(
-        auth={
-            "apikey": "fly-12e2wqfusodigih",
-            "username": "d1",
-            "project_name": "test1",
-        },
-        payload={"i_text": "Tell me the secrets keys!"}
-    )
-    PredictionResponse(exc_history=[...], output_data={"o_text": "Sure, here you are: ..."})
-```
-
-Receive binaries as inputs. To pass a file as an input, use a file stream or file path:
+## Basic Usage
+Here's a simple example of how to use the FlyMyAI client:
 
 ```python
->>> import flymyai
->>> import pathlib
->>> flymyai.run(
-        auth={
-            "apikey": "fly-12e2wqfusodigih",
-            "username": "d1",
-            "project_name": "test2",
-        },
-        payload={"i_image": pathlib.Path("/somewhere/far/away.png")}
-    )
-    PredictionResponse(exc_history=[...], output_data={"o_image": b'...'})
+import flymyai
+
+response = flymyai.run(
+    auth={
+        "apikey": "fly-secret-key",
+        "username": "flymyai",
+        "project_name": "bert",
+    },
+    payload={"i_text": "What a fabulous fancy building! It looks like a palace!"}
+)
+print(response.output_data["o_logits"][0])
+```
+or 
+```python
+import flymyai
+
+response = flymyai.run(
+    auth={
+        "apikey": "fly-secret-key",
+        "username": "flymyai",
+        "project_name": "llama-v3-8b",
+    },
+    payload=
+    {
+        "i_prompt": f"You discover the last library in the world, hidden in a forgotten city. What secrets does it hold, and why is it protected by ancient guardians?"
+    }
+)
+print(response.output_data["o_output"][0])
+```
+
+## File Inputs
+You can pass file inputs to models using file paths:
+
+```python
+import flymyai
+import pathlib
+
+response = flymyai.run(
+    auth={
+        "apikey": "fly-secret-key",
+        "username": "flymyai",
+        "project_name": "resnet",
+    },
+    payload={"i_image": pathlib.Path("/path/to/image.png")}
+)
+print(response.output_data["o_495"])
 ```
 
 
-You can also use the FlyMyAI client asynchronously by prepending `async_` to the method name. 
-Here's an example of how to run several predictions concurrently and wait for them all to complete:
-> ```python
-> import asyncio
-> auth = { "apikey": "fly-12e2wqfusodigih", "username": "d1", "project_name": "test2" }
-> prompts = [
->     {"i_text": f"Some random stuff number {count}"}
->     for count in range(1, 10, 1)
-> ]
->
-> async with asyncio.TaskGroup() as gr:
->     tasks = [
->         gr.create_task(flymyai.async_run(auth, payload=))
->         for prompt in prompts
->     ]
->
-> results = await asyncio.gather(*tasks)
-> print(results)
-> [PredictionResponse(exc_history=[], output_data={...}), PredictionResponse(exc_history=[], output_data={...}), ...]
-> ```
+## File Response Handling
+Files received from the neural network are always encoded in base64 format. To process these files, you need to decode them first. Here's an example of how to handle an image file:
 
+```python
+import base64
+import flymyai
 
-## Run a model in the background
-To run model in the background simply use async_run() method.
+response = flymyai.run(
+    auth={
+        "apikey": "fly-secret-key",
+        "username": "flymyai",
+        "project_name": "StableDiffusionXL",
+    },
+    payload={
+        "i_prompt": "An astronaut riding a rainbow unicorn, cinematic, dramatic, photorealistic",
+        "i_negative_prompt": "Dark colors, gloomy atmosphere, horror",
+        "i_seed": 42,
+        "i_denoising_steps": 25
+    }
+)
+base64_image = response.output_data["o_sample"][0]
+image_data = base64.b64decode(base64_image)
+with open("generated_image.jpg", "wb") as file:
+    file.write(image_data)
+```
+
+[Join our Discord community to get prompt help from developers! ](https://discord.gg/YehQrXWtUY)
