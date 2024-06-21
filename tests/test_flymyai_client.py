@@ -1,3 +1,4 @@
+import asyncio
 import os
 import pathlib
 
@@ -56,3 +57,13 @@ async def test_flymyai_async_run(
         auth=client_auth_fixture, payload=fake_payload_fixture
     )
     assert response
+
+
+@pytest.mark.asyncio
+async def test_doc_case(address_fixture, client_auth_fixture, fake_payload_fixture):
+    tasks = [
+        asyncio.create_task(flymyai_async_run(auth=client_auth_fixture, payload=prompt))
+        for prompt in [fake_payload_fixture] * 3
+    ]
+    results = await asyncio.gather(*tasks)
+    assert len(results) == 3
