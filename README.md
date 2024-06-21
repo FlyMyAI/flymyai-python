@@ -31,7 +31,24 @@ response = flymyai.run(
     },
     payload={"i_text": "What a fabulous fancy building! It looks like a palace!"}
 )
-print(response.output_data["o_logits"])
+print(response.output_data["o_logits"][0])
+```
+or 
+```python
+import flymyai
+
+response = flymyai.run(
+    auth={
+        "apikey": "fly-secret-key",
+        "username": "flymyai",
+        "project_name": "llama-v3-8b",
+    },
+    payload=
+    {
+        "i_prompt": f"You discover the last library in the world, hidden in a forgotten city. What secrets does it hold, and why is it protected by ancient guardians?"
+    }
+)
+print(response.output_data["o_output"][0])
 ```
 
 ## File Inputs
@@ -77,69 +94,5 @@ base64_image = response.output_data["o_sample"][0]
 image_data = base64.b64decode(base64_image)
 with open("generated_image.jpg", "wb") as file:
     file.write(image_data)
-```
-
-
-## Asynchronous Requests
-FlyMyAI supports asynchronous requests for improved performance. Here's how to use it:
-
-```python
-import asyncio
-import flymyai
-
-async def main():
-    auth = {
-            "apikey": "fly-secret-key",
-            "username": "flymyai",
-            "project_name": "llama-v3-8b",
-    }
-    prompts = [
-        {"i_prompt": f"Some random stuff number {count}"}
-        for count in range(1, 10)
-    ]
-    async with asyncio.TaskGroup() as gr:
-        tasks = [
-            gr.create_task(flymyai.async_run(auth, payload=prompt))
-            for prompt in prompts
-        ]
-    results = await asyncio.gather(*tasks)
-    for result in results:
-        print(result.output_data["o_output"])
-        
-asyncio.run(main())
-```
-
-## Running Models in the Background
-To run a model in the background, simply use the async_run() method:
-
-```python
-import asyncio
-import flymyai
-import pathlib
-
-async def background_task():
-    auth = {
-        "apikey": "fly-secret-key",
-        "username": "flymyai",
-        "project_name": "whisper"
-    }
-    payload = {"i_audio": pathlib.Path("/path/to/audio.mp3")}
-    
-    response = await flymyai.async_run(auth, payload=payload)
-    print("Background task completed:", response.output_data)
-
-asyncio.create_task(background_task())
-# Continue with other operations while the model runs in the background
-```
-
-## Error Handling
-The FlyMyAI client includes error information in the exc_history field of the response. Always check this field to ensure your request was processed successfully:
-
-```python
-response = flymyai.run(auth, payload=payload)
-if response.exc_history:
-    print("An error occurred:", response.exc_history)
-else:
-    print("Success:", response.output_data)
 ```
 
