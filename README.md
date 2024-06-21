@@ -96,3 +96,4 @@ with open("generated_image.jpg", "wb") as file:
     file.write(image_data)
 ```
 
+[Join our Discord community to get prompt help from developers! ](https://discord.gg/YehQrXWtUY)
