@@ -121,4 +121,63 @@ with open("generated_image.jpg", "wb") as file:
     file.write(image_data)
 ```
 
-[Join our Discord community to get prompt help from developers! ](https://discord.gg/YehQrXWtUY)
+
+## Asynchronous Requests
+FlyMyAI supports asynchronous requests for improved performance. Here's how to use it:
+
+```python
+import asyncio
+import flymyai
+
+
+async def main():
+    auth = {
+        "apikey": "fly-secret-key",
+        "username": "flymyai",
+        "project_name": "llama-v3-8b",
+    }
+    prompts = [
+        {"i_prompt": f"Some random stuff number {count}"}
+        for count in range(1, 10)
+    ]
+    async with asyncio.TaskGroup() as gr:
+        tasks = [
+            gr.create_task(flymyai.async_run(auth, payload=prompt))
+            for prompt in prompts
+        ]
+    results = await asyncio.gather(*tasks)
+    for result in results:
+        print(result.output_data["o_output"])
+
+
+asyncio.run(main())
+```
+
+## Running Models in the Background
+To run a model in the background, simply use the async_run() method:
+
+```python
+import asyncio
+import flymyai
+import pathlib
+
+
+async def background_task():
+    auth = {
+        "apikey": "fly-secret-key",
+        "username": "flymyai",
+        "project_name": "whisper"
+    }
+    payload = {"i_audio": pathlib.Path("/path/to/audio.mp3")}
+    response = await flymyai.async_run(auth, payload=payload)
+    print("Background task completed:", response.output_data["o_transcription"])
+
+
+async def main():
+    task = asyncio.create_task(background_task())
+    await task
+
+asyncio.run(main())
+# Continue with other operations while the model runs in the background
+```
+
