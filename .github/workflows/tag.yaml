@@ -24,7 +24,9 @@ jobs:
         run: git config --global --add safe.directory '*'
 
       - name: Add gettext
-        run: apt-get install -y gettext
+        run: |
+          apt update
+          apt install -y gettext
 
       - name: Set version
         shell: bash
