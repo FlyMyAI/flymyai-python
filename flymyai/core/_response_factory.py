@@ -30,7 +30,7 @@ class ResponseFactory(object):
         self.httpx_response = httpx_response
 
     def get_sse_status_code(self):
-        return self.sse.json().get("status_code", 200)
+        return self.sse.json().get("status", 200)
 
     def _base_construct_from_sse(self):
         sse_status = self.get_sse_status_code()

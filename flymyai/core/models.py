@@ -78,39 +78,46 @@ class FlyMyAI422Response(Base4xxResponse):
         return msg
 
 
-class PredictionResponse(pydantic.BaseModel):
+class BaseFromServer(pydantic.BaseModel):
+    _response: FlyMyAIResponse = PrivateAttr()
+
+    @property
+    def response(self):
+        return self._response
+
+    @classmethod
+    def from_response(cls, response: FlyMyAIResponse, **kwargs):
+        self = cls(**response.json(), **kwargs)
+        self._response = response
+        return self
+
+
+class PredictionResponse(BaseFromServer):
     """
     Prediction response from FlyMyAI
     """
 
     exc_history: list | None
     output_data: dict
-    _response: FlyMyAIResponse = PrivateAttr()
 
     inference_time: float | None = None
-
-    def __init__(self, response=None, **data):
-        super().__init__(**data)
-        self._response = data.get("response")
 
     @property
     def response(self):
         return self._response
 
 
-class OpenAPISchemaResponse(pydantic.BaseModel):
+class OpenAPISchemaResponse(BaseFromServer):
     """
-    OpenAPI schema for current project. Use it to construct your own schema
+    OpenAPI schema for the current project. Use it to construct your own schema
     """
 
     exc_history: list | None
     openapi_schema: dict
+
+
+class PredictionPartial(BaseFromServer):
+    status: int
+    output_data: dict | None = None
+
     _response: FlyMyAIResponse = PrivateAttr()
-
-    def __init__(self, response=None, **data):
-        super().__init__(**data)
-        self._response = response
-
-    @property
-    def response(self):
-        return self._response
