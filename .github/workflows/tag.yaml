@@ -24,6 +24,7 @@ jobs:
         run: git config --global --add safe.directory '*'
 
       - name: Set version
+        shell: bash
         run: |
           git fetch --all
           git describe --tags
