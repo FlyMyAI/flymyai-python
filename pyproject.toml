@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "flymyai"
-version = "0.1.10"
+version = "$FLYMYAI_PYTHON_VERSION"
 description = ""
 authors = ["denti <dentiwork@yandex.ru>", "D1-3105 <lyerhd@gmail.com>"]
 readme = "README.md"
