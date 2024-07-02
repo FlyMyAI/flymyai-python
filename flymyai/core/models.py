@@ -62,6 +62,18 @@ class FlyMyAI401Response(Base4xxResponse):
 
 
 @dataclasses.dataclass
+class FlyMyAI421Response(Base4xxResponse):
+    requires_retry = False
+
+    def to_msg(self):
+        jsoned = json.loads(self.content)
+        msg = super().to_msg()
+        if detail := jsoned.get("detail"):
+            msg += f"\nDetail: {detail}"
+        return msg
+
+
+@dataclasses.dataclass
 class FlyMyAI422Response(Base4xxResponse):
     """
     422 response
@@ -87,7 +99,10 @@ class BaseFromServer(pydantic.BaseModel):
 
     @classmethod
     def from_response(cls, response: FlyMyAIResponse, **kwargs):
-        self = cls(**response.json(), **kwargs)
+        status_code = kwargs.pop("status", response.status_code)
+        response_json = response.json()
+        response_json["status"] = response_json.get("status", status_code)
+        self = cls(**response_json, **kwargs)
         self._response = response
         return self
 
@@ -99,6 +114,7 @@ class PredictionResponse(BaseFromServer):
 
     exc_history: list | None
     output_data: dict
+    status: int
 
     inference_time: float | None = None
 
@@ -114,6 +130,7 @@ class OpenAPISchemaResponse(BaseFromServer):
 
     exc_history: list | None
     openapi_schema: dict
+    status: int
 
 
 class PredictionPartial(BaseFromServer):
