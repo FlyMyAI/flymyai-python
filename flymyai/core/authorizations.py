@@ -52,7 +52,7 @@ class APIKeyClientInfo(ClientInfo):
 
     @property
     def prediction_stream_path(self):
-        return self._project_path.join(httpx.URL("predict/stream"))
+        return self._project_path.join(httpx.URL("predict/stream/"))
 
     @property
     def openapi_schema_path(self):
