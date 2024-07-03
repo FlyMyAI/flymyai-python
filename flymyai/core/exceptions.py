@@ -8,6 +8,10 @@ from .models import (
 )
 
 
+class ImproperlyConfiguredClientException(Exception):
+    ...
+
+
 class BaseFlyMyAIException(Exception):
     msg: str
     requires_retry: bool
