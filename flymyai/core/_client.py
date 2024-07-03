@@ -8,6 +8,7 @@ from typing import (
     overload,
     Iterator,
     AsyncContextManager,
+    AsyncIterator,
 )
 
 import httpx
@@ -21,7 +22,11 @@ from flymyai.core.exceptions import (
     BaseFlyMyAIException,
     FlyMyAIOpenAPIException,
 )
-from flymyai.core.models import PredictionResponse, OpenAPISchemaResponse
+from flymyai.core.models import (
+    PredictionResponse,
+    OpenAPISchemaResponse,
+    PredictionPartial,
+)
 from flymyai.multipart.payload import MultipartPayload
 from flymyai.utils.utils import retryable_callback, aretryable_callback
 
@@ -56,14 +61,14 @@ class BaseClient(Generic[_PossibleClients]):
         self.max_retries = max_retries
 
     @overload
-    async def predict(self, input_data: dict, max_retries=None) -> PredictionResponse:
+    async def predict(self, payload: dict, max_retries=None) -> PredictionResponse:
         ...
 
     @overload
-    def predict(self, input_data: dict, max_retries=None) -> PredictionResponse:
+    def predict(self, payload: dict, max_retries=None) -> PredictionResponse:
         ...
 
-    def predict(self, input_data: dict, max_retries=None) -> PredictionResponse:
+    def predict(self, payload: dict, max_retries=None) -> PredictionResponse:
         ...
 
     @overload
@@ -76,6 +81,33 @@ class BaseClient(Generic[_PossibleClients]):
 
     def openapi_schema(self, max_retries=None) -> OpenAPISchemaResponse:
         ...
+
+    @overload
+    async def stream(self, payload: dict) -> AsyncIterator[PredictionPartial]:
+        ...
+
+    @overload
+    def stream(self, payload: dict) -> Iterator[PredictionPartial]:
+        ...
+
+    def stream(self, payload: dict):
+        ...
+
+    def _stream_iterator(
+        self, payload: MultipartPayload, is_long_stream: bool
+    ) -> Iterator[httpx.Response] | AsyncIterator[httpx.Response]:
+        return self._client.stream(
+            method="post",
+            url=(
+                self.auth.prediction_path
+                if not is_long_stream
+                else self.auth.prediction_stream_path
+            ),
+            **payload.serialize(),
+            timeout=_predict_timeout,
+            headers=self.auth.authorization_headers,
+            follow_redirects=True,
+        )
 
     @staticmethod
     def _wrap_request(request_callback: Callable):
@@ -135,15 +167,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         Wrap predict method in sse
         """
         try:
-            return self._sse_instant(
-                lambda: self._client.stream(
-                    method="post",
-                    url=self.auth.prediction_path,
-                    **payload.serialize(),
-                    timeout=_predict_timeout,
-                    headers=self.auth.authorization_headers,
-                )
-            )
+            return self._sse_instant(lambda: self._stream_iterator(payload, False))
         except BaseFlyMyAIException as e:
             raise FlyMyAIPredictException.from_response(e.response)
 
@@ -164,9 +188,33 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return PredictionResponse(
-            exc_history=history, response=response, **response.json()
-        )
+        return PredictionResponse.from_response(response, exc_history=history)
+
+    def _stream(self, payload: dict):
+        payload = MultipartPayload(payload)
+        response_iterator = self._stream_iterator(payload, is_long_stream=True)
+        decoder = SSEDecoder()
+        with response_iterator as sse_stream:
+            for sse_partial in decoder.iter(sse_stream.iter_lines()):
+                try:
+                    response = ResponseFactory(
+                        sse=sse_partial,
+                        httpx_request=sse_stream.request,
+                        httpx_response=sse_stream,
+                    ).construct()
+                except BaseFlyMyAIException as e:
+                    raise FlyMyAIPredictException.from_response(e.response)
+                yield response
+
+    def stream(self, payload: dict):
+        stream_iter = self._stream(payload)
+        last_response = None
+        for response in stream_iter:
+            response.stream = stream_iter
+            yield PredictionPartial.from_response(response)
+            last_response = response
+        if last_response:
+            last_response.is_stream_consumed = True
 
     def _openapi_schema(self):
         """
@@ -197,7 +245,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return OpenAPISchemaResponse(
+        return OpenAPISchemaResponse.from_response(
             exc_history=history, openapi_schema=response.json(), response=response
         )
 
@@ -244,7 +292,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return OpenAPISchemaResponse(
+        return OpenAPISchemaResponse.from_response(
             exc_history=history, openapi_schema=response.json(), response=response
         )
 
@@ -315,9 +363,33 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
         )
-        return PredictionResponse(
-            exc_history=history, response=response, **response.json()
-        )
+        return PredictionResponse.from_response(response, exc_history=history)
+
+    async def _stream(self, payload: dict):
+        payload = MultipartPayload(payload)
+        stream_iterator = self._stream_iterator(payload, is_long_stream=True)
+        decoder = SSEDecoder()
+        async with stream_iterator as sse_stream:
+            async for sse_partial in decoder.aiter(sse_stream.aiter_lines()):
+                try:
+                    response = ResponseFactory(
+                        sse=sse_partial,
+                        httpx_request=sse_stream.request,
+                        httpx_response=sse_stream,
+                    ).construct()
+                except BaseFlyMyAIException as e:
+                    raise FlyMyAIPredictException.from_response(e.response)
+                yield response
+
+    async def stream(self, payload: dict):
+        stream_iter = self._stream(payload)
+        last_response = None
+        async for response in stream_iter:
+            response.stream = stream_iter
+            yield PredictionPartial.from_response(response)
+            last_response = response
+        if last_response:
+            last_response.is_stream_consumed = True
 
     @staticmethod
     async def _wrap_request(request_callback: Callable[..., Awaitable[httpx.Response]]):

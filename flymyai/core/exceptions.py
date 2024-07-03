@@ -4,6 +4,7 @@ from .models import (
     FlyMyAI422Response,
     Base4xxResponse,
     FlyMyAI400Response,
+    FlyMyAI421Response,
 )
 
 
@@ -43,6 +44,7 @@ class BaseFlyMyAIException(Exception):
         response_validation_templates = {
             400: FlyMyAI400Response,
             401: FlyMyAI401Response,
+            421: FlyMyAI421Response,
             422: FlyMyAI422Response,
         }
         response_4xx = response_validation_templates.get(
