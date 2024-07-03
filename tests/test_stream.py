@@ -30,6 +30,7 @@ def test_vllm_stream(vllm_stream_auth, vllm_stream_payload, dsn):
         assert response.status == 200
         assert response.output_data
         print(response.output_data["o_text_output"].pop(), end="")
+    print("\n")
 
 
 @pytest.mark.asyncio
