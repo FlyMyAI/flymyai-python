@@ -29,13 +29,22 @@ def test_vllm_stream(vllm_stream_auth, vllm_stream_payload, dsn):
     for response in stream_iterator:
         assert response.status == 200
         assert response.output_data
-        print(response.output_data)
+        print(response.output_data["o_text_output"].pop(), end="")
 
 
 @pytest.mark.asyncio
 async def test_vllm_async_stream(vllm_stream_auth, vllm_stream_payload, dsn):
-    stream_iterator = async_client(auth=vllm_stream_auth).stream(vllm_stream_payload)
-    async for response in stream_iterator:
-        assert response.status == 200
-        assert response.output_data
-        print(response.output_data)
+    try:
+        stream_iterator = async_client(auth=vllm_stream_auth).stream(
+            vllm_stream_payload
+        )
+        async for response in stream_iterator:
+            assert response.status == 200
+            assert response.output_data
+            print(response.output_data["o_text_output"].pop(), end="")
+    except Exception as e:
+        if hasattr(e, "msg"):
+            print(e)
+        raise e
+    finally:
+        print()
