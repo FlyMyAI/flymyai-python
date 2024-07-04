@@ -25,7 +25,7 @@ def vllm_stream_auth():
 
 
 def test_vllm_stream(vllm_stream_auth, vllm_stream_payload, dsn):
-    stream_iterator = sync_client(auth=vllm_stream_auth).stream(vllm_stream_payload)
+    stream_iterator = sync_client(**vllm_stream_auth).stream(vllm_stream_payload)
     for response in stream_iterator:
         assert response.status == 200
         assert response.output_data
@@ -36,9 +36,7 @@ def test_vllm_stream(vllm_stream_auth, vllm_stream_payload, dsn):
 @pytest.mark.asyncio
 async def test_vllm_async_stream(vllm_stream_auth, vllm_stream_payload, dsn):
     try:
-        stream_iterator = async_client(auth=vllm_stream_auth).stream(
-            vllm_stream_payload
-        )
+        stream_iterator = async_client(**vllm_stream_auth).stream(vllm_stream_payload)
         async for response in stream_iterator:
             assert response.status == 200
             assert response.output_data

@@ -38,15 +38,18 @@ def client_auth_fixture() -> dict:
 
 def test_flymyai_client(address_fixture, fake_payload_fixture, client_auth_fixture):
     response = flymyai_sync_run(
-        auth=client_auth_fixture,
+        **client_auth_fixture,
         payload=fake_payload_fixture,
     )
     assert response
 
 
 def test_flymyai_openapi(address_fixture, client_auth_fixture):
-    response = flymyai_client(auth=client_auth_fixture).openapi_schema()
-    assert response
+    response1 = flymyai_client(**client_auth_fixture).openapi_schema()
+    response2 = flymyai_client(client_auth_fixture["apikey"]).openapi_schema(
+        model=client_auth_fixture["model"]
+    )
+    assert response1.model_dump() == response2.model_dump()
 
 
 @pytest.mark.asyncio
@@ -54,7 +57,7 @@ async def test_flymyai_async_run(
     address_fixture, client_auth_fixture, fake_payload_fixture
 ):
     response = await flymyai_async_run(
-        auth=client_auth_fixture, payload=fake_payload_fixture
+        **client_auth_fixture, payload=fake_payload_fixture
     )
     assert response
 
@@ -62,7 +65,7 @@ async def test_flymyai_async_run(
 @pytest.mark.asyncio
 async def test_doc_case(address_fixture, client_auth_fixture, fake_payload_fixture):
     tasks = [
-        asyncio.create_task(flymyai_async_run(auth=client_auth_fixture, payload=prompt))
+        asyncio.create_task(flymyai_async_run(**client_auth_fixture, payload=prompt))
         for prompt in [fake_payload_fixture] * 3
     ]
     results = await asyncio.gather(*tasks)
