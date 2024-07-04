@@ -39,8 +39,8 @@ jobs:
           echo "Current version: ${TAG:1}"
           echo "---------------------------------------"
           
-          echo "$(FLYMYAI_PYTHON_VERSION=${TAG:1} envsubst < setup.py)" > setup.py
-          echo "$(FLYMYAI_PYTHON_VERSION=${TAG:1} envsubst < pyproject.toml)" > pyproject.toml
+          echo "$(FLYMYAI_PYTHON_VERSION=${TAG:1} envsubst < setup.py.template)" > setup.py
+          echo "$(FLYMYAI_PYTHON_VERSION=${TAG:1} envsubst < pyproject.toml.template)" > pyproject.toml
 
       - name: Install dependencies
         run: pip3 install poetry && poetry config virtualenvs.create ${USE_VENV} && poetry install
