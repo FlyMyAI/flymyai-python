@@ -15,8 +15,10 @@ typing-extensions = "^4.9.0"
 [tool.poetry.dev-dependencies]
 python = ">=3.8"
 httpx = ">=0.26.0"
-pytest = "^7.4.3"
 
+[tool.poetry.group.dev.dependencies]
+tomli = "^2.0.1"
+pytest-asyncio = "^0.23.7"
 
 [build-system]
 requires = ["poetry-core"]

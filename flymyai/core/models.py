@@ -1,5 +1,6 @@
 import dataclasses
 import json
+from typing import Optional
 
 import httpx
 import pydantic
@@ -112,11 +113,11 @@ class PredictionResponse(BaseFromServer):
     Prediction response from FlyMyAI
     """
 
-    exc_history: list | None
+    exc_history: Optional[list]
     output_data: dict
     status: int
 
-    inference_time: float | None = None
+    inference_time: Optional[float] = None
 
     @property
     def response(self):
@@ -128,13 +129,13 @@ class OpenAPISchemaResponse(BaseFromServer):
     OpenAPI schema for the current project. Use it to construct your own schema
     """
 
-    exc_history: list | None
+    exc_history: Optional[list]
     openapi_schema: dict
     status: int
 
 
 class PredictionPartial(BaseFromServer):
     status: int
-    output_data: dict | None = None
+    output_data: Optional[dict] = None
 
     _response: FlyMyAIResponse = PrivateAttr()

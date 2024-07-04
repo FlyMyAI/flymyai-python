@@ -1,4 +1,4 @@
-from typing import Callable, Awaitable, Type, Any, Coroutine
+from typing import Callable, Awaitable, Type
 
 import httpx
 

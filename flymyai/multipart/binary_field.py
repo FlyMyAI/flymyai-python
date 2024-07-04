@@ -3,13 +3,13 @@ import mimetypes
 import pathlib
 import uuid
 from io import BytesIO
-from typing import Union, BinaryIO, Any
+from typing import Union, BinaryIO, Any, Optional, Tuple
 
 from .base_field import BaseField
 
 _BinaryInput = Union[bytes, pathlib.Path, BinaryIO, str]
-_IOOutput = Union[BinaryIO, io.BytesIO]
-_FieldOutput = tuple[str, _IOOutput, str]  # filename, io[binary], mime
+_IOOutput = Union[BinaryIO, BytesIO]
+_FieldOutput = Tuple[str, _IOOutput, str]  # filename, io[binary], mime
 
 
 def is_binary_input(value: _BinaryInput) -> bool:
@@ -35,7 +35,7 @@ class BinaryField(BaseField):
     def __init__(self, value: _BinaryInput):
         super().__init__(value)
 
-    def validate(self, value: _BinaryInput | None = None) -> None:
+    def validate(self, value: Optional[_BinaryInput] = None) -> None:
         value = value or self.value
         if not is_binary_input(value):
             raise TypeError()
@@ -55,9 +55,7 @@ class BinaryField(BaseField):
             )
         return io_obj
 
-    def serialize(
-        self, value=None
-    ) -> tuple[BinaryIO | BytesIO, str | Any, tuple[str | None, str | None] | str]:
+    def serialize(self, value=None) -> Tuple[Union[str, Any], _IOOutput, Optional[str]]:
         value = value or self.value
         io_obj = self.to_io(value)
         filename = io_obj.name

@@ -143,3 +143,4 @@ dmypy.json
 .idea/*
 poetry.lock
 tests/fixtures*/
+venv*

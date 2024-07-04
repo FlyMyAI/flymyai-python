@@ -24,14 +24,14 @@ This is a Python client for [FlyMyAI](https://flymy.ai). It allows you to easily
 
 ## Requirements
 
-- Python 3.10+
+- Python 3.8+
 
 ## Installation
 
 Install the FlyMyAI client using pip:
 
 ```sh
-pip install flymyai-client
+pip install flymyai
 ```
 
 ## Authentication
