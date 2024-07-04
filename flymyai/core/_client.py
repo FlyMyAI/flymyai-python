@@ -9,6 +9,7 @@ from typing import (
     Iterator,
     AsyncContextManager,
     AsyncIterator,
+    Optional,
 )
 
 import httpx
@@ -52,7 +53,7 @@ class BaseClient(Generic[_PossibleClients]):
     client_info: APIKeyClientInfo
 
     def __init__(
-        self, apikey: str, model: str | None = None, max_retries=DEFAULT_RETRY_COUNT
+        self, apikey: str, model: Optional[str] = None, max_retries=DEFAULT_RETRY_COUNT
     ):
         self.client_info = APIKeyClientInfo(apikey)
         if model:
@@ -60,7 +61,7 @@ class BaseClient(Generic[_PossibleClients]):
         self._client = self._construct_client()
         self.max_retries = max_retries
 
-    def amend_client_info(self, model: str | None = None):
+    def amend_client_info(self, model: Optional[str] = None):
         if model:
             client_info = self.client_info.copy_for_model(model)
         else:
@@ -73,35 +74,35 @@ class BaseClient(Generic[_PossibleClients]):
 
     @overload
     async def predict(
-        self, payload: dict, model: str | None = None, max_retries=None
+        self, payload: dict, model: Optional[str] = None, max_retries=None
     ) -> PredictionResponse:
         ...
 
     @overload
     def predict(
-        self, payload: dict, model: str | None = None, max_retries=None
+        self, payload: dict, model: Optional[str] = None, max_retries=None
     ) -> PredictionResponse:
         ...
 
     def predict(
-        self, payload: dict, model: str | None = None, max_retries=None
+        self, payload: dict, model: Optional[str] = None, max_retries=None
     ) -> PredictionResponse:
         ...
 
     @overload
     async def openapi_schema(
-        self, model: str | None = None, max_retries=None
+        self, model: Optional[str] = None, max_retries=None
     ) -> OpenAPISchemaResponse:
         ...
 
     @overload
     def openapi_schema(
-        self, model: str | None = None, max_retries=None
+        self, model: Optional[str] = None, max_retries=None
     ) -> OpenAPISchemaResponse:
         ...
 
     def openapi_schema(
-        self, model: str | None = None, max_retries=None
+        self, model: Optional[str] = None, max_retries=None
     ) -> OpenAPISchemaResponse:
         ...
 
@@ -109,7 +110,7 @@ class BaseClient(Generic[_PossibleClients]):
     async def stream(
         self,
         payload: dict,
-        model: str | None = None,
+        model: Optional[str] = None,
     ) -> AsyncIterator[PredictionPartial]:
         ...
 
@@ -117,20 +118,20 @@ class BaseClient(Generic[_PossibleClients]):
     def stream(
         self,
         payload: dict,
-        model: str | None = None,
+        model: Optional[str] = None,
     ) -> Iterator[PredictionPartial]:
         ...
 
     def stream(
         self,
         payload: dict,
-        model: str | None = None,
+        model: Optional[str] = None,
     ):
         ...
 
     def _stream_iterator(
         self, client_info, payload: MultipartPayload, is_long_stream: bool
-    ) -> Iterator[httpx.Response] | AsyncIterator[httpx.Response]:
+    ) -> Union[Iterator[httpx.Response], AsyncIterator[httpx.Response]]:
         return self._client.stream(
             method="post",
             url=(
@@ -209,7 +210,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         except BaseFlyMyAIException as e:
             raise FlyMyAIPredictException.from_response(e.response)
 
-    def predict(self, payload: dict, model: str | None = None, max_retries=None):
+    def predict(self, payload: dict, model: Optional[str] = None, max_retries=None):
         """
         Wrap predict method in sse.
         Retries until max_retries or self.max_retries is reached
@@ -248,7 +249,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
                     raise FlyMyAIPredictException.from_response(e.response)
                 yield response
 
-    def stream(self, payload: dict, model: str | None = None):
+    def stream(self, payload: dict, model: Optional[str] = None):
         stream_iter = self._stream(self.amend_client_info(model), payload)
         last_response = None
         for response in stream_iter:
@@ -273,7 +274,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         except BaseFlyMyAIException as e:
             raise FlyMyAIOpenAPIException.from_response(e.response)
 
-    def openapi_schema(self, model: str | None = None, max_retries=None):
+    def openapi_schema(self, model: Optional[str] = None, max_retries=None):
         """
         :param model: flymyai/bert
         :param max_retries: retries before give up
@@ -321,7 +322,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         if hasattr(self, "_client"):
             await self._client.aclose()
 
-    async def openapi_schema(self, model: str | None = None, max_retries=None):
+    async def openapi_schema(self, model: Optional[str] = None, max_retries=None):
         """
         :param max_retries: retries before giving up
         :return:
@@ -364,7 +365,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         :return: FlyMyAIResponse
         """
         async with async_response_stream() as stream:
-            sse = await anext(SSEDecoder().aiter(stream.aiter_lines()))
+            sse = await SSEDecoder().aiter(stream.aiter_lines()).__anext__()
             response = ResponseFactory(
                 sse=sse, httpx_request=stream.request, httpx_response=stream
             ).construct()
@@ -390,7 +391,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             raise FlyMyAIPredictException.from_response(e.response)
 
     async def predict(
-        self, payload: dict, model: str | None = None, max_retries=None
+        self, payload: dict, model: Optional[str] = None, max_retries=None
     ) -> PredictionResponse:
         """
         Wrap predict method in sse.
@@ -429,7 +430,9 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
                     raise FlyMyAIPredictException.from_response(e.response)
                 yield response
 
-    async def stream(self, payload: dict, model: str | None = None, max_retries=None):
+    async def stream(
+        self, payload: dict, model: Optional[str] = None, max_retries=None
+    ):
         stream_iter = self._stream(self.amend_client_info(model), payload)
         last_response = None
         async for response in stream_iter:

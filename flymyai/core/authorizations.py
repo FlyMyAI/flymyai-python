@@ -1,5 +1,6 @@
 import copy
 import dataclasses
+from typing import Optional
 
 import httpx
 
@@ -38,8 +39,8 @@ class APIKeyClientInfo(ClientInfo):
     """
 
     apikey: str
-    username: str | None = None
-    project_name: str | None = None
+    username: Optional[str] = None
+    project_name: Optional[str] = None
 
     @property
     def authorization_headers(self):

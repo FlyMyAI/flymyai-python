@@ -1,3 +1,5 @@
+from typing import List
+
 from ._response import FlyMyAIResponse
 from .models import (
     FlyMyAI401Response,
@@ -80,7 +82,7 @@ class FlyMyAIOpenAPIException(BaseFlyMyAIException):
 
 
 class FlyMyAIExceptionGroup(Exception):
-    def __init__(self, errors: list[BaseFlyMyAIException], **kwargs):
+    def __init__(self, errors: List[BaseFlyMyAIException], **kwargs):
         self.errors = errors
         exceptions_message = ";".join([str(err) for err in errors])
         self.message = f"FlyMyAI exception history: {exceptions_message}"

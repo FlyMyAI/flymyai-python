@@ -1,12 +1,13 @@
 import json
 import os
 import pathlib
+from typing import Union
 
 fixture_dir = os.getenv("FIXTURE_DIR", "fixtures")
 
 
 class FixtureFactory:
-    def __init__(self, test_module_name: str | pathlib.Path):
+    def __init__(self, test_module_name: Union[str, pathlib.Path]):
         if test_module_name.endswith(".py"):
             test_module_name = test_module_name[:-3]
         if isinstance(test_module_name, str):
