@@ -38,41 +38,88 @@ pip install flymyai
 Before using the client, you need to have your API key, username, and project name. In order to get credentials, you have to sign up on flymy.ai and get your personal data on [the profile](https://app.flymy.ai/profile).
 
 ## Basic Usage
-#### Llama3_8b chat model
 Here's a simple example of how to use the FlyMyAI client:
-
-```python
-import flymyai
-
-response = flymyai.run(
-    auth={
-        "apikey": "fly-secret-key",
-        "username": "flymyai",
-        "project_name": "llama-v3-8b",
-    },
-    payload=
-    {
-        "i_prompt": f"You discover the last library in the world, hidden in a forgotten city. What secrets does it hold, and why is it protected by ancient guardians?"
-    }
-)
-print(response.output_data["o_output"][0])
-```
-or 
 
 #### BERT Sentiment analysis
 ```python
 import flymyai
 
 response = flymyai.run(
-    auth={
-        "apikey": "fly-secret-key",
-        "username": "flymyai",
-        "project_name": "bert",
-    },
+    apikey="fly-secret-key",
+    model="flymyai/bert",
     payload={"i_text": "What a fabulous fancy building! It looks like a palace!"}
 )
 print(response.output_data["o_logits"][0])
 ```
+
+
+## Sync Streams
+For llms you should use stream method
+
+#### llama 3 8b
+```python
+from flymyai import client, FlyMyAIPredictException
+
+fma_client = client(apikey="fly-secret-key")
+
+try:
+    stream_iterator = fma_client.stream(
+            payload={
+                "i_prompt": "tell me a story about christmas tree",
+                "i_best_of": 12,
+                "i_max_tokens": 1024,
+                "i_stop": 1,
+                "i_temperature": 1,
+                "i_top_k": 1,
+                "i_top_p": "0.95",
+            },
+            model="flymyai/llama3"
+        )
+    for response in stream_iterator:
+        print(response.output_data["o_output"].pop(), end="")
+except FlyMyAIPredictException as e:
+    print(e)
+    raise e
+finally:
+    print()
+```
+
+## Async Streams
+For llms you should use stream method
+
+#### Stable Code Instruct 3b
+```python
+from flymyai import async_client, FlyMyAIPredictException
+import asyncio
+
+async def run_stable_code():
+    fma_client = async_client(apikey="fly-secret-key")
+    try:
+        stream_iterator = fma_client.stream(
+            payload={
+                "i_prompt": "What's the difference between an iterator and a generator in Python?",
+                "i_best_of": 12,
+                "i_max_tokens": 512,
+                "i_stop": 1,
+                "i_temperature": 1,
+                "i_top_k": 1,
+                "i_top_p": "0.95",
+            },
+            model="flymyai/Stable-Code-Instruct-3b"
+        )
+        async for response in stream_iterator:
+            print(response.output_data["o_output"].pop(), end="")
+    except FlyMyAIPredictException as e:
+        print(e)
+        raise e
+    finally:
+        print()
+
+
+asyncio.run(run_stable_code())
+```
+
+
 
 ## File Inputs
 #### ResNet image classification
@@ -83,11 +130,8 @@ import flymyai
 import pathlib
 
 response = flymyai.run(
-    auth={
-        "apikey": "fly-secret-key",
-        "username": "flymyai",
-        "project_name": "resnet",
-    },
+    apikey="fly-secret-key",
+    model="flymyai/resnet",
     payload={"i_image": pathlib.Path("/path/to/image.png")}
 )
 print(response.output_data["o_495"])
@@ -103,16 +147,10 @@ import base64
 import flymyai
 
 response = flymyai.run(
-    auth={
-        "apikey": "fly-secret-key",
-        "username": "flymyai",
-        "project_name": "SDTurboFMAAceleratedH100",
-    },
+    apikey="fly-secret-key",
+    model="flymyai/SDTurboFMAAceleratedH100",
     payload={
         "i_prompt": "An astronaut riding a rainbow unicorn, cinematic, dramatic, photorealistic",
-        "i_negative_prompt": "Dark colors, gloomy atmosphere, horror",
-        "i_seed": 42,
-        "i_denoising_steps": 25
     }
 )
 base64_image = response.output_data["o_sample"][0]
@@ -131,19 +169,26 @@ import flymyai
 
 
 async def main():
-    auth = {
-        "apikey": "fly-secret-key",
-        "username": "flymyai",
-        "project_name": "llama-v3-8b",
-    }
-    prompts = [
-        {"i_prompt": f"Some random stuff number {count}"}
+    payloads = [
+        {
+            "i_prompt": "An astronaut riding a rainbow unicorn, cinematic, dramatic, photorealistic",
+            "i_negative_prompt": "Dark colors, gloomy atmosphere, horror",
+            "i_seed": count,
+            "i_denoising_steps": 4,
+            "scheduler": "DPM++ SDE"
+         }
         for count in range(1, 10)
     ]
     async with asyncio.TaskGroup() as gr:
         tasks = [
-            gr.create_task(flymyai.async_run(auth, payload=prompt))
-            for prompt in prompts
+            gr.create_task(
+                flymyai.async_run(
+                    apikey="fly-secret-key",
+                    model="flymyai/DreamShaperV2-1",
+                    payload=payload
+                )
+            )
+            for payload in payloads
         ]
     results = await asyncio.gather(*tasks)
     for result in results:
@@ -163,13 +208,12 @@ import pathlib
 
 
 async def background_task():
-    auth = {
-        "apikey": "fly-secret-key",
-        "username": "flymyai",
-        "project_name": "whisper"
-    }
     payload = {"i_audio": pathlib.Path("/path/to/audio.mp3")}
-    response = await flymyai.async_run(auth, payload=payload)
+    response = await flymyai.async_run(
+        apikey="fly-secret-key",
+        model="flymyai/whisper",
+        payload=payload
+    )
     print("Background task completed:", response.output_data["o_transcription"])
 
 
