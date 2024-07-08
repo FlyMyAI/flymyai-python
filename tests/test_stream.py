@@ -15,17 +15,22 @@ def dsn():
 
 
 @pytest.fixture
-def vllm_stream_payload():
-    return factory("vllm_stream_payload")
+def stream_payload():
+    return factory("stream_payload")
 
 
 @pytest.fixture
-def vllm_stream_auth():
-    return factory("vllm_auth")
+def stream_auth():
+    return factory("auth")
 
 
-def test_vllm_stream(vllm_stream_auth, vllm_stream_payload, dsn):
-    stream_iterator = sync_client(**vllm_stream_auth).stream(vllm_stream_payload)
+@pytest.fixture
+def output_field():
+    return factory("output_field")
+
+
+def test_vllm_stream(stream_auth, stream_payload, dsn):
+    stream_iterator = sync_client(**stream_auth).stream(stream_payload)
     for response in stream_iterator:
         assert response.status == 200
         assert response.output_data
@@ -34,13 +39,13 @@ def test_vllm_stream(vllm_stream_auth, vllm_stream_payload, dsn):
 
 
 @pytest.mark.asyncio
-async def test_vllm_async_stream(vllm_stream_auth, vllm_stream_payload, dsn):
+async def test_async_stream(stream_auth, stream_payload, dsn, output_field):
     try:
-        stream_iterator = async_client(**vllm_stream_auth).stream(vllm_stream_payload)
+        stream_iterator = async_client(**stream_auth).stream(stream_payload)
         async for response in stream_iterator:
             assert response.status == 200
             assert response.output_data
-            print(response.output_data["o_text_output"].pop(), end="")
+            print(response.output_data[output_field].pop(), end="")
     except Exception as e:
         if hasattr(e, "msg"):
             print(e)
