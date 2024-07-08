@@ -29,12 +29,12 @@ def output_field():
     return factory("output_field")
 
 
-def test_vllm_stream(stream_auth, stream_payload, dsn):
+def test_stream(stream_auth, stream_payload, dsn, output_field):
     stream_iterator = sync_client(**stream_auth).stream(stream_payload)
     for response in stream_iterator:
         assert response.status == 200
         assert response.output_data
-        print(response.output_data["o_text_output"].pop(), end="")
+        print(response.output_data[output_field].pop(), end="")
     print("\n")
 
 
