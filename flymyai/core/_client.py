@@ -381,7 +381,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             return self._sse_instant(
                 lambda: self._client.stream(
                     method="post",
-                    url=self.client_info.prediction_path,
+                    url=client_info.prediction_path,
                     timeout=_predict_timeout,
                     **payload.serialize(),
                     headers=client_info.authorization_headers,
