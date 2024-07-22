@@ -162,6 +162,6 @@ class SSEDecoder:
             except (TypeError, ValueError):
                 pass
         else:
-            pass  # Field is ignored.
+            pass  # the field is ignored.
 
         return None
