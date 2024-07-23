@@ -31,24 +31,34 @@ def output_field():
 
 def test_stream(stream_auth, stream_payload, dsn, output_field):
     stream_iterator = sync_client(**stream_auth).stream(stream_payload)
-    for response in stream_iterator:
-        assert response.status == 200
-        assert response.output_data
-        print(response.output_data[output_field].pop(), end="")
-    print("\n")
-
-
-@pytest.mark.asyncio
-async def test_async_stream(stream_auth, stream_payload, dsn, output_field):
     try:
-        stream_iterator = async_client(**stream_auth).stream(stream_payload)
-        async for response in stream_iterator:
+        for response in stream_iterator:
             assert response.status == 200
-            assert response.output_data
-            print(response.output_data[output_field].pop(), end="")
+            assert response.output_data or hasattr(stream_iterator, "stream_details")
+            if response.output_data.get(output_field):
+                print(response.output_data[output_field].pop(), end="")
     except Exception as e:
         if hasattr(e, "msg"):
             print(e)
         raise e
     finally:
         print()
+        print(stream_iterator.stream_details)
+
+
+@pytest.mark.asyncio
+async def test_async_stream(stream_auth, stream_payload, dsn, output_field):
+    stream_iterator = async_client(**stream_auth).stream(stream_payload)
+    try:
+        async for response in stream_iterator:
+            assert response.status == 200
+            assert response.output_data or hasattr(stream_iterator, "stream_details")
+            if response.output_data.get(output_field):
+                print(response.output_data[output_field].pop(), end="")
+    except Exception as e:
+        if hasattr(e, "msg"):
+            print(e)
+        raise e
+    finally:
+        print()
+        print(stream_iterator.stream_details)

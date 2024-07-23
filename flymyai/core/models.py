@@ -139,3 +139,9 @@ class PredictionPartial(BaseFromServer):
     output_data: Optional[dict] = None
 
     _response: FlyMyAIResponse = PrivateAttr()
+
+
+class StreamDetails(pydantic.BaseModel):
+    input_tokens: int
+    output_tokens: int
+    size_in_billions: float = pydantic.Field(alias="model_size_in_billions")

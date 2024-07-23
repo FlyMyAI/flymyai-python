@@ -1,3 +1,6 @@
+import json
+import typing
+
 import httpx
 
 
@@ -10,3 +13,10 @@ class FlyMyAIResponse(httpx.Response):
             request=response.request,
             headers=response.headers,
         )
+
+    def json(self, **kwargs) -> typing.Any:
+        if self.content.startswith(b"data"):
+            trail_content = self.content[: len(b"data")]
+            return json.loads(trail_content)
+        else:
+            return super().json(**kwargs)
