@@ -62,58 +62,65 @@ from flymyai import client, FlyMyAIPredictException
 
 fma_client = client(apikey="fly-secret-key")
 
+stream_iterator = fma_client.stream(
+    payload={
+        "prompt": "tell me a story about christmas tree",
+        "best_of": 12,
+        "max_tokens": 1024,
+        "stop": 1,
+        "temperature": 1,
+        "top_k": 1,
+        "top_p": "0.95",
+    },
+    model="flymyai/llama-v3-8b"
+)
 try:
-    stream_iterator = fma_client.stream(
-            payload={
-                "prompt": "tell me a story about christmas tree",
-                "best_of": 12,
-                "max_tokens": 1024,
-                "stop": 1,
-                "temperature": 1,
-                "top_k": 1,
-                "top_p": "0.95",
-            },
-            model="flymyai/llama3"
-        )
     for response in stream_iterator:
-        print(response.output_data["output"].pop(), end="")
+        if response.output_data.get("output"):
+            print(response.output_data["output"].pop(), end="")
 except FlyMyAIPredictException as e:
     print(e)
     raise e
 finally:
     print()
+    print(stream_iterator.stream_details)
 ```
 
 ## Async Streams
 For llms you should use stream method
 
 #### Stable Code Instruct 3b
+
 ```python
-from flymyai import async_client, FlyMyAIPredictException
 import asyncio
+
+from flymyai import async_client, FlyMyAIPredictException
+
 
 async def run_stable_code():
     fma_client = async_client(apikey="fly-secret-key")
+    stream_iterator = fma_client.stream(
+        payload={
+            "prompt": "What's the difference between an iterator and a generator in Python?",
+            "best_of": 12,
+            "max_tokens": 512,
+            "stop": 1,
+            "temperature": 1,
+            "top_k": 1,
+            "top_p": "0.95",
+        },
+        model="flymyai/Stable-Code-Instruct-3b"
+    )
     try:
-        stream_iterator = fma_client.stream(
-            payload={
-                "prompt": "What's the difference between an iterator and a generator in Python?",
-                "best_of": 12,
-                "max_tokens": 512,
-                "stop": 1,
-                "temperature": 1,
-                "top_k": 1,
-                "top_p": "0.95",
-            },
-            model="flymyai/Stable-Code-Instruct-3b"
-        )
         async for response in stream_iterator:
-            print(response.output_data["output"].pop(), end="")
+            if response.output_data.get("output"):
+                print(response.output_data["output"].pop(), end="")
     except FlyMyAIPredictException as e:
         print(e)
         raise e
     finally:
         print()
+        print(stream_iterator.stream_details)
 
 
 asyncio.run(run_stable_code())
@@ -126,8 +133,9 @@ asyncio.run(run_stable_code())
 You can pass file inputs to models using file paths:
 
 ```python
-import flymyai
 import pathlib
+
+import flymyai
 
 response = flymyai.run(
     apikey="fly-secret-key",
