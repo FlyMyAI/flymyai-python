@@ -47,9 +47,9 @@ import flymyai
 response = flymyai.run(
     apikey="fly-secret-key",
     model="flymyai/bert",
-    payload={"i_text": "What a fabulous fancy building! It looks like a palace!"}
+    payload={"text": "What a fabulous fancy building! It looks like a palace!"}
 )
-print(response.output_data["o_logits"][0])
+print(response.output_data["logits"][0])
 ```
 
 
@@ -65,18 +65,18 @@ fma_client = client(apikey="fly-secret-key")
 try:
     stream_iterator = fma_client.stream(
             payload={
-                "i_prompt": "tell me a story about christmas tree",
-                "i_best_of": 12,
-                "i_max_tokens": 1024,
-                "i_stop": 1,
-                "i_temperature": 1,
-                "i_top_k": 1,
-                "i_top_p": "0.95",
+                "prompt": "tell me a story about christmas tree",
+                "best_of": 12,
+                "max_tokens": 1024,
+                "stop": 1,
+                "temperature": 1,
+                "top_k": 1,
+                "top_p": "0.95",
             },
             model="flymyai/llama3"
         )
     for response in stream_iterator:
-        print(response.output_data["o_output"].pop(), end="")
+        print(response.output_data["output"].pop(), end="")
 except FlyMyAIPredictException as e:
     print(e)
     raise e
@@ -97,18 +97,18 @@ async def run_stable_code():
     try:
         stream_iterator = fma_client.stream(
             payload={
-                "i_prompt": "What's the difference between an iterator and a generator in Python?",
-                "i_best_of": 12,
-                "i_max_tokens": 512,
-                "i_stop": 1,
-                "i_temperature": 1,
-                "i_top_k": 1,
-                "i_top_p": "0.95",
+                "prompt": "What's the difference between an iterator and a generator in Python?",
+                "best_of": 12,
+                "max_tokens": 512,
+                "stop": 1,
+                "temperature": 1,
+                "top_k": 1,
+                "top_p": "0.95",
             },
             model="flymyai/Stable-Code-Instruct-3b"
         )
         async for response in stream_iterator:
-            print(response.output_data["o_output"].pop(), end="")
+            print(response.output_data["output"].pop(), end="")
     except FlyMyAIPredictException as e:
         print(e)
         raise e
@@ -132,9 +132,9 @@ import pathlib
 response = flymyai.run(
     apikey="fly-secret-key",
     model="flymyai/resnet",
-    payload={"i_image": pathlib.Path("/path/to/image.png")}
+    payload={"image": pathlib.Path("/path/to/image.png")}
 )
-print(response.output_data["o_495"])
+print(response.output_data["495"])
 ```
 
 
@@ -150,10 +150,10 @@ response = flymyai.run(
     apikey="fly-secret-key",
     model="flymyai/SDTurboFMAAceleratedH100",
     payload={
-        "i_prompt": "An astronaut riding a rainbow unicorn, cinematic, dramatic, photorealistic",
+        "prompt": "An astronaut riding a rainbow unicorn, cinematic, dramatic, photorealistic",
     }
 )
-base64_image = response.output_data["o_sample"][0]
+base64_image = response.output_data["sample"][0]
 image_data = base64.b64decode(base64_image)
 with open("generated_image.jpg", "wb") as file:
     file.write(image_data)
@@ -171,10 +171,10 @@ import flymyai
 async def main():
     payloads = [
         {
-            "i_prompt": "An astronaut riding a rainbow unicorn, cinematic, dramatic, photorealistic",
-            "i_negative_prompt": "Dark colors, gloomy atmosphere, horror",
-            "i_seed": count,
-            "i_denoising_steps": 4,
+            "prompt": "An astronaut riding a rainbow unicorn, cinematic, dramatic, photorealistic",
+            "negative_prompt": "Dark colors, gloomy atmosphere, horror",
+            "seed": count,
+            "denoising_steps": 4,
             "scheduler": "DPM++ SDE"
          }
         for count in range(1, 10)
@@ -192,7 +192,7 @@ async def main():
         ]
     results = await asyncio.gather(*tasks)
     for result in results:
-        print(result.output_data["o_output"])
+        print(result.output_data["output"])
 
 
 asyncio.run(main())
@@ -208,13 +208,13 @@ import pathlib
 
 
 async def background_task():
-    payload = {"i_audio": pathlib.Path("/path/to/audio.mp3")}
+    payload = {"audio": pathlib.Path("/path/to/audio.mp3")}
     response = await flymyai.async_run(
         apikey="fly-secret-key",
         model="flymyai/whisper",
         payload=payload
     )
-    print("Background task completed:", response.output_data["o_transcription"])
+    print("Background task completed:", response.output_data["transcription"])
 
 
 async def main():
