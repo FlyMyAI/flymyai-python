@@ -144,4 +144,4 @@ class PredictionPartial(BaseFromServer):
 class StreamDetails(pydantic.BaseModel):
     input_tokens: int
     output_tokens: int
-    model_size_in_billions: float
+    size_in_billions: float = pydantic.Field(alias="model_size_in_billions")
