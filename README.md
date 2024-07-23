@@ -56,7 +56,7 @@ print(response.output_data["logits"][0])
 ## Sync Streams
 For llms you should use stream method
 
-#### llama 3 8b
+#### llama 3.1 8b
 ```python
 from flymyai import client, FlyMyAIPredictException
 
@@ -72,7 +72,7 @@ stream_iterator = fma_client.stream(
         "top_k": 1,
         "top_p": "0.95",
     },
-    model="flymyai/llama-v3-8b"
+    model="flymyai/llama-v3-1-8b"
 )
 try:
     for response in stream_iterator:
