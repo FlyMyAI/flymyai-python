@@ -148,9 +148,8 @@ async def test_async_stream_cancel(stream_auth, stream_payload, dsn, output_fiel
     try:
         async for response in stream_iterator:
             assert response.status == 200
-            assert response.output_data or hasattr(stream_iterator, "stream_details")
-            if response.output_data.get(output_field):
-                print(response.output_data[output_field].pop(), end="")
+            assert response.output_data
+            print(response.output_data[output_field].pop(), end="")
     except Exception as e:
         if hasattr(e, "msg"):
             print(e)
