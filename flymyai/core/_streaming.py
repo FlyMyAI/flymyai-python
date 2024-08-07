@@ -48,7 +48,10 @@ class ServerSentEvent:
         return self._data
 
     def json(self) -> Any:
-        return json.loads(self.data.strip())
+        if self.data:
+            return json.loads(self.data.strip())
+        if self.event:
+            return json.loads(self.event.strip())
 
     @property
     def headers(self):

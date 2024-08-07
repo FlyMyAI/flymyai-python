@@ -37,12 +37,14 @@ class ResponseFactory(object):
     def _base_construct_from_sse(self):
         sse_status = self.get_sse_status_code()
         if sse_status < 400:
-            return FlyMyAIResponse(
+            response = FlyMyAIResponse(
                 status_code=sse_status,
                 content=self.sse.data or self.sse.event,
                 request=self.httpx_request,
                 headers=self.httpx_response.headers or self.sse.headers,
             )
+            response.is_event = self.sse.event is not None
+            return response
         else:
             raise BaseFlyMyAIException.from_response(
                 FlyMyAIResponse(

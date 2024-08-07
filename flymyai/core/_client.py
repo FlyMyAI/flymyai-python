@@ -14,7 +14,6 @@ from typing import (
 
 import httpx
 
-from flymyai.core._response import FlyMyAIResponse
 from flymyai.core._response_factory import ResponseFactory
 from flymyai.core._streaming import SSEDecoder
 from flymyai.core.authorizations import APIKeyClientInfo
@@ -29,8 +28,9 @@ from flymyai.core.models import (
     PredictionResponse,
     OpenAPISchemaResponse,
     PredictionPartial,
-    StreamDetails,
 )
+from flymyai.core.stream_iterators.AsyncPredictionStream import AsyncPredictionStream
+from flymyai.core.stream_iterators.PredictionStream import PredictionStream
 from flymyai.multipart.payload import MultipartPayload
 from flymyai.utils.utils import retryable_callback, aretryable_callback
 
@@ -170,34 +170,6 @@ class BaseClient(Generic[_PossibleClients]):
         raise NotImplemented
 
 
-class PredictionStream:
-    stream_details: StreamDetails
-
-    def __init__(self, response_iterator: Iterator):
-        self.response_iterator = response_iterator
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        response_end = None
-        try:
-            next_resp: FlyMyAIResponse = self.response_iterator.__next__()
-            response_end = next_resp
-            return PredictionPartial.from_response(response_end)
-        except BaseFlyMyAIException as e:
-            response_end = e.response
-            raise e
-        finally:
-            if not response_end:
-                raise StopIteration()
-            stream_details_marshalled = response_end.json().get("stream_details")
-            if stream_details_marshalled:
-                self.stream_details = StreamDetails.model_validate(
-                    stream_details_marshalled
-                )
-
-
 class BaseSyncClient(BaseClient[httpx.Client]):
     def _construct_client(self):
         return httpx.Client(
@@ -330,34 +302,6 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         """
         with cls(apikey, model) as client:
             return client.predict(payload)
-
-
-class AsyncPredictionStream:
-    stream_details: StreamDetails
-
-    def __init__(self, response_iterator: AsyncIterator):
-        self.response_iterator = response_iterator
-
-    def __aiter__(self):
-        return self
-
-    async def __anext__(self):
-        response_end = None
-        try:
-            next_resp: FlyMyAIResponse = await self.response_iterator.__anext__()
-            response_end = next_resp
-            return PredictionPartial.from_response(response_end)
-        except BaseFlyMyAIException as e:
-            response_end = e.response
-            raise e
-        finally:
-            if not response_end:
-                raise StopAsyncIteration()
-            stream_details_marshalled = response_end.json().get("stream_details")
-            if stream_details_marshalled:
-                self.stream_details = StreamDetails.model_validate(
-                    stream_details_marshalled
-                )
 
 
 class BaseAsyncClient(BaseClient[httpx.AsyncClient]):

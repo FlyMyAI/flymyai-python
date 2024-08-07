@@ -31,6 +31,8 @@ def output_field():
 
 def test_stream(stream_auth, stream_payload, dsn, output_field):
     stream_iterator = sync_client(**stream_auth).stream(stream_payload)
+    stream_iterator.follow_cancelling = False
+    stream_iterator.set_on_event(print)
     try:
         for response in stream_iterator:
             assert response.status == 200
@@ -43,12 +45,14 @@ def test_stream(stream_auth, stream_payload, dsn, output_field):
         raise e
     finally:
         print()
-        print(stream_iterator.stream_details)
+        print(getattr(stream_iterator, "stream_details", None))
 
 
 @pytest.mark.asyncio
 async def test_async_stream(stream_auth, stream_payload, dsn, output_field):
     stream_iterator = async_client(**stream_auth).stream(stream_payload)
+    stream_iterator.follow_cancelling = False
+    stream_iterator.set_on_event(print)
     try:
         async for response in stream_iterator:
             assert response.status == 200
@@ -61,4 +65,4 @@ async def test_async_stream(stream_auth, stream_payload, dsn, output_field):
         raise e
     finally:
         print()
-        print(stream_iterator.stream_details)
+        print(getattr(stream_iterator, "stream_details", None))

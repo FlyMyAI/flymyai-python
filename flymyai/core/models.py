@@ -7,6 +7,7 @@ import pydantic
 from pydantic import PrivateAttr
 
 from flymyai.core._response import FlyMyAIResponse
+from flymyai.core.types.event_types import EventType
 
 
 @dataclasses.dataclass
@@ -141,7 +142,16 @@ class PredictionPartial(BaseFromServer):
     _response: FlyMyAIResponse = PrivateAttr()
 
 
+class PredictionEvent(BaseFromServer):
+    status: int
+    event_type: EventType
+
+    prediction_id: Optional[str] = None  # EventType.STREAM_ID
+
+
 class StreamDetails(pydantic.BaseModel):
-    input_tokens: int
-    output_tokens: int
-    size_in_billions: float = pydantic.Field(alias="model_size_in_billions")
+    input_tokens: Optional[int] = None
+    output_tokens: Optional[int] = None
+    size_in_billions: Optional[float] = pydantic.Field(
+        default=None, alias="model_size_in_billions"
+    )
