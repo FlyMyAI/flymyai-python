@@ -55,6 +55,10 @@ class APIKeyClientInfo(ClientInfo):
         return self._project_path.join(httpx.URL("predict"))
 
     @property
+    def prediction_cancel_path(self):
+        return self._project_path.join(httpx.URL("predict/cancel/"))
+
+    @property
     def prediction_stream_path(self):
         return self._project_path.join(httpx.URL("predict/stream/"))
 

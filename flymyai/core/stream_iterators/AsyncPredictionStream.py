@@ -2,8 +2,15 @@ import asyncio
 from typing import AsyncIterator, TypeVar, Callable, Union, Awaitable
 
 from flymyai.core._response import FlyMyAIResponse
+from flymyai.core.authorizations import APIKeyClientInfo
+from flymyai.core.clients.base_client import BaseClient
 from flymyai.core.exceptions import BaseFlyMyAIException
-from flymyai.core.models import StreamDetails, PredictionPartial, PredictionEvent
+from flymyai.core.models.successful_responses import (
+    StreamDetails,
+    PredictionPartial,
+    PredictionEvent,
+)
+from flymyai.core.stream_iterators.exceptions import StreamCancellationException
 from flymyai.core.types.event_types import EventType
 
 
@@ -20,10 +27,29 @@ class AsyncPredictionStream:
 
     event_callback: _AsyncEventCallbackType = None
 
+    prediction_id: str
+
     follow_cancelling: bool = True
 
-    def __init__(self, response_iterator: AsyncIterator):
+    _client: BaseClient
+    _client_info: APIKeyClientInfo
+
+    def __init__(
+        self,
+        response_iterator: AsyncIterator,
+        client: BaseClient,
+        client_info: APIKeyClientInfo,
+    ):
         self.response_iterator = response_iterator
+        self._client = client
+        self._client_info = client_info
+
+    async def cancel(self):
+        if not hasattr(self, "prediction_id"):
+            raise StreamCancellationException("No prediction_id obtained!")
+        return await self._client.cancel_prediction(
+            self.prediction_id, client_info=self._client_info
+        )
 
     def __aiter__(self):
         return self
@@ -48,11 +74,10 @@ class AsyncPredictionStream:
                         asyncio.run_coroutine_threadsafe(
                             coro_or_res, asyncio.get_event_loop()
                         )
-                    if (
-                        self.follow_cancelling
-                        and evt.event_type == EventType.CANCELLING
-                    ):
-                        raise StopAsyncIteration
+                if self.follow_cancelling and evt.event_type == EventType.CANCELLING:
+                    raise StopAsyncIteration
+                if evt.event_type == EventType.STREAM_ID:
+                    self.prediction_id = evt.prediction_id
 
     async def __anext__(self):
         response_end = None
