@@ -1,12 +1,7 @@
 import dataclasses
 import json
-from typing import Optional
 
 import httpx
-import pydantic
-from pydantic import PrivateAttr
-
-from flymyai.core._response import FlyMyAIResponse
 
 
 @dataclasses.dataclass
@@ -89,59 +84,3 @@ class FlyMyAI422Response(Base4xxResponse):
         if detail := jsoned.get("detail"):
             msg += f"Details: {detail}"
         return msg
-
-
-class BaseFromServer(pydantic.BaseModel):
-    _response: FlyMyAIResponse = PrivateAttr()
-
-    @property
-    def response(self):
-        return self._response
-
-    @classmethod
-    def from_response(cls, response: FlyMyAIResponse, **kwargs):
-        status_code = kwargs.pop("status", response.status_code)
-        response_json = response.json()
-        response_json["status"] = response_json.get("status", status_code)
-        self = cls(**response_json, **kwargs)
-        self._response = response
-        return self
-
-
-class PredictionResponse(BaseFromServer):
-    """
-    Prediction response from FlyMyAI
-    """
-
-    exc_history: Optional[list]
-    output_data: dict
-    status: int
-
-    inference_time: Optional[float] = None
-
-    @property
-    def response(self):
-        return self._response
-
-
-class OpenAPISchemaResponse(BaseFromServer):
-    """
-    OpenAPI schema for the current project. Use it to construct your own schema
-    """
-
-    exc_history: Optional[list]
-    openapi_schema: dict
-    status: int
-
-
-class PredictionPartial(BaseFromServer):
-    status: int
-    output_data: Optional[dict] = None
-
-    _response: FlyMyAIResponse = PrivateAttr()
-
-
-class StreamDetails(pydantic.BaseModel):
-    input_tokens: int
-    output_tokens: int
-    size_in_billions: float = pydantic.Field(alias="model_size_in_billions")

@@ -1,7 +1,7 @@
 from typing import List
 
 from ._response import FlyMyAIResponse
-from .models import (
+from .models.error_responses import (
     FlyMyAI401Response,
     FlyMyAI422Response,
     Base4xxResponse,

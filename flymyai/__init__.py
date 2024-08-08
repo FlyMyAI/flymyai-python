@@ -1,7 +1,7 @@
 import httpx
 
-from .core.client import FlyMyAI, AsyncFlyMyAI
-from .core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
+from flymyai.core.client import FlyMyAI, AsyncFlyMyAI
+from flymyai.core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
 
 
 __all__ = [
