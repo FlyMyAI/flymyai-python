@@ -33,7 +33,13 @@ def fake_payload_fixture(binary_file_paths) -> dict:
 
 @pytest.fixture
 def client_auth_fixture() -> dict:
-    return factory("client_auth_fixture")
+    client_auth_fixture: dict = factory("client_auth_fixture")
+    auth_apikey_env = client_auth_fixture.pop("apikey_environ", "")
+    if auth_apikey_env:
+        client_auth_fixture["apikey"] = os.getenv(
+            auth_apikey_env, client_auth_fixture.get("apikey")
+        )
+    return client_auth_fixture
 
 
 def test_flymyai_client(address_fixture, fake_payload_fixture, client_auth_fixture):

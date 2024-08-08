@@ -25,7 +25,13 @@ def stream_payload():
 
 @pytest.fixture
 def stream_auth():
-    return factory("auth")
+    client_auth_fixture = factory("auth")
+    auth_apikey_env = client_auth_fixture.pop("apikey_environ", "")
+    if auth_apikey_env:
+        client_auth_fixture["apikey"] = os.getenv(
+            auth_apikey_env, client_auth_fixture.get("apikey")
+        )
+    return client_auth_fixture
 
 
 @pytest.fixture
