@@ -1,0 +1,18 @@
+{
+  "address_fixture": "https://dev-api.flymy.ai",
+  "stream_payload": {
+    "prompt": "You discover the last library in the world, hidden in a forgotten city. What secrets does it hold, and why is it protected by ancient guardians?",
+    "best_of": 1,
+    "max_tokens": 128,
+    "stop": "\"<|im_end|>\", \"<|user|>\"",
+    "temperature": 0.7,
+    "top_k": 10,
+    "top_p": 0.9,
+    "stream": true
+  },
+  "auth": {
+    "model": "flymyai/vllm_stream",
+    "apikey_environ": "FMA_APIKEY"
+  },
+  "output_field": "output"
+}

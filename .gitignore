@@ -131,7 +131,6 @@ dmypy.json
 .pyre/
 # media files
 *.csv
-*.png
 *.jpg
 *.rar
 *.jpeg
@@ -142,5 +141,4 @@ dmypy.json
 .dir
 .idea/*
 poetry.lock
-tests/fixtures*/
 venv*
