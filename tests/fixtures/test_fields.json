@@ -1,0 +1,6 @@
+{
+  "binary_field_path": "tests/fixtures/Untitled.png",
+  "simple_field_inputs": [
+    "123", 2, 2.0, [222, 22.0]
+  ]
+}
