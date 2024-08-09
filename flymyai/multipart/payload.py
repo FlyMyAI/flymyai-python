@@ -6,7 +6,6 @@ from .simple_field import SimpleField
 
 
 class MultipartPayload:
-
     """
     This class provides a way to create a multipart-prepared
     payload (multipart/form-data) from a python dict

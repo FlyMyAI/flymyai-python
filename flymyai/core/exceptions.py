@@ -10,8 +10,7 @@ from .models.error_responses import (
 )
 
 
-class ImproperlyConfiguredClientException(Exception):
-    ...
+class ImproperlyConfiguredClientException(Exception): ...
 
 
 class BaseFlyMyAIException(Exception):
@@ -73,12 +72,10 @@ class BaseFlyMyAIException(Exception):
         return self.msg
 
 
-class FlyMyAIPredictException(BaseFlyMyAIException):
-    ...
+class FlyMyAIPredictException(BaseFlyMyAIException): ...
 
 
-class FlyMyAIOpenAPIException(BaseFlyMyAIException):
-    ...
+class FlyMyAIOpenAPIException(BaseFlyMyAIException): ...
 
 
 class FlyMyAIExceptionGroup(Exception):

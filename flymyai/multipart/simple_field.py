@@ -5,7 +5,6 @@ from .base_field import BaseField
 
 
 class SimpleField(BaseField):
-
     """
     Primitive field that stores a single jsonable-value
     """

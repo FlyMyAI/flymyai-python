@@ -27,7 +27,6 @@ def is_binary_input(value: _BinaryInput) -> bool:
 
 
 class BinaryField(BaseField):
-
     """
     Primitive that handles a binary input
     """

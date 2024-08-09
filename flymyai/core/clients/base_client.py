@@ -28,7 +28,6 @@ _predict_timeout = httpx.Timeout(None, connect=10)
 
 
 class BaseClient(Generic[_PossibleClients]):
-
     """
     Base class for FlyMyAI clients
     """
@@ -60,59 +59,50 @@ class BaseClient(Generic[_PossibleClients]):
     @overload
     async def predict(
         self, payload: dict, model: Optional[str] = None, max_retries=None
-    ) -> PredictionResponse:
-        ...
+    ) -> PredictionResponse: ...
 
     @overload
     def predict(
         self, payload: dict, model: Optional[str] = None, max_retries=None
-    ) -> PredictionResponse:
-        ...
+    ) -> PredictionResponse: ...
 
     def predict(
         self, payload: dict, model: Optional[str] = None, max_retries=None
-    ) -> PredictionResponse:
-        ...
+    ) -> PredictionResponse: ...
 
     @overload
     async def openapi_schema(
         self, model: Optional[str] = None, max_retries=None
-    ) -> OpenAPISchemaResponse:
-        ...
+    ) -> OpenAPISchemaResponse: ...
 
     @overload
     def openapi_schema(
         self, model: Optional[str] = None, max_retries=None
-    ) -> OpenAPISchemaResponse:
-        ...
+    ) -> OpenAPISchemaResponse: ...
 
     def openapi_schema(
         self, model: Optional[str] = None, max_retries=None
-    ) -> OpenAPISchemaResponse:
-        ...
+    ) -> OpenAPISchemaResponse: ...
 
     @overload
     async def stream(
         self,
         payload: dict,
         model: Optional[str] = None,
-    ) -> AsyncIterator[PredictionPartial]:
-        ...
+    ) -> AsyncIterator[PredictionPartial]: ...
 
     @overload
     def stream(
         self,
         payload: dict,
         model: Optional[str] = None,
-    ) -> Iterator[PredictionPartial]:
-        ...
+    ) -> Iterator[PredictionPartial]: ...
 
     def stream(
         self,
         payload: dict,
         model: Optional[str] = None,
-    ):
-        ...
+    ): ...
 
     def _stream_iterator(
         self, client_info, payload: MultipartPayload, is_long_stream: bool
@@ -158,8 +148,7 @@ class BaseClient(Generic[_PossibleClients]):
         prediction_id: str,
         model: Optional[str] = None,
         client_info: APIKeyClientInfo = None,
-    ):
-        ...
+    ): ...
 
     @overload
     def cancel_prediction(
@@ -167,13 +156,11 @@ class BaseClient(Generic[_PossibleClients]):
         prediction_id: str,
         model: Optional[str] = None,
         client_info: APIKeyClientInfo = None,
-    ):
-        ...
+    ): ...
 
     def cancel_prediction(
         self,
         prediction_id: str,
         model: Optional[str] = None,
         client_info: APIKeyClientInfo = None,
-    ):
-        ...
+    ): ...

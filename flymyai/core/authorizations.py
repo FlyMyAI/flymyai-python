@@ -8,7 +8,6 @@ from flymyai.core.exceptions import ImproperlyConfiguredClientException
 
 
 class ClientInfo:
-
     """
     Base class for all ClientInfo objects
     """
@@ -32,7 +31,6 @@ class ClientInfo:
 
 @dataclasses.dataclass
 class APIKeyClientInfo(ClientInfo):
-
     """
     Encapsulates information about a project.
     Uses X-API-KEY header to perform an auth
