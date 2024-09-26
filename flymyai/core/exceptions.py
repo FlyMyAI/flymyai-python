@@ -32,6 +32,7 @@ class BaseFlyMyAIException(Exception):
         msg = f"""
                 INTERNAL SERVER ERROR ({response.status_code}):
                 REQUEST URL: {response.url};
+                Content [0:250]: {response.content.decode()[0:250]}
             """
         internal_error_mapping = {
             500: lambda: cls(msg, False, response=response),
@@ -39,6 +40,7 @@ class BaseFlyMyAIException(Exception):
             503: lambda: cls(msg, False, response=response),
             504: lambda: cls(msg, True, response=response),
             524: lambda: cls(msg, True, response=response),
+            599: lambda: cls(msg, False, response=response),
         }
         return internal_error_mapping.get(
             response.status_code, lambda: cls(msg, False)

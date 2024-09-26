@@ -14,6 +14,8 @@ class ServerSentEvent:
     _headers: dict[str, str]
     _url: str
 
+    __jsoned: Any
+
     def __init__(
         self,
         *,
@@ -47,10 +49,13 @@ class ServerSentEvent:
         return self._data
 
     def json(self) -> Any:
+        if hasattr(self, "__jsoned"):
+            return self.__jsoned
         if self.data:
-            return json.loads(self.data.strip())
+            self.__jsoned = json.loads(self.data.strip())
         if self.event:
-            return json.loads(self.event.strip())
+            self.__jsoned = json.loads(self.event.strip())
+        return self.__jsoned
 
     @property
     def headers(self):

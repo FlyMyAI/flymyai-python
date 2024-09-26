@@ -35,7 +35,10 @@ class ResponseFactory(object):
 
     def _base_construct_from_sse(self):
         sse_status = self.get_sse_status_code()
-        if sse_status < 400:
+        is_details = self.sse.json().get("details") is not None
+        if is_details and sse_status:
+            sse_status = 599
+        if sse_status < 400 and not is_details:
             response = FlyMyAIResponse(
                 status_code=sse_status,
                 content=self.sse.data or self.sse.event,
