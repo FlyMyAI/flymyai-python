@@ -5,7 +5,8 @@ from flymyai.core._streaming import ServerSentEvent
 from flymyai.core.exceptions import BaseFlyMyAIException
 
 
-class ResponseFactoryException(Exception): ...
+class ResponseFactoryException(Exception):
+    ...
 
 
 class ResponseFactory(object):
@@ -36,7 +37,7 @@ class ResponseFactory(object):
     def _base_construct_from_sse(self):
         sse_status = self.get_sse_status_code()
         is_details = self.sse.json().get("details") is not None
-        if is_details and sse_status:
+        if is_details and sse_status == 200:
             sse_status = 599
         if sse_status < 400 and not is_details:
             response = FlyMyAIResponse(
@@ -53,7 +54,8 @@ class ResponseFactory(object):
                     status_code=sse_status,
                     content=self.sse.data or self.sse.event,
                     request=self.httpx_request,
-                    headers=self.httpx_response.headers or self.sse.headers,
+                    headers=self.httpx_response.headers
+                    or getattr(self.sse, "headers", {}),
                 )
             )
 

@@ -99,10 +99,13 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         """
         async with async_response_stream() as stream:
             sse = await SSEDecoder().aiter(stream.aiter_lines()).__anext__()
-            response = ResponseFactory(
-                sse=sse, httpx_request=stream.request, httpx_response=stream
-            ).construct()
-            return response
+            try:
+                response = ResponseFactory(
+                    sse=sse, httpx_request=stream.request, httpx_response=stream
+                ).construct()
+                return response
+            except BaseFlyMyAIException as e:
+                raise FlyMyAIPredictException.from_base_exception(e)
 
     def _predict(self, client_info, payload: MultipartPayload):
         """
@@ -110,18 +113,15 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         :param payload: model input data
         :return: FlyMyAIResponse or raise an exception
         """
-        try:
-            return self._sse_instant(
-                lambda: self._client.stream(
-                    method="post",
-                    url=client_info.prediction_path,
-                    timeout=_predict_timeout,
-                    **payload.serialize(),
-                    headers=client_info.authorization_headers,
-                )
+        return self._sse_instant(
+            lambda: self._client.stream(
+                method="post",
+                url=client_info.prediction_path,
+                timeout=_predict_timeout,
+                **payload.serialize(),
+                headers=client_info.authorization_headers,
             )
-        except BaseFlyMyAIException as e:
-            raise FlyMyAIPredictException.from_response(e.response)
+        )
 
     async def predict(
         self, payload: dict, model: Optional[str] = None, max_retries=None
@@ -160,7 +160,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
                         httpx_response=sse_stream,
                     ).construct()
                 except BaseFlyMyAIException as e:
-                    raise FlyMyAIPredictException.from_response(e.response)
+                    raise FlyMyAIPredictException.from_base_exception(e)
                 yield response
 
     def stream(self, payload: dict, model: Optional[str] = None, max_retries=None):

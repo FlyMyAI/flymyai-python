@@ -62,7 +62,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
                 lambda: self._stream_iterator(client_info, payload, False)
             )
         except BaseFlyMyAIException as e:
-            raise FlyMyAIPredictException.from_response(e.response)
+            raise FlyMyAIPredictException.from_base_exception(e)
 
     def predict(self, payload: dict, model: Optional[str] = None, max_retries=None):
         """
@@ -100,7 +100,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
                         httpx_response=sse_stream,
                     ).construct()
                 except BaseFlyMyAIException as e:
-                    raise FlyMyAIPredictException.from_response(e.response)
+                    raise FlyMyAIPredictException.from_base_exception(e)
                 yield response
 
     def stream(self, payload: dict, model: Optional[str] = None):

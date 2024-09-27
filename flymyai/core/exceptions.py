@@ -1,4 +1,5 @@
-from typing import List
+import datetime
+from typing import List, Type
 
 from ._response import FlyMyAIResponse
 from .models.error_responses import (
@@ -10,7 +11,8 @@ from .models.error_responses import (
 )
 
 
-class ImproperlyConfiguredClientException(Exception): ...
+class ImproperlyConfiguredClientException(Exception):
+    ...
 
 
 class BaseFlyMyAIException(Exception):
@@ -33,6 +35,7 @@ class BaseFlyMyAIException(Exception):
                 INTERNAL SERVER ERROR ({response.status_code}):
                 REQUEST URL: {response.url};
                 Content [0:250]: {response.content.decode()[0:250]}
+                Timestamp [UTC]: {datetime.datetime.utcnow()}
         """
         internal_error_mapping = {
             500: lambda: cls(msg, False, response=response),
@@ -78,10 +81,14 @@ class BaseFlyMyAIException(Exception):
         return self.msg
 
 
-class FlyMyAIPredictException(BaseFlyMyAIException): ...
+class FlyMyAIPredictException(BaseFlyMyAIException):
+    @classmethod
+    def from_base_exception(cls, exception: BaseFlyMyAIException):
+        return cls(exception.msg, exception.requires_retry, exception.response)
 
 
-class FlyMyAIOpenAPIException(BaseFlyMyAIException): ...
+class FlyMyAIOpenAPIException(BaseFlyMyAIException):
+    ...
 
 
 class FlyMyAIExceptionGroup(Exception):
