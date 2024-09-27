@@ -59,9 +59,36 @@ jobs:
           FMA_APIKEY: ${{ secrets.FMA_APIKEY }}
         run: pytest tests/test_fields.py --tb=short
 
+  test_unknown_error_handle:
+    needs:
+      - lint
+
+    runs-on: ubuntu-latest
+
+    container:
+      image: python:3.8
+
+    steps:
+      - name: Check out git repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Fix
+        run: git config --global --add safe.directory '*'
+
+      - name: Install dependencies
+        run: pip3 install poetry pytest-asyncio && poetry config virtualenvs.create false && poetry install
+
+      - name: Test
+        env:
+          FMA_APIKEY: ${{ secrets.FMA_APIKEY }}
+        run: pytest tests/test_unknown_error_handle.py --tb=short
+
   test_flymyai_client:
     needs:
       - lint
+      - test_unknown_error_handle
 
     runs-on: ubuntu-latest
 
@@ -88,6 +115,7 @@ jobs:
   test_stream:
     needs:
       - lint
+      - test_unknown_error_handle
 
     runs-on: ubuntu-latest
 
