@@ -11,8 +11,7 @@ from .models.error_responses import (
 )
 
 
-class ImproperlyConfiguredClientException(Exception):
-    ...
+class ImproperlyConfiguredClientException(Exception): ...
 
 
 class BaseFlyMyAIException(Exception):
@@ -87,8 +86,7 @@ class FlyMyAIPredictException(BaseFlyMyAIException):
         return cls(exception.msg, exception.requires_retry, exception.response)
 
 
-class FlyMyAIOpenAPIException(BaseFlyMyAIException):
-    ...
+class FlyMyAIOpenAPIException(BaseFlyMyAIException): ...
 
 
 class FlyMyAIExceptionGroup(Exception):
