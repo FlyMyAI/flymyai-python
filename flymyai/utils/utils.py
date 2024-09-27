@@ -48,6 +48,8 @@ async def aretryable_callback(
                 continue
             else:
                 raise exception_group_cls(retries_history)
+        except Exception as e:
+            raise e
     else:
         exception_gr = exception_group_cls(retries_history)
         raise exception_gr
