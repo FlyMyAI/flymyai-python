@@ -10,7 +10,8 @@ from .models.error_responses import (
 )
 
 
-class ImproperlyConfiguredClientException(Exception): ...
+class ImproperlyConfiguredClientException(Exception):
+    ...
 
 
 class BaseFlyMyAIException(Exception):
@@ -33,14 +34,18 @@ class BaseFlyMyAIException(Exception):
                 INTERNAL SERVER ERROR ({response.status_code}):
                 REQUEST URL: {response.url};
                 Content [0:250]: {response.content.decode()[0:250]}
-            """
+        """
         internal_error_mapping = {
             500: lambda: cls(msg, False, response=response),
             502: lambda: cls(msg, True, response=response),
             503: lambda: cls(msg, False, response=response),
             504: lambda: cls(msg, True, response=response),
             524: lambda: cls(msg, True, response=response),
+            # unknown issue, probably detected on the client side
             599: lambda: cls(msg, False, response=response),
+            # broker issues, they are not billed at all
+            5000: lambda: cls(msg, False, response=response),
+            5320: lambda: cls(msg, True, response=response),
         }
         return internal_error_mapping.get(
             response.status_code, lambda: cls(msg, False)
@@ -74,10 +79,12 @@ class BaseFlyMyAIException(Exception):
         return self.msg
 
 
-class FlyMyAIPredictException(BaseFlyMyAIException): ...
+class FlyMyAIPredictException(BaseFlyMyAIException):
+    ...
 
 
-class FlyMyAIOpenAPIException(BaseFlyMyAIException): ...
+class FlyMyAIOpenAPIException(BaseFlyMyAIException):
+    ...
 
 
 class FlyMyAIExceptionGroup(Exception):
