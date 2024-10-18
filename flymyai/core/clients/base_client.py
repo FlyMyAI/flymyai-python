@@ -76,36 +76,30 @@ class BaseClient(Generic[_PossibleClients]):
     @overload
     async def predict(
         self, payload: dict, model: Optional[str] = None, max_retries=None
-    ) -> PredictionResponse:
-        ...
+    ) -> PredictionResponse: ...
 
     @overload
     def predict(
         self, payload: dict, model: Optional[str] = None, max_retries=None
-    ) -> PredictionResponse:
-        ...
+    ) -> PredictionResponse: ...
 
     def predict(
         self, payload: dict, model: Optional[str] = None, max_retries=None
-    ) -> PredictionResponse:
-        ...
+    ) -> PredictionResponse: ...
 
     @overload
     async def predict_async_task(
         self, payload: dict, model: Optional[str] = None, max_retries=None
-    ) -> AsyncPredictionTask:
-        ...
+    ) -> AsyncPredictionTask: ...
 
     @overload
     def predict_async_task(
         self, payload: dict, model: Optional[str] = None, max_retries=None
-    ) -> AsyncPredictionTask:
-        ...
+    ) -> AsyncPredictionTask: ...
 
     def predict_async_task(
         self, payload: dict, model: Optional[str] = None, max_retries=None
-    ) -> AsyncPredictionTask:
-        ...
+    ) -> AsyncPredictionTask: ...
 
     @classmethod
     def _construct_task_result(cls, response):
@@ -131,59 +125,50 @@ class BaseClient(Generic[_PossibleClients]):
     @overload
     async def prediction_task_result(
         self, prediction_task: AsyncPredictionTask, timeout: Optional[float] = None
-    ):
-        ...
+    ): ...
 
     @overload
     def prediction_task_result(
         self, prediction_task: AsyncPredictionTask, timeout: Optional[float] = None
-    ):
-        ...
+    ): ...
 
     def prediction_task_result(
         self, prediction_task: AsyncPredictionTask, timeout: Optional[float] = None
-    ):
-        ...
+    ): ...
 
     @overload
     async def openapi_schema(
         self, model: Optional[str] = None, max_retries=None
-    ) -> OpenAPISchemaResponse:
-        ...
+    ) -> OpenAPISchemaResponse: ...
 
     @overload
     def openapi_schema(
         self, model: Optional[str] = None, max_retries=None
-    ) -> OpenAPISchemaResponse:
-        ...
+    ) -> OpenAPISchemaResponse: ...
 
     def openapi_schema(
         self, model: Optional[str] = None, max_retries=None
-    ) -> OpenAPISchemaResponse:
-        ...
+    ) -> OpenAPISchemaResponse: ...
 
     @overload
     async def stream(
         self,
         payload: dict,
         model: Optional[str] = None,
-    ) -> AsyncIterator[PredictionPartial]:
-        ...
+    ) -> AsyncIterator[PredictionPartial]: ...
 
     @overload
     def stream(
         self,
         payload: dict,
         model: Optional[str] = None,
-    ) -> Iterator[PredictionPartial]:
-        ...
+    ) -> Iterator[PredictionPartial]: ...
 
     def stream(
         self,
         payload: dict,
         model: Optional[str] = None,
-    ):
-        ...
+    ): ...
 
     def _stream_iterator(
         self, client_info, payload: MultipartPayload, is_long_stream: bool
@@ -229,8 +214,7 @@ class BaseClient(Generic[_PossibleClients]):
         prediction_id: str,
         model: Optional[str] = None,
         client_info: APIKeyClientInfo = None,
-    ):
-        ...
+    ): ...
 
     @overload
     def cancel_prediction(
@@ -238,13 +222,11 @@ class BaseClient(Generic[_PossibleClients]):
         prediction_id: str,
         model: Optional[str] = None,
         client_info: APIKeyClientInfo = None,
-    ):
-        ...
+    ): ...
 
     def cancel_prediction(
         self,
         prediction_id: str,
         model: Optional[str] = None,
         client_info: APIKeyClientInfo = None,
-    ):
-        ...
+    ): ...
