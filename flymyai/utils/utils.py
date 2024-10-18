@@ -88,7 +88,7 @@ async def aretryable_callback(
             except append_on_exception_cls as e1:
                 retries_history.append(e1)
                 if e1.requires_retry:
-                    await asyncio.sleep(await_treshold)
+                    await asyncio.sleep(await_treshold or 0)
                     r += 1
                     continue
                 else:
