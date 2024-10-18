@@ -109,7 +109,7 @@ class AsyncPredictionResponseList(BaseFromServer):
         return exc_group
 
 
-class AsyncPredictionTask(Generic[_ClientT], BaseFromServer):
+class AsyncPredictionTask(BaseFromServer, Generic[_ClientT]):
     _affiliated_client: Optional[_ClientT] = PrivateAttr(default=None)
     _client_info: APIKeyClientInfo = PrivateAttr(default=None)
 

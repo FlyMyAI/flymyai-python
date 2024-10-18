@@ -36,7 +36,7 @@ def retryable_callback(
             except append_on_exception_cls as e:
                 retries_history.append(e)
                 if e.requires_retry and not should_stop:
-                    time.sleep(await_treshold)
+                    time.sleep(await_treshold or 0)
                     r += 1
                     continue
                 else:
