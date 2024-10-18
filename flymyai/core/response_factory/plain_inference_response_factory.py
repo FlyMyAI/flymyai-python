@@ -3,16 +3,13 @@ import httpx
 from flymyai.core._response import FlyMyAIResponse
 from flymyai.core._streaming import ServerSentEvent
 from flymyai.core.exceptions import BaseFlyMyAIException
+from flymyai.core.response_factory.base_response_factory import (
+    ResponseFactory,
+    ResponseFactoryException,
+)
 
 
-class ResponseFactoryException(Exception): ...
-
-
-class ResponseFactory(object):
-    """
-    Factory for FlyMyAIResponse objects
-    """
-
+class SSEInferenceResponseFactory(ResponseFactory):
     def __init__(
         self,
         httpx_response: httpx.Response = None,
@@ -21,12 +18,8 @@ class ResponseFactory(object):
     ):
         if not httpx_response and not sse:
             raise ResponseFactoryException("httpx_response and sse params required")
-        if httpx_response and not httpx_request:
-            self.httpx_request = httpx_response.request
-        else:
-            self.httpx_request = httpx_request
+        super().__init__(httpx_response, httpx_request)
         self.sse = sse
-        self.httpx_response = httpx_response
 
     def get_sse_status_code(self):
         return self.sse.json().get(
@@ -56,14 +49,6 @@ class ResponseFactory(object):
                     headers=self.httpx_response.headers
                     or getattr(self.sse, "headers", {}),
                 )
-            )
-
-    def _base_construct_from_httpx_response(self):
-        if self.httpx_response.status_code < 400:
-            return FlyMyAIResponse.from_httpx(self.httpx_response)
-        else:
-            raise BaseFlyMyAIException.from_response(
-                FlyMyAIResponse.from_httpx(self.httpx_response)
             )
 
     def construct(self):
