@@ -233,3 +233,77 @@ asyncio.run(main())
 # Continue with other operations while the model runs in the background
 ```
 
+
+## Asynchronous Prediction Tasks
+
+For long-running operations, FlyMyAI provides asynchronous prediction tasks. This allows you to submit a task and check its status later, which is useful for handling time-consuming predictions without blocking your application.
+
+### Using Synchronous Client
+
+```python
+from flymyai import client
+from flymyai.core.exceptions import (
+    RetryTimeoutExceededException,
+    FlyMyAIExceptionGroup,
+)
+
+# Initialize client
+fma_client = client(apikey="fly-secret-key")
+
+# Submit async prediction task
+prediction_task = fma_client.predict_async_task(
+    model="flymyai/flux-schnell",
+    payload={"prompt": "Funny Cat with Stupid Dog"}
+)
+
+try:
+    # Get result
+    result = prediction_task.result()
+
+    print(f"Prediction completed: {result.inference_responses}")
+except RetryTimeoutExceededException:
+    print("Prediction is taking longer than expected")
+except FlyMyAIExceptionGroup as e:
+    print(f"Prediction failed: {e}")
+```
+
+### Using Asynchronous Client
+
+```python
+import asyncio
+from flymyai import async_client
+from flymyai.core.exceptions import (
+    RetryTimeoutExceededException,
+    FlyMyAIExceptionGroup,
+)
+
+async def run_prediction():
+    # Initialize async client
+    fma_client = async_client(apikey="fly-secret-key")
+    
+    # Submit async prediction task
+    prediction_task = await fma_client.predict_async_task(
+        model="flymyai/flux-schnell",
+        payload={"prompt": "Funny Cat with Stupid Dog"}
+)
+    
+    try:
+        # Await result with default timeout
+        result = await prediction_task.result()
+        print(f"Prediction completed: {result.inference_responses}")
+        
+        # Check response status
+        all_successful = all(
+            resp.infer_details["status"] == 200 
+            for resp in result.inference_responses
+        )
+        print(f"All predictions successful: {all_successful}")
+        
+    except RetryTimeoutExceededException:
+        print("Prediction is taking longer than expected")
+    except FlyMyAIExceptionGroup as e:
+        print(f"Prediction failed: {e}")
+
+# Run async function
+asyncio.run(run_prediction())
+```
