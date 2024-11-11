@@ -6,14 +6,26 @@ from typing import (
 )
 
 import httpx
+import pydantic
 
-from flymyai.core._response_factory import ResponseFactory
+from flymyai.core.response_factory.async_task_result_factory import (
+    AsyncTaskResultFactory,
+)
+from flymyai.core.response_factory.plain_inference_response_factory import (
+    SSEInferenceResponseFactory,
+)
 from flymyai.core.authorizations import APIKeyClientInfo
-from flymyai.core.exceptions import ImproperlyConfiguredClientException
+from flymyai.core.exceptions import (
+    ImproperlyConfiguredClientException,
+    BaseFlyMyAIException,
+    FlyMyAIAsyncTaskException,
+)
 from flymyai.core.models.successful_responses import (
     PredictionResponse,
     OpenAPISchemaResponse,
     PredictionPartial,
+    AsyncPredictionTask,
+    AsyncPredictionResponseList,
 )
 from flymyai.multipart import MultipartPayload
 
@@ -24,7 +36,12 @@ _PossibleClients = TypeVar(
 )
 
 
-_predict_timeout = httpx.Timeout(None, connect=10)
+_predict_timeout = httpx.Timeout(
+    connect=int(os.getenv("FMA_CONNECT_TIMEOUT", 999999)),
+    read=int(os.getenv("FMA_READ_TIMEOUT", 999999)),
+    write=int(os.getenv("FMA_WRITE_TIMEOUT", 999999)),
+    pool=int(os.getenv("FMA_POOL_TIMEOUT", 999999)),
+)
 
 
 class BaseClient(Generic[_PossibleClients]):
@@ -69,6 +86,55 @@ class BaseClient(Generic[_PossibleClients]):
     def predict(
         self, payload: dict, model: Optional[str] = None, max_retries=None
     ) -> PredictionResponse: ...
+
+    @overload
+    async def predict_async_task(
+        self, payload: dict, model: Optional[str] = None, max_retries=None
+    ) -> AsyncPredictionTask: ...
+
+    @overload
+    def predict_async_task(
+        self, payload: dict, model: Optional[str] = None, max_retries=None
+    ) -> AsyncPredictionTask: ...
+
+    def predict_async_task(
+        self, payload: dict, model: Optional[str] = None, max_retries=None
+    ) -> AsyncPredictionTask: ...
+
+    @classmethod
+    def _construct_task_result(cls, response):
+        try:
+            validated = AsyncTaskResultFactory(httpx_response=response).construct()
+        except BaseFlyMyAIException as e:
+            raise FlyMyAIAsyncTaskException.from_base_exception(e)
+        try:
+            return AsyncPredictionResponseList.from_response(validated, status=200)
+        except pydantic.ValidationError as e:
+            raise AsyncPredictionResponseList.convert_error(e) from e
+
+    def _async_prediction_task_construct(
+        self, response: httpx.Response, client_info: APIKeyClientInfo
+    ) -> AsyncPredictionTask:
+        async_prediction_task = AsyncPredictionTask[self.__class__].model_validate_json(
+            json_data=response.content
+        )
+        async_prediction_task.client_info = client_info
+        async_prediction_task.set_client(self)
+        return async_prediction_task
+
+    @overload
+    async def prediction_task_result(
+        self, prediction_task: AsyncPredictionTask, timeout: Optional[float] = None
+    ): ...
+
+    @overload
+    def prediction_task_result(
+        self, prediction_task: AsyncPredictionTask, timeout: Optional[float] = None
+    ): ...
+
+    def prediction_task_result(
+        self, prediction_task: AsyncPredictionTask, timeout: Optional[float] = None
+    ): ...
 
     @overload
     async def openapi_schema(
@@ -123,7 +189,7 @@ class BaseClient(Generic[_PossibleClients]):
     @staticmethod
     def _wrap_request(request_callback: Callable):
         response = request_callback()
-        return ResponseFactory(httpx_response=response).construct()
+        return SSEInferenceResponseFactory(httpx_response=response).construct()
 
     def is_closed(self) -> bool:
         return self._client.is_closed

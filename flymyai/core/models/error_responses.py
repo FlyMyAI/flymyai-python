@@ -1,11 +1,14 @@
 import dataclasses
 import json
+from typing import Union
 
 import httpx
 
+from flymyai.core.models.base import ResponseLike
+
 
 @dataclasses.dataclass
-class Base4xxResponse:
+class Base4xxResponse(ResponseLike):
     """
     Base class for all 4xx
     """
@@ -16,14 +19,8 @@ class Base4xxResponse:
 
     requires_retry: bool = False
 
-    def to_msg(self):
-        return f"""
-            BAD REQUEST DETECTED ({self.status_code}):
-            REQUEST URL: {self.url};
-        """
-
     @classmethod
-    def from_response(cls, response: httpx.Response):
+    def from_response(cls, response: Union[httpx.Response, ResponseLike]):
         return cls(response.status_code, response.url, response.content)
 
 
@@ -84,3 +81,8 @@ class FlyMyAI422Response(Base4xxResponse):
         if detail := jsoned.get("detail"):
             msg += f"Details: {detail}"
         return msg
+
+
+@dataclasses.dataclass
+class FlyMyAI425Response(Base4xxResponse):
+    requires_retry: bool = True

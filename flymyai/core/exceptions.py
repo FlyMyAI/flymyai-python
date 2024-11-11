@@ -1,14 +1,19 @@
 import datetime
-from typing import List, Type
+from typing import List, Union
 
 from ._response import FlyMyAIResponse
+from .models.base import ResponseLike
 from .models.error_responses import (
     FlyMyAI401Response,
     FlyMyAI422Response,
     Base4xxResponse,
     FlyMyAI400Response,
     FlyMyAI421Response,
+    FlyMyAI425Response,
 )
+
+
+class RetryTimeoutExceededException(TimeoutError): ...
 
 
 class ImproperlyConfiguredClientException(Exception): ...
@@ -17,7 +22,7 @@ class ImproperlyConfiguredClientException(Exception): ...
 class BaseFlyMyAIException(Exception):
     msg: str
     requires_retry: bool
-    _response: FlyMyAIResponse
+    _response: Union[FlyMyAIResponse, ResponseLike]
 
     def __init__(self, msg, requires_retry=False, response=None):
         self.msg = msg
@@ -29,37 +34,46 @@ class BaseFlyMyAIException(Exception):
         return self._response
 
     @classmethod
-    def from_5xx(cls, response: FlyMyAIResponse):
+    def internal_error_mapping(cls):
+        return {
+            500: lambda msg, response: cls(msg, False, response=response),
+            502: lambda msg, response: cls(msg, True, response=response),
+            503: lambda msg, response: cls(msg, False, response=response),
+            504: lambda msg, response: cls(msg, True, response=response),
+            524: lambda msg, response: cls(msg, True, response=response),
+            # unknown issue, probably detected on the client side
+            599: lambda msg, response: cls(msg, False, response=response),
+            # broker issues, they are not billed at all
+            5000: lambda msg, response: cls(msg, False, response=response),
+            5320: lambda msg, response: cls(msg, True, response=response),
+        }
+
+    @classmethod
+    def from_5xx(cls, response: Union[FlyMyAIResponse, ResponseLike]):
         msg = f"""
                 INTERNAL SERVER ERROR ({response.status_code}):
                 REQUEST URL: {response.url};
                 Content [0:250]: {response.content.decode()[0:250]}
                 Timestamp [UTC]: {datetime.datetime.utcnow()}
         """
-        internal_error_mapping = {
-            500: lambda: cls(msg, False, response=response),
-            502: lambda: cls(msg, True, response=response),
-            503: lambda: cls(msg, False, response=response),
-            504: lambda: cls(msg, True, response=response),
-            524: lambda: cls(msg, True, response=response),
-            # unknown issue, probably detected on the client side
-            599: lambda: cls(msg, False, response=response),
-            # broker issues, they are not billed at all
-            5000: lambda: cls(msg, False, response=response),
-            5320: lambda: cls(msg, True, response=response),
-        }
-        return internal_error_mapping.get(
-            response.status_code, lambda: cls(msg, False)
-        )()
+        return cls.internal_error_mapping().get(
+            response.status_code, lambda m, _: cls(msg, False)
+        )(msg, response)
 
     @classmethod
-    def from_4xx(cls, response: FlyMyAIResponse):
-        response_validation_templates = {
+    def client_error_mapping(cls):
+        return {
             400: FlyMyAI400Response,
             401: FlyMyAI401Response,
             421: FlyMyAI421Response,
             422: FlyMyAI422Response,
+            # requested too early
+            425: FlyMyAI425Response,
         }
+
+    @classmethod
+    def from_4xx(cls, response: Union[FlyMyAIResponse, ResponseLike]):
+        response_validation_templates = cls.client_error_mapping()
         response_4xx = response_validation_templates.get(
             response.status_code, Base4xxResponse
         ).from_response(response)
@@ -70,7 +84,7 @@ class BaseFlyMyAIException(Exception):
         )
 
     @classmethod
-    def from_response(cls, response: FlyMyAIResponse):
+    def from_response(cls, response: Union[FlyMyAIResponse, ResponseLike]):
         if 400 <= response.status_code < 500:
             return cls.from_4xx(response)
         if response.status_code >= 500:
@@ -86,11 +100,14 @@ class FlyMyAIPredictException(BaseFlyMyAIException):
         return cls(exception.msg, exception.requires_retry, exception.response)
 
 
+class FlyMyAIAsyncTaskException(FlyMyAIPredictException): ...
+
+
 class FlyMyAIOpenAPIException(BaseFlyMyAIException): ...
 
 
 class FlyMyAIExceptionGroup(Exception):
-    def __init__(self, errors: List[BaseFlyMyAIException], **kwargs):
+    def __init__(self, errors: List[Exception], **kwargs):
         self.errors = errors
         exceptions_message = ";".join([str(err) for err in errors])
         self.message = f"FlyMyAI exception history: {exceptions_message}"
@@ -98,3 +115,13 @@ class FlyMyAIExceptionGroup(Exception):
 
     def __str__(self):
         return self.message
+
+    def fma_errors(self):
+        return list(
+            filter(lambda err: isinstance(err, BaseFlyMyAIException), self.errors)
+        )
+
+    def non_fma_errors(self):
+        return list(
+            filter(lambda err: not isinstance(err, BaseFlyMyAIException), self.errors)
+        )

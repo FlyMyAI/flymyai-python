@@ -1,0 +1,15 @@
+{
+  "client_auth_fixture": {
+    "model": "flymyai/perf_cpn-1",
+    "apikey_environ": "FMA_APIKEY"
+  },
+  "address_fixture": "https://dev-api.flymy.ai",
+  "fake_payload_fixture": {
+    "prompt": "2w432442"
+  },
+  "binary_file_paths": {},
+  "broken_payload_fixture": {
+    "prompt": "2w432442",
+    "delay": -1
+  }
+}

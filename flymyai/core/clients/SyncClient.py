@@ -3,19 +3,23 @@ from typing import Callable, Iterator, Optional
 
 import httpx
 
-from flymyai.core._response_factory import ResponseFactory
 from flymyai.core._streaming import SSEDecoder
 from flymyai.core.authorizations import APIKeyClientInfo
-from flymyai.core.clients.base_client import BaseClient
+from flymyai.core.clients.base_client import BaseClient, _predict_timeout
 from flymyai.core.exceptions import (
     BaseFlyMyAIException,
     FlyMyAIOpenAPIException,
     FlyMyAIPredictException,
     FlyMyAIExceptionGroup,
+    FlyMyAIAsyncTaskException,
 )
 from flymyai.core.models.successful_responses import (
     PredictionResponse,
     OpenAPISchemaResponse,
+    AsyncPredictionTask,
+)
+from flymyai.core.response_factory.plain_inference_response_factory import (
+    SSEInferenceResponseFactory,
 )
 from flymyai.core.stream_iterators.PredictionStream import PredictionStream
 from flymyai.multipart import MultipartPayload
@@ -28,6 +32,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             http2=True,
             headers=self.client_info.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://api.flymy.ai/"),
+            timeout=_predict_timeout,
         )
 
     def __enter__(self):
@@ -45,7 +50,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         """
         with stream_iter_func() as stream:
             stream: httpx.Response
-            response = ResponseFactory(
+            response = SSEInferenceResponseFactory(
                 sse=next(SSEDecoder().iter(stream.iter_lines())),
                 httpx_request=stream.request,
                 httpx_response=stream,
@@ -85,6 +90,50 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         )
         return PredictionResponse.from_response(response, exc_history=history)
 
+    def predict_async_task(
+        self, payload: dict, model: Optional[str] = None, max_retries=None
+    ):
+        payload = MultipartPayload(input_data=payload)
+        client_info = self.amend_client_info(model)
+        try:
+            _, response = retryable_callback(
+                lambda: self._client.post(
+                    client_info.prediction_async_path, **payload.serialize()
+                ),
+                max_retries or self.max_retries,
+                FlyMyAIAsyncTaskException,
+                FlyMyAIExceptionGroup,
+            )
+            response = SSEInferenceResponseFactory(response).construct()
+            return self._async_prediction_task_construct(response, client_info)
+        except BaseFlyMyAIException as e:
+            raise FlyMyAIAsyncTaskException.from_base_exception(e)
+
+    def prediction_task_result(
+        self, prediction_task: AsyncPredictionTask, timeout: Optional[float] = None
+    ):
+        prediction_id = prediction_task.prediction_id
+
+        def get_res():
+            resp = self._client.get(
+                url=(
+                    prediction_task.client_info or self.client_info
+                ).prediction_result_path,
+                params={"request_id": prediction_id},
+            )
+            return self._construct_task_result(resp)
+
+        _, res = retryable_callback(
+            lambda: get_res(),
+            None,
+            FlyMyAIAsyncTaskException,
+            FlyMyAIExceptionGroup,
+            timeout,
+            0.5,
+        )
+
+        return res
+
     def _stream(self, client_info: APIKeyClientInfo, payload: dict):
         payload = MultipartPayload(payload)
         response_iterator = self._stream_iterator(
@@ -94,7 +143,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         with response_iterator as sse_stream:
             for sse_partial in decoder.iter(sse_stream.iter_lines()):
                 try:
-                    response = ResponseFactory(
+                    response = SSEInferenceResponseFactory(
                         sse=sse_partial,
                         httpx_request=sse_stream.request,
                         httpx_response=sse_stream,
@@ -138,7 +187,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             url=full_client_info.prediction_cancel_path,
             json={"infer_id": prediction_id},
         )
-        return ResponseFactory(
+        return SSEInferenceResponseFactory(
             httpx_response=response, httpx_request=response.request
         ).construct()
 
