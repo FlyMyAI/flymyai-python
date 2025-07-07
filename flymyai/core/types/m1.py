@@ -4,8 +4,8 @@ from typing import Optional
 
 
 class M1Role(Enum):
-    user = 'user'
-    assistant = 'assistant'
+    user = "user"
+    assistant = "assistant"
 
 
 @dataclass

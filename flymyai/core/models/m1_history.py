@@ -10,7 +10,7 @@ class M1History:
 
     def __init__(self):
         self._records = []
-    
+
     def add(self, M1Record):
         self._records.append(M1Record)
 

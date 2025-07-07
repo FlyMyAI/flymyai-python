@@ -3,7 +3,6 @@ import httpx
 from flymyai.core.client import FlyMyAI, AsyncFlyMyAI, FlyMyAIM1, AsyncFlymyAIM1
 from flymyai.core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
 
-
 __all__ = [
     "run",
     "httpx",

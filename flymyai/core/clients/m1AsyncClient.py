@@ -23,24 +23,23 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
             timeout=_predict_timeout,
         )
 
-    async def generate(self, prompt: str, image: Union[str, Path, None] = None) -> FlyMyAIM1Response:
+    async def generate(
+        self, prompt: str, image: Union[str, Path, None] = None
+    ) -> FlyMyAIM1Response:
         """Submit a chat prompt with optional image input and return the final generation result.
-        
+
         :param prompt: User input string to send to the model.
         :param image: Local image file (as `Path`) or remote image URL (as `str`).
         :return: FlyMyAIM1Response with generated content and metadata.
         """
         await self._process_image(image)
-        self._m1_history.add(M1Record(
-            role=M1Role.user,
-            content=prompt
-        ))
+        self._m1_history.add(M1Record(role=M1Role.user, content=prompt))
         generation_task = await self.generation_task()
         result = await self.generation_task_result(generation_task)
         return result
 
     async def _process_image(self, image: Optional[Union[str, Path]]) -> Optional[str]:
-        if image is None: 
+        if image is None:
             return
 
         image_url = None
@@ -59,28 +58,35 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
             "image_url": self._image,
         }
         response = await self._client.post(
-            self._generation_path,
-            json=payload,
-            headers=self._headers
+            self._generation_path, json=payload, headers=self._headers
         )
         response.raise_for_status()
         response_data = response.json()
         return M1GenerationTask(request_id=response_data["request_id"])
 
-    async def generation_task_result(self, generation_task: M1GenerationTask) -> FlyMyAIM1Response:
+    async def generation_task_result(
+        self, generation_task: M1GenerationTask
+    ) -> FlyMyAIM1Response:
         while True:
-            response = await self._client.get(self._populate_result_path(generation_task))
+            response = await self._client.get(
+                self._populate_result_path(generation_task)
+            )
             response.raise_for_status()
             response_data = response.json()
 
             if response_data.get("success"):
-                self._m1_history.add(M1Record(
-                    role=M1Role.assistant,
-                    content=response_data.get("data", {}).get("text", "")
-                ))
+                self._m1_history.add(
+                    M1Record(
+                        role=M1Role.assistant,
+                        content=response_data.get("data", {}).get("text", ""),
+                    )
+                )
                 if file_url := response_data.get("data", {}).get("file_url", ""):
                     if not file_url.endswith(".mp4"):
-                        self._image = os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/") + file_url
+                        self._image = (
+                            os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/")
+                            + file_url
+                        )
                 return FlyMyAIM1Response.from_httpx(response)
 
             if response_data.get("error") == "Still processing":
@@ -103,4 +109,7 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
             response = await self._client.post(self._image_upload_path, files=files)
         response.raise_for_status()
         response_data = response.json()
-        return os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/") + response_data["url"]
+        return (
+            os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/")
+            + response_data["url"]
+        )

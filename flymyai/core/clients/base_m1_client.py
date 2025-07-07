@@ -38,43 +38,53 @@ class BaseM1Client(Generic[_PossibleClients]):
         self._m1_history = M1History()
 
     @overload
-    def generate(self, prompt: str, image: Optional[Union[str, Path]] = None) -> FlyMyAIM1Response: ...
+    def generate(
+        self, prompt: str, image: Optional[Union[str, Path]] = None
+    ) -> FlyMyAIM1Response: ...
 
     @overload
-    def generation_task(self, prompt: str, image: Optional[Union[str, Path]] = None) -> M1GenerationTask: ...
+    def generation_task(
+        self, prompt: str, image: Optional[Union[str, Path]] = None
+    ) -> M1GenerationTask: ...
 
     @overload
-    def generation_task_result(self, generation_task: M1GenerationTask) -> FlyMyAIM1Response: ...
+    def generation_task_result(
+        self, generation_task: M1GenerationTask
+    ) -> FlyMyAIM1Response: ...
 
     @overload
     def upload_image(self, image: Union[str, Path]): ...
 
     @overload
-    async def generate(self, prompt: str, image: Optional[Union[str, Path]] = None) -> FlyMyAIM1Response: ...
+    async def generate(
+        self, prompt: str, image: Optional[Union[str, Path]] = None
+    ) -> FlyMyAIM1Response: ...
 
     @overload
-    async def generation_task(self, prompt: str, image: Optional[Union[str, Path]] = None) -> M1GenerationTask: ...
+    async def generation_task(
+        self, prompt: str, image: Optional[Union[str, Path]] = None
+    ) -> M1GenerationTask: ...
 
     @overload
-    async def generation_task_result(self, generation_task: M1GenerationTask) -> FlyMyAIM1Response: ...
+    async def generation_task_result(
+        self, generation_task: M1GenerationTask
+    ) -> FlyMyAIM1Response: ...
 
     @overload
     async def upload_image(self, image: Union[str, Path]): ...
 
     @property
     def _headers(self):
-        return {
-            "X-API-KEY": self._apikey
-        }
+        return {"X-API-KEY": self._apikey}
 
     @property
     def _generation_path(self):
         return "/chat"
-    
+
     @property
     def _result_path(self):
         return "/chat-result/"
-    
+
     def _populate_result_path(self, generation_task: M1GenerationTask):
         return "".join([self._result_path, generation_task.request_id])
 

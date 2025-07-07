@@ -34,13 +34,20 @@ class ChatResponseData:
     file_url: typing.Optional[str]
 
     @classmethod
-    def from_dict(cls, data: typing.Optional[dict]) -> typing.Optional["ChatResponseData"]:
+    def from_dict(
+        cls, data: typing.Optional[dict]
+    ) -> typing.Optional["ChatResponseData"]:
         if not data:
             return None
         return cls(
             text=data.get("text"),
             tool_used=data.get("tool_used"),
-            file_url="".join([os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/"), data.get("file_url")]),
+            file_url="".join(
+                [
+                    os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/"),
+                    data.get("file_url"),
+                ]
+            ),
         )
 
 

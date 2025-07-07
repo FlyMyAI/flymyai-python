@@ -13,7 +13,6 @@ from flymyai.core.models.successful_responses import (
 from flymyai.core.stream_iterators.exceptions import StreamCancellationException
 from flymyai.core.types.event_types import EventType
 
-
 _AsyncEventCallbackType = TypeVar(
     "_AsyncEventCallbackType",
     bound=Union[
