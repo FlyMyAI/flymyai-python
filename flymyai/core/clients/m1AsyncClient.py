@@ -23,6 +23,13 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
             timeout=_predict_timeout,
         )
 
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        if hasattr(self, "_client"):
+            await self._client.aclose()
+
     async def generate(
         self, prompt: str, image: Union[str, Path, None] = None
     ) -> FlyMyAIM1Response:

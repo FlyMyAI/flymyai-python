@@ -47,7 +47,7 @@ class ChatResponseData:
                     os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/"),
                     data.get("file_url"),
                 ]
-            ),
+            ) if data.get("file_url") else None,
         )
 
 
