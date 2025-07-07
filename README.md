@@ -323,3 +323,61 @@ client = m1_client(apikey="fly-secret-key")
 result = client.generate("An Iron Man")
 print(result.data.text, result.data.file_url)
 ```
+
+FlymyAI M1 client also stores request history for later generation context:
+
+```python
+from flymyai import m1_client
+
+client = m1_client(apikey="fly-secret-key")
+
+result = client.generate("An Iron Man")
+print(result.data.text, result.data.file_url)
+
+result = client.generate("Add him Captain America's shield")
+print(result.data.text, result.data.file_url)
+```
+
+#### Passing image
+
+```python
+from pathlib import Path
+from flymyai import m1_client
+
+client = m1_client(apikey="fly-secret-key")
+result = client.generate("An Iron Man", image=Path("./image.png"))
+print(result.data.text, result.data.file_url)
+```
+
+### Using Asynchronous Client
+
+```python
+import asyncio
+from flymyai import async_m1_client
+
+
+async def main():
+    client = async_m1_client(apikey="fly-secret-key")
+    result = await client.generate("An Iron Man")
+    print(result.data.text, result.data.file_url)
+
+
+asyncio.run(main())
+```
+
+#### Passing image
+
+```python
+import asyncio
+from pathlib import Path
+from flymyai import async_m1_client
+
+
+async def main():
+    client = async_m1_client(apikey="fly-secret-key")
+    result = await client.generate("An Iron Man", image=Path("./image.png"))
+    print(result.data.text, result.data.file_url)
+
+
+asyncio.run(main())
+```

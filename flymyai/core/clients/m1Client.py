@@ -60,13 +60,11 @@ class BaseM1SyncClient(BaseM1Client[httpx.Client]):
             "chat_history": self._m1_history.serialize(),
             "image_url": self._image,
         }
-        print(f"{payload = }")
         response = self._client.post(
             self._generation_path, json=payload, headers=self._headers
         )
         response.raise_for_status()
         response_data = response.json()
-        print(f"{response_data = }; {response = }")
         return M1GenerationTask(request_id=response_data["request_id"])
 
     def generation_task_result(
@@ -78,7 +76,6 @@ class BaseM1SyncClient(BaseM1Client[httpx.Client]):
             response_data = response.json()
 
             if response_data.get("success"):
-                print(response_data)
                 self._m1_history.add(
                     M1Record(
                         role=M1Role.assistant,
