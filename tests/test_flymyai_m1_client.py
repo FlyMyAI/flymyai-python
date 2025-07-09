@@ -25,6 +25,7 @@ def test_prompt():
 def dummy_image_path():
     return pathlib.Path(__file__).parent / "fixtures" / "Untitled.png"
 
+
 @pytest.fixture
 def apikey_fixture():
     auth_data = factory("client_auth_fixture")
@@ -55,7 +56,9 @@ def test_generate_text_only(httpx_mock, m1_env_fixture, test_prompt, apikey_fixt
     assert client._m1_history._records[1].role == M1Role.assistant
 
 
-def test_generate_with_image(httpx_mock, m1_env_fixture, test_prompt, dummy_image_path, apikey_fixture):
+def test_generate_with_image(
+    httpx_mock, m1_env_fixture, test_prompt, dummy_image_path, apikey_fixture
+):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
     # Mock upload image
@@ -101,7 +104,9 @@ def test_image_upload(httpx_mock, m1_env_fixture, dummy_image_path, apikey_fixtu
 
 
 @pytest.mark.asyncio
-async def test_async_generate_text_only(httpx_mock, m1_env_fixture, test_prompt, apikey_fixture):
+async def test_async_generate_text_only(
+    httpx_mock, m1_env_fixture, test_prompt, apikey_fixture
+):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
     httpx_mock.add_response(
@@ -127,7 +132,9 @@ async def test_async_generate_text_only(httpx_mock, m1_env_fixture, test_prompt,
 
 
 @pytest.mark.asyncio
-async def test_async_generate_with_image(httpx_mock, m1_env_fixture, test_prompt, dummy_image_path, apikey_fixture):
+async def test_async_generate_with_image(
+    httpx_mock, m1_env_fixture, test_prompt, dummy_image_path, apikey_fixture
+):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
     httpx_mock.add_response(
@@ -156,7 +163,9 @@ async def test_async_generate_with_image(httpx_mock, m1_env_fixture, test_prompt
 
 
 @pytest.mark.asyncio
-async def test_async_image_upload(httpx_mock, m1_env_fixture, dummy_image_path, apikey_fixture):
+async def test_async_image_upload(
+    httpx_mock, m1_env_fixture, dummy_image_path, apikey_fixture
+):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
     httpx_mock.add_response(
