@@ -1,11 +1,11 @@
 # FlyMy.AI
+
 <p align="center">
   <img src="https://telegra.ph/file/d76588fc58b3445be4291.png" alt="Generated with FlyMy.AI in 🚀 70ms" width="500" />
   </br>Generated with FlyMy.AI  <b>in 🚀 70ms </b>
 </p>
 
 Welcome to FlyMy.AI inference platform. Our goal is to provide the fastest and most affordable deployment solutions for neural networks and AI applications.
-
 
 - **Fast Inference**: Experience the fastest Stable Diffusion inference globally.
 - **Scalability**: Autoscaling to millions of users per second.
@@ -16,11 +16,9 @@ Welcome to FlyMy.AI inference platform. Our goal is to provide the fastest and m
 For more information, visit our website: [FlyMy.AI](https://flymy.ai)
 Or connect with us and other users on Discord: [Join Discord](https://discord.com/invite/t6hPBpSebw)
 
-
 ## Getting Started
 
 This is a Python client for [FlyMyAI](https://flymy.ai). It allows you to easily run models and get predictions from your Python code in sync and async mode.
-
 
 ## Requirements
 
@@ -35,12 +33,15 @@ pip install flymyai
 ```
 
 ## Authentication
+
 Before using the client, you need to have your API key, username, and project name. In order to get credentials, you have to sign up on flymy.ai and get your personal data on [the profile](https://app.flymy.ai/profile).
 
 ## Basic Usage
+
 Here's a simple example of how to use the FlyMyAI client:
 
 #### BERT Sentiment analysis
+
 ```python
 import flymyai
 
@@ -52,11 +53,12 @@ response = flymyai.run(
 print(response.output_data["logits"][0])
 ```
 
-
 ## Sync Streams
+
 For llms you should use stream method
 
 #### llama 3.1 8b
+
 ```python
 from flymyai import client, FlyMyAIPredictException
 
@@ -87,6 +89,7 @@ finally:
 ```
 
 ## Async Streams
+
 For llms you should use stream method
 
 #### Stable Code Instruct 3b
@@ -126,10 +129,10 @@ async def run_stable_code():
 asyncio.run(run_stable_code())
 ```
 
-
-
 ## File Inputs
+
 #### ResNet image classification
+
 You can pass file inputs to models using file paths:
 
 ```python
@@ -145,9 +148,10 @@ response = flymyai.run(
 print(response.output_data["495"])
 ```
 
-
 ## File Response Handling
+
 Files received from the neural network are always encoded in base64 format. To process these files, you need to decode them first. Here's an example of how to handle an image file:
+
 #### StableDiffusion Turbo image generation in ~50ms 🚀
 
 ```python
@@ -167,8 +171,8 @@ with open("generated_image.jpg", "wb") as file:
     file.write(image_data)
 ```
 
-
 ## Asynchronous Requests
+
 FlyMyAI supports asynchronous requests for improved performance. Here's how to use it:
 
 ```python
@@ -207,6 +211,7 @@ asyncio.run(main())
 ```
 
 ## Running Models in the Background
+
 To run a model in the background, simply use the async_run() method:
 
 ```python
@@ -232,7 +237,6 @@ async def main():
 asyncio.run(main())
 # Continue with other operations while the model runs in the background
 ```
-
 
 ## Asynchronous Prediction Tasks
 
@@ -280,25 +284,25 @@ from flymyai.core.exceptions import (
 async def run_prediction():
     # Initialize async client
     fma_client = async_client(apikey="fly-secret-key")
-    
+
     # Submit async prediction task
     prediction_task = await fma_client.predict_async_task(
         model="flymyai/flux-schnell",
         payload={"prompt": "Funny Cat with Stupid Dog"}
 )
-    
+
     try:
         # Await result with default timeout
         result = await prediction_task.result()
         print(f"Prediction completed: {result.inference_responses}")
-        
+
         # Check response status
         all_successful = all(
-            resp.infer_details["status"] == 200 
+            resp.infer_details["status"] == 200
             for resp in result.inference_responses
         )
         print(f"All predictions successful: {all_successful}")
-        
+
     except RetryTimeoutExceededException:
         print("Prediction is taking longer than expected")
     except FlyMyAIExceptionGroup as e:
@@ -306,4 +310,74 @@ async def run_prediction():
 
 # Run async function
 asyncio.run(run_prediction())
+```
+
+## M1 Agent Usage
+
+### Using Synchronous Client
+
+```python
+from flymyai import m1_client
+
+client = m1_client(apikey="fly-secret-key")
+result = client.generate("An Iron Man")
+print(result.data.text, result.data.file_url)
+```
+
+FlymyAI M1 client also stores request history for later generation context:
+
+```python
+from flymyai import m1_client
+
+client = m1_client(apikey="fly-secret-key")
+
+result = client.generate("An Iron Man")
+print(result.data.text, result.data.file_url)
+
+result = client.generate("Add him Captain America's shield")
+print(result.data.text, result.data.file_url)
+```
+
+#### Passing image
+
+```python
+from pathlib import Path
+from flymyai import m1_client
+
+client = m1_client(apikey="fly-secret-key")
+result = client.generate("An Iron Man", image=Path("./image.png"))
+print(result.data.text, result.data.file_url)
+```
+
+### Using Asynchronous Client
+
+```python
+import asyncio
+from flymyai import async_m1_client
+
+
+async def main():
+    client = async_m1_client(apikey="fly-secret-key")
+    result = await client.generate("An Iron Man")
+    print(result.data.text, result.data.file_url)
+
+
+asyncio.run(main())
+```
+
+#### Passing image
+
+```python
+import asyncio
+from pathlib import Path
+from flymyai import async_m1_client
+
+
+async def main():
+    client = async_m1_client(apikey="fly-secret-key")
+    result = await client.generate("An Iron Man", image=Path("./image.png"))
+    print(result.data.text, result.data.file_url)
+
+
+asyncio.run(main())
 ```

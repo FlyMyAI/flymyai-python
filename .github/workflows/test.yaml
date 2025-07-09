@@ -165,3 +165,26 @@ jobs:
         env:
           FMA_APIKEY: ${{ secrets.FMA_APIKEY }}
         run: pytest tests/test_async_inference.py --tb=short
+
+  test_m1_clients:
+    needs:
+      - lint
+    runs-on: ubuntu-latest
+
+    container:
+      image: python:3.8
+
+    steps:
+      - name: Check out git repo
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+
+      - name: Fix
+        run: git config --global --add safe.directory '*'
+
+      - name: Install dependencies
+        run: pip3 install poetry pytest-asyncio && poetry config virtualenvs.create false && poetry install
+
+      - name: Test
+        run: pytest tests/test_flymyai_m1_client.py --tb=short

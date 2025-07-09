@@ -1,0 +1,6 @@
+{
+	"m1_env_fixture": "https://mock.flymy.ai/",
+	"client_auth_fixture": {
+		"apikey": "test-api-key-123"
+	}
+}

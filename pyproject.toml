@@ -20,6 +20,7 @@ httpx = ">=0.26.0"
 [tool.poetry.group.dev.dependencies]
 tomli = ">=2.0.1"
 pytest-asyncio = ">=0.23.7"
+respx = "^0.22.0"
 
 [build-system]
 requires = ["poetry-core"]
