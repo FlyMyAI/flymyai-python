@@ -2,11 +2,12 @@ import os
 import pathlib
 
 import pytest
+import respx
 import httpx
 from flymyai import m1_client, async_m1_client
 from flymyai.core.types.m1 import M1Role
-
 from .FixtureFactory import FixtureFactory
+from httpx import Response
 
 factory = FixtureFactory(__file__)
 
@@ -32,19 +33,17 @@ def apikey_fixture():
     return auth_data.get("apikey", "dummy-test-apikey")
 
 
-def test_generate_text_only(httpx_mock, m1_env_fixture, test_prompt, apikey_fixture):
+@respx.mock
+def test_generate_text_only(m1_env_fixture, test_prompt, apikey_fixture):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{base_url}chat",
-        json={"request_id": "abc123"},
+    respx.post(f"{base_url}chat").mock(
+        return_value=Response(200, json={"request_id": "abc123"})
     )
-
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{base_url}chat-result/abc123",
-        json={"success": True, "data": {"text": "This is a response"}},
+    respx.get(f"{base_url}chat-result/abc123").mock(
+        return_value=Response(
+            200, json={"success": True, "data": {"text": "This is a response"}}
+        )
     )
 
     client = m1_client(apikey_fixture)
@@ -56,30 +55,22 @@ def test_generate_text_only(httpx_mock, m1_env_fixture, test_prompt, apikey_fixt
     assert client._m1_history._records[1].role == M1Role.assistant
 
 
+@respx.mock
 def test_generate_with_image(
-    httpx_mock, m1_env_fixture, test_prompt, dummy_image_path, apikey_fixture
+    m1_env_fixture, test_prompt, dummy_image_path, apikey_fixture
 ):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
-    # Mock upload image
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{base_url}upload-image",
-        json={"url": "/static/images/xyz.png"},
+    respx.post(f"{base_url}upload-image").mock(
+        return_value=Response(200, json={"url": "/static/images/xyz.png"})
     )
-
-    # Mock generate
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{base_url}chat",
-        json={"request_id": "img123"},
+    respx.post(f"{base_url}chat").mock(
+        return_value=Response(200, json={"request_id": "img123"})
     )
-
-    # Mock result polling
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{base_url}chat-result/img123",
-        json={"success": True, "data": {"text": "Image-based response"}},
+    respx.get(f"{base_url}chat-result/img123").mock(
+        return_value=Response(
+            200, json={"success": True, "data": {"text": "Image-based response"}}
+        )
     )
 
     client = m1_client(apikey_fixture)
@@ -88,13 +79,12 @@ def test_generate_with_image(
     assert response.data.text == "Image-based response"
 
 
-def test_image_upload(httpx_mock, m1_env_fixture, dummy_image_path, apikey_fixture):
+@respx.mock
+def test_image_upload(m1_env_fixture, dummy_image_path, apikey_fixture):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{base_url}upload-image",
-        json={"url": "/uploads/fake123.png"},
+    respx.post(f"{base_url}upload-image").mock(
+        return_value=Response(200, json={"url": "/uploads/fake123.png"})
     )
 
     client = m1_client(apikey_fixture)
@@ -104,21 +94,17 @@ def test_image_upload(httpx_mock, m1_env_fixture, dummy_image_path, apikey_fixtu
 
 
 @pytest.mark.asyncio
-async def test_async_generate_text_only(
-    httpx_mock, m1_env_fixture, test_prompt, apikey_fixture
-):
+@respx.mock
+async def test_async_generate_text_only(m1_env_fixture, test_prompt, apikey_fixture):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{base_url}chat",
-        json={"request_id": "async123"},
+    respx.post(f"{base_url}chat").mock(
+        return_value=Response(200, json={"request_id": "async123"})
     )
-
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{base_url}chat-result/async123",
-        json={"success": True, "data": {"text": "Async response"}},
+    respx.get(f"{base_url}chat-result/async123").mock(
+        return_value=Response(
+            200, json={"success": True, "data": {"text": "Async response"}}
+        )
     )
 
     client = async_m1_client(apikey=apikey_fixture)
@@ -132,27 +118,22 @@ async def test_async_generate_text_only(
 
 
 @pytest.mark.asyncio
+@respx.mock
 async def test_async_generate_with_image(
-    httpx_mock, m1_env_fixture, test_prompt, dummy_image_path, apikey_fixture
+    m1_env_fixture, test_prompt, dummy_image_path, apikey_fixture
 ):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{base_url}upload-image",
-        json={"url": "/static/images/xyz.png"},
+    respx.post(f"{base_url}upload-image").mock(
+        return_value=Response(200, json={"url": "/static/images/xyz.png"})
     )
-
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{base_url}chat",
-        json={"request_id": "img123"},
+    respx.post(f"{base_url}chat").mock(
+        return_value=Response(200, json={"request_id": "img123"})
     )
-
-    httpx_mock.add_response(
-        method="GET",
-        url=f"{base_url}chat-result/img123",
-        json={"success": True, "data": {"text": "Image-based async response"}},
+    respx.get(f"{base_url}chat-result/img123").mock(
+        return_value=Response(
+            200, json={"success": True, "data": {"text": "Image-based async response"}}
+        )
     )
 
     client = async_m1_client(apikey=apikey_fixture)
@@ -163,15 +144,12 @@ async def test_async_generate_with_image(
 
 
 @pytest.mark.asyncio
-async def test_async_image_upload(
-    httpx_mock, m1_env_fixture, dummy_image_path, apikey_fixture
-):
+@respx.mock
+async def test_async_image_upload(m1_env_fixture, dummy_image_path, apikey_fixture):
     base_url = os.getenv("FLYMYAI_M1_DSN")
 
-    httpx_mock.add_response(
-        method="POST",
-        url=f"{base_url}upload-image",
-        json={"url": "/uploads/fake123.png"},
+    respx.post(f"{base_url}upload-image").mock(
+        return_value=Response(200, json={"url": "/uploads/fake123.png"})
     )
 
     client = async_m1_client(apikey=apikey_fixture)
