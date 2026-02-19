@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
 
     container:
-      image: python
+      image: python:3.13
 
     steps:
       - name: Check out git repo
@@ -25,9 +25,7 @@ jobs:
         run: git config --global --add safe.directory '*'
 
       - name: Install dependencies
-        env:
-          PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
-        run: pip3 install poetry flake8 black && poetry config virtualenvs.create ${USE_VENV} && poetry install
+        run: pip3 install poetry flake8 black && poetry config virtualenvs.create ${USE_VENV} && poetry install && pip install black
 #
 #      - name: flake8
 #        run: flake8 --max-line-length=120 .
