@@ -25,6 +25,8 @@ jobs:
         run: git config --global --add safe.directory '*'
 
       - name: Install dependencies
+        env:
+          PYO3_USE_ABI3_FORWARD_COMPATIBILITY: "1"
         run: pip3 install poetry flake8 black && poetry config virtualenvs.create ${USE_VENV} && poetry install
 #
 #      - name: flake8
