@@ -29,11 +29,26 @@ from flymyai.utils.utils import aretryable_callback
 class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
     def _construct_client(self):
         return httpx.AsyncClient(
-            http2=False,
+            http2=True,
             headers=self.client_info.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://api.flymy.ai/"),
             timeout=_predict_timeout,
         )
+
+    async def _reconnect_client(self):
+        if hasattr(self, "_client"):
+            try:
+                await self._client.aclose()
+            except Exception:
+                pass
+        self._client = self._construct_client()
+
+    async def _awith_reconnect(self, fn):
+        try:
+            return await fn()
+        except httpx.RemoteProtocolError:
+            await self._reconnect_client()
+            return await fn()
 
     async def __aenter__(self):
         return self
@@ -51,7 +66,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
                 openapi_schema - dict with openapi;
         """
         history, response = await aretryable_callback(
-            lambda: self._openapi_schema(),
+            lambda: self._openapi_schema(client_info=self.amend_client_info(model)),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
@@ -60,16 +75,18 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             exc_history=history, openapi_schema=response.json(), response=response
         )
 
-    def _openapi_schema(self, client_info: APIKeyClientInfo):
+    async def _openapi_schema(self, client_info: APIKeyClientInfo):
         """
         OpenAPI request for the current project, wrapped in executor-method (using HTTP/1)
         :return:
         """
         try:
-            return self._wrap_request(
-                lambda: self._client.get(
-                    client_info.openapi_schema_path,
-                    headers=client_info.authorization_headers,
+            return await self._awith_reconnect(
+                lambda: self._wrap_request(
+                    lambda: self._client.get(
+                        client_info.openapi_schema_path,
+                        headers=client_info.authorization_headers,
+                    )
                 )
             )
         except BaseFlyMyAIException as e:
@@ -85,9 +102,11 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             full_client_info = client_info
         else:
             full_client_info = self.amend_client_info(model)
-        response = await self._client.patch(
-            url=full_client_info.prediction_cancel_path,
-            json={"infer_id": prediction_id},
+        response = await self._awith_reconnect(
+            lambda: self._client.patch(
+                url=full_client_info.prediction_cancel_path,
+                json={"infer_id": prediction_id},
+            )
         )
         return SSEInferenceResponseFactory(
             httpx_response=response, httpx_request=response.request
@@ -112,19 +131,21 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             except BaseFlyMyAIException as e:
                 raise FlyMyAIPredictException.from_base_exception(e)
 
-    def _predict(self, client_info, payload: MultipartPayload):
+    async def _predict(self, client_info, payload: MultipartPayload):
         """
         Executes request and waits for sse data
         :param payload: model input data
         :return: FlyMyAIResponse or raise an exception
         """
-        return self._sse_instant(
-            lambda: self._client.stream(
-                method="post",
-                url=client_info.prediction_path,
-                timeout=_predict_timeout,
-                **payload.serialize(),
-                headers=client_info.authorization_headers,
+        return await self._awith_reconnect(
+            lambda: self._sse_instant(
+                lambda: self._client.stream(
+                    method="post",
+                    url=client_info.prediction_path,
+                    timeout=_predict_timeout,
+                    **payload.serialize(),
+                    headers=client_info.authorization_headers,
+                )
             )
         )
 
@@ -157,8 +178,10 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         client_info = self.amend_client_info(model)
         try:
             _, response = await aretryable_callback(
-                lambda: self._client.post(
-                    client_info.prediction_async_path, **payload.serialize()
+                lambda: self._awith_reconnect(
+                    lambda: self._client.post(
+                        client_info.prediction_async_path, **payload.serialize()
+                    )
                 ),
                 max_retries or self.max_retries,
                 FlyMyAIAsyncTaskException,
@@ -175,11 +198,13 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         prediction_id = prediction_task.prediction_id
 
         async def get_res():
-            data_resp = await self._client.get(
-                url=(
-                    prediction_task.client_info or self.client_info
-                ).prediction_result_path,
-                params={"request_id": prediction_id},
+            data_resp = await self._awith_reconnect(
+                lambda: self._client.get(
+                    url=(
+                        prediction_task.client_info or self.client_info
+                    ).prediction_result_path,
+                    params={"request_id": prediction_id},
+                )
             )
             return self._construct_task_result(data_resp)
 
@@ -195,21 +220,39 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
 
     async def _stream(self, client_info: APIKeyClientInfo, payload: dict):
         payload = MultipartPayload(payload)
-        stream_iterator = self._stream_iterator(
-            client_info, payload, is_long_stream=True
-        )
-        decoder = SSEDecoder()
-        async with stream_iterator as sse_stream:
-            async for sse_partial in decoder.aiter(sse_stream.aiter_lines()):
-                try:
-                    response = SSEInferenceResponseFactory(
-                        sse=sse_partial,
-                        httpx_request=sse_stream.request,
-                        httpx_response=sse_stream,
-                    ).construct()
-                except BaseFlyMyAIException as e:
-                    raise FlyMyAIPredictException.from_base_exception(e)
-                yield response
+        try:
+            stream_iterator = self._stream_iterator(
+                client_info, payload, is_long_stream=True
+            )
+            decoder = SSEDecoder()
+            async with stream_iterator as sse_stream:
+                async for sse_partial in decoder.aiter(sse_stream.aiter_lines()):
+                    try:
+                        response = SSEInferenceResponseFactory(
+                            sse=sse_partial,
+                            httpx_request=sse_stream.request,
+                            httpx_response=sse_stream,
+                        ).construct()
+                    except BaseFlyMyAIException as e:
+                        raise FlyMyAIPredictException.from_base_exception(e)
+                    yield response
+        except httpx.RemoteProtocolError:
+            await self._reconnect_client()
+            stream_iterator = self._stream_iterator(
+                client_info, payload, is_long_stream=True
+            )
+            decoder = SSEDecoder()
+            async with stream_iterator as sse_stream:
+                async for sse_partial in decoder.aiter(sse_stream.aiter_lines()):
+                    try:
+                        response = SSEInferenceResponseFactory(
+                            sse=sse_partial,
+                            httpx_request=sse_stream.request,
+                            httpx_response=sse_stream,
+                        ).construct()
+                    except BaseFlyMyAIException as e:
+                        raise FlyMyAIPredictException.from_base_exception(e)
+                    yield response
 
     def stream(self, payload: dict, model: Optional[str] = None, max_retries=None):
         full_client_info = self.amend_client_info(model)

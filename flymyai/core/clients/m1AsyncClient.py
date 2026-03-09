@@ -23,6 +23,21 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
             timeout=_predict_timeout,
         )
 
+    async def _reconnect_client(self):
+        if hasattr(self, "_client"):
+            try:
+                await self._client.aclose()
+            except Exception:
+                pass
+        self._client = self._construct_client()
+
+    async def _awith_reconnect(self, fn):
+        try:
+            return await fn()
+        except httpx.RemoteProtocolError:
+            await self._reconnect_client()
+            return await fn()
+
     async def __aenter__(self):
         return self
 
@@ -64,8 +79,10 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
             "chat_history": self._m1_history.serialize(),
             "image_url": self._image,
         }
-        response = await self._client.post(
-            self._generation_path, json=payload, headers=self._headers
+        response = await self._awith_reconnect(
+            lambda: self._client.post(
+                self._generation_path, json=payload, headers=self._headers
+            )
         )
         response.raise_for_status()
         response_data = response.json()
@@ -75,8 +92,10 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
         self, generation_task: M1GenerationTask
     ) -> FlyMyAIM1Response:
         while True:
-            response = await self._client.get(
-                self._populate_result_path(generation_task)
+            response = await self._awith_reconnect(
+                lambda: self._client.get(
+                    self._populate_result_path(generation_task)
+                )
             )
             response.raise_for_status()
             response_data = response.json()
@@ -113,7 +132,9 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
         image_path = Path(image) if isinstance(image, str) else image
         with image_path.open("rb") as f:
             files = {"file": (image_path.name, f, "image/png")}
-            response = await self._client.post(self._image_upload_path, files=files)
+            response = await self._awith_reconnect(
+                lambda: self._client.post(self._image_upload_path, files=files)
+            )
         response.raise_for_status()
         response_data = response.json()
         return (

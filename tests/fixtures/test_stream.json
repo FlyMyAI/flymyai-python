@@ -1,17 +1,12 @@
 {
-  "address_fixture": "https://dev-api.flymy.ai",
+  "address_fixture": "https://api.flymy.ai",
   "stream_payload": {
-    "prompt": "You discover the last library in the world, hidden in a forgotten city. What secrets does it hold, and why is it protected by ancient guardians?",
-    "best_of": 1,
-    "max_tokens": 128,
-    "stop": "\"<|im_end|>\", \"<|user|>\"",
-    "temperature": 0.7,
-    "top_k": 10,
-    "top_p": 0.9,
-    "stream": true
+    "model": "MiniMax-M1",
+    "messages": "[{\"role\": \"system\", \"content\": \"You are a helpful assistant.\"}, {\"role\": \"user\", \"content\": \"What is 2+2? Answer briefly.\"}]",
+    "is_stream": true
   },
   "auth": {
-    "model": "flymyai/vllm_stream",
+    "model": "flymyai/minimax-m1",
     "apikey_environ": "FMA_APIKEY"
   },
   "output_field": "output"

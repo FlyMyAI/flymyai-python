@@ -1,15 +1,33 @@
 {
   "client_auth_fixture": {
-    "model": "flymyai/perf_cpn-1",
+    "model": "flymyai/sdxl-lora",
     "apikey_environ": "FMA_APIKEY"
   },
-  "address_fixture": "https://dev-api.flymy.ai",
+  "address_fixture": "https://api.flymy.ai",
   "fake_payload_fixture": {
-    "prompt": "2w432442"
+    "prompt": "a Delorean on synthwave city",
+    "negative_prompt": "dull colors",
+    "height": 1024,
+    "width": 1024,
+    "num_inference_steps": 20,
+    "guidance_scale": "7.5",
+    "seed": 1645,
+    "sampler": "Euler",
+    "loras": "[{\"path\":\"https://civitai.com/api/download/models/135931?type=Model&format=SafeTensor\",\"scale\":1.3}]",
+    "checkpoint_name": "Original",
+    "num_images_per_prompt": 1
   },
   "binary_file_paths": {},
   "broken_payload_fixture": {
-    "prompt": "2w432442",
-    "delay": -1
+    "prompt": "a Delorean on synthwave city",
+    "height": 1024,
+    "width": 1024,
+    "num_inference_steps": 20,
+    "guidance_scale": "7.5",
+    "seed": 1645,
+    "sampler": "Euler",
+    "loras": "[{\"path\":\"https://broken-link.invalid/nonexistent-model\",\"scale\":1.3}]",
+    "checkpoint_name": "Original",
+    "num_images_per_prompt": 1
   }
 }

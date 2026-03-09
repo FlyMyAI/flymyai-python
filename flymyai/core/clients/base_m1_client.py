@@ -34,6 +34,14 @@ class BaseM1Client(Generic[_PossibleClients]):
         self._m1_history = M1History()
         self._image = None
 
+    def _reconnect_client(self):
+        if hasattr(self, "_client"):
+            try:
+                self._client.close()
+            except Exception:
+                pass
+        self._client = self._construct_client()
+
     def reset_history(self):
         self._m1_history = M1History()
 

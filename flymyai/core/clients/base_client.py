@@ -205,6 +205,14 @@ class BaseClient(Generic[_PossibleClients]):
         if hasattr(self, "_client"):
             self._client.close()
 
+    def _reconnect_client(self):
+        if hasattr(self, "_client"):
+            try:
+                self._client.close()
+            except Exception:
+                pass
+        self._client = self._construct_client()
+
     def _construct_client(self):
         raise NotImplemented
 

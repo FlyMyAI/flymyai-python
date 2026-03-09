@@ -29,11 +29,18 @@ from flymyai.utils.utils import retryable_callback
 class BaseSyncClient(BaseClient[httpx.Client]):
     def _construct_client(self):
         return httpx.Client(
-            http2=False,
+            http2=True,
             headers=self.client_info.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://api.flymy.ai/"),
             timeout=_predict_timeout,
         )
+
+    def _with_reconnect(self, fn):
+        try:
+            return fn()
+        except httpx.RemoteProtocolError:
+            self._reconnect_client()
+            return fn()
 
     def __enter__(self):
         return self
@@ -63,8 +70,10 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         """
 
         try:
-            return self._sse_instant(
-                lambda: self._stream_iterator(client_info, payload, False)
+            return self._with_reconnect(
+                lambda: self._sse_instant(
+                    lambda: self._stream_iterator(client_info, payload, False)
+                )
             )
         except BaseFlyMyAIException as e:
             raise FlyMyAIPredictException.from_base_exception(e)
@@ -97,8 +106,10 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         client_info = self.amend_client_info(model)
         try:
             _, response = retryable_callback(
-                lambda: self._client.post(
-                    client_info.prediction_async_path, **payload.serialize()
+                lambda: self._with_reconnect(
+                    lambda: self._client.post(
+                        client_info.prediction_async_path, **payload.serialize()
+                    )
                 ),
                 max_retries or self.max_retries,
                 FlyMyAIAsyncTaskException,
@@ -115,11 +126,13 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         prediction_id = prediction_task.prediction_id
 
         def get_res():
-            resp = self._client.get(
-                url=(
-                    prediction_task.client_info or self.client_info
-                ).prediction_result_path,
-                params={"request_id": prediction_id},
+            resp = self._with_reconnect(
+                lambda: self._client.get(
+                    url=(
+                        prediction_task.client_info or self.client_info
+                    ).prediction_result_path,
+                    params={"request_id": prediction_id},
+                )
             )
             return self._construct_task_result(resp)
 
@@ -136,21 +149,39 @@ class BaseSyncClient(BaseClient[httpx.Client]):
 
     def _stream(self, client_info: APIKeyClientInfo, payload: dict):
         payload = MultipartPayload(payload)
-        response_iterator = self._stream_iterator(
-            client_info, payload, is_long_stream=True
-        )
-        decoder = SSEDecoder()
-        with response_iterator as sse_stream:
-            for sse_partial in decoder.iter(sse_stream.iter_lines()):
-                try:
-                    response = SSEInferenceResponseFactory(
-                        sse=sse_partial,
-                        httpx_request=sse_stream.request,
-                        httpx_response=sse_stream,
-                    ).construct()
-                except BaseFlyMyAIException as e:
-                    raise FlyMyAIPredictException.from_base_exception(e)
-                yield response
+        try:
+            response_iterator = self._stream_iterator(
+                client_info, payload, is_long_stream=True
+            )
+            decoder = SSEDecoder()
+            with response_iterator as sse_stream:
+                for sse_partial in decoder.iter(sse_stream.iter_lines()):
+                    try:
+                        response = SSEInferenceResponseFactory(
+                            sse=sse_partial,
+                            httpx_request=sse_stream.request,
+                            httpx_response=sse_stream,
+                        ).construct()
+                    except BaseFlyMyAIException as e:
+                        raise FlyMyAIPredictException.from_base_exception(e)
+                    yield response
+        except httpx.RemoteProtocolError:
+            self._reconnect_client()
+            response_iterator = self._stream_iterator(
+                client_info, payload, is_long_stream=True
+            )
+            decoder = SSEDecoder()
+            with response_iterator as sse_stream:
+                for sse_partial in decoder.iter(sse_stream.iter_lines()):
+                    try:
+                        response = SSEInferenceResponseFactory(
+                            sse=sse_partial,
+                            httpx_request=sse_stream.request,
+                            httpx_response=sse_stream,
+                        ).construct()
+                    except BaseFlyMyAIException as e:
+                        raise FlyMyAIPredictException.from_base_exception(e)
+                    yield response
 
     def stream(self, payload: dict, model: Optional[str] = None):
         full_client_info = self.amend_client_info(model)
@@ -164,10 +195,12 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         :return:
         """
         try:
-            return self._wrap_request(
-                lambda: self._client.get(
-                    client_info.openapi_schema_path,
-                    headers=client_info.authorization_headers,
+            return self._with_reconnect(
+                lambda: self._wrap_request(
+                    lambda: self._client.get(
+                        client_info.openapi_schema_path,
+                        headers=client_info.authorization_headers,
+                    )
                 )
             )
         except BaseFlyMyAIException as e:
@@ -183,9 +216,11 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             full_client_info = client_info
         else:
             full_client_info = self.amend_client_info(model)
-        response = self._client.patch(
-            url=full_client_info.prediction_cancel_path,
-            json={"infer_id": prediction_id},
+        response = self._with_reconnect(
+            lambda: self._client.patch(
+                url=full_client_info.prediction_cancel_path,
+                json={"infer_id": prediction_id},
+            )
         )
         return SSEInferenceResponseFactory(
             httpx_response=response, httpx_request=response.request

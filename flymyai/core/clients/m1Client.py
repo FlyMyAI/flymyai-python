@@ -23,6 +23,13 @@ class BaseM1SyncClient(BaseM1Client[httpx.Client]):
             timeout=_predict_timeout,
         )
 
+    def _with_reconnect(self, fn):
+        try:
+            return fn()
+        except httpx.RemoteProtocolError:
+            self._reconnect_client()
+            return fn()
+
     def __enter__(self):
         return self
 
@@ -60,8 +67,10 @@ class BaseM1SyncClient(BaseM1Client[httpx.Client]):
             "chat_history": self._m1_history.serialize(),
             "image_url": self._image,
         }
-        response = self._client.post(
-            self._generation_path, json=payload, headers=self._headers
+        response = self._with_reconnect(
+            lambda: self._client.post(
+                self._generation_path, json=payload, headers=self._headers
+            )
         )
         response.raise_for_status()
         response_data = response.json()
@@ -71,7 +80,9 @@ class BaseM1SyncClient(BaseM1Client[httpx.Client]):
         self, generation_task: M1GenerationTask
     ) -> FlyMyAIM1Response:
         while True:
-            response = self._client.get(self._populate_result_path(generation_task))
+            response = self._with_reconnect(
+                lambda: self._client.get(self._populate_result_path(generation_task))
+            )
             response.raise_for_status()
             response_data = response.json()
 
@@ -107,7 +118,9 @@ class BaseM1SyncClient(BaseM1Client[httpx.Client]):
         image_path = Path(image) if isinstance(image, str) else image
         with image_path.open("rb") as f:
             files = {"file": (image_path.name, f, "image/png")}
-            response = self._client.post(self._image_upload_path, files=files)
+            response = self._with_reconnect(
+                lambda: self._client.post(self._image_upload_path, files=files)
+            )
         response.raise_for_status()
         response_data = response.json()
         return (
