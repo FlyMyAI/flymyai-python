@@ -44,7 +44,7 @@ _CONNECT_RECONNECT_EXC = (
 )
 
 # How many times to reconnect and retry on connection/stream errors (1 initial + this many retries)
-_RECONNECT_RETRIES = int(os.getenv("FMA_RECONNECT_RETRIES", "2"))
+_RECONNECT_RETRIES = int(os.getenv("FMA_RECONNECT_RETRIES", "3"))
 
 
 def _is_reconnectable_error(exc: BaseException) -> bool:
