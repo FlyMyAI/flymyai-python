@@ -8,7 +8,14 @@ from flymyai.core.response_factory.plain_inference_response_factory import (
 )
 from flymyai.core._streaming import SSEDecoder
 from flymyai.core.authorizations import APIKeyClientInfo
-from flymyai.core.clients.base_client import BaseClient, _predict_timeout
+from flymyai.core.clients.base_client import (
+    BaseClient,
+    _predict_timeout,
+    _http2,
+    _limits,
+    _is_reconnectable_error,
+    _RECONNECT_RETRIES,
+)
 from flymyai.core.exceptions import (
     BaseFlyMyAIException,
     FlyMyAIOpenAPIException,
@@ -25,11 +32,11 @@ from flymyai.core.stream_iterators.AsyncPredictionStream import AsyncPredictionS
 from flymyai.multipart import MultipartPayload
 from flymyai.utils.utils import aretryable_callback
 
-
 class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
     def _construct_client(self):
         return httpx.AsyncClient(
-            http2=True,
+            http2=_http2,
+            limits=_limits,
             headers=self.client_info.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://api.flymy.ai/"),
             timeout=_predict_timeout,
@@ -44,11 +51,20 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         self._client = self._construct_client()
 
     async def _awith_reconnect(self, fn):
-        try:
-            return await fn()
-        except httpx.RemoteProtocolError:
-            await self._reconnect_client()
-            return await fn()
+        last_exc = None
+        for attempt in range(1 + _RECONNECT_RETRIES):
+            try:
+                return await fn()
+            except BaseException as e:
+                last_exc = e
+                if not _is_reconnectable_error(e):
+                    raise
+                if attempt < _RECONNECT_RETRIES:
+                    await self._reconnect_client()
+                    continue
+                raise
+        assert last_exc is not None
+        raise last_exc
 
     async def __aenter__(self):
         return self
@@ -236,7 +252,9 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
                     except BaseFlyMyAIException as e:
                         raise FlyMyAIPredictException.from_base_exception(e)
                     yield response
-        except httpx.RemoteProtocolError:
+        except BaseException as e:
+            if not _is_reconnectable_error(e):
+                raise
             await self._reconnect_client()
             stream_iterator = self._stream_iterator(
                 client_info, payload, is_long_stream=True
