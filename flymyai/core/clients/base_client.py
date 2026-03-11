@@ -35,12 +35,44 @@ _PossibleClients = TypeVar(
     "_PossibleClients", bound=Union[httpx.Client, httpx.AsyncClient]
 )
 
+# Connection-style errors that warrant one reconnect + retry (high RPS / HTTP2 drops)
+_CONNECT_RECONNECT_EXC = (
+    httpx.RemoteProtocolError,
+    httpx.WriteError,
+    httpx.ReadError,
+    httpx.ConnectError,
+)
+
+# How many times to reconnect and retry on connection/stream errors (1 initial + this many retries)
+_RECONNECT_RETRIES = int(os.getenv("FMA_RECONNECT_RETRIES", "3"))
+
+
+def _is_reconnectable_error(exc: BaseException) -> bool:
+    if isinstance(exc, _CONNECT_RECONNECT_EXC):
+        return True
+    if isinstance(exc, RuntimeError) and "client has been closed" in str(exc).lower():
+        return True
+    if type(exc).__name__ in ("ClosedResourceError", "BrokenResourceError"):
+        return True
+    # HTTP/2 connection closed then reused (e.g. "ConnectionState.CLOSED", "SEND_SETTINGS", "StreamReset")
+    msg = str(exc)
+    if "ConnectionState.CLOSED" in msg or "SEND_SETTINGS" in msg or "StreamReset" in msg:
+        return True
+    return False
+
 
 _predict_timeout = httpx.Timeout(
     connect=int(os.getenv("FMA_CONNECT_TIMEOUT", 999999)),
     read=int(os.getenv("FMA_READ_TIMEOUT", 999999)),
     write=int(os.getenv("FMA_WRITE_TIMEOUT", 999999)),
     pool=int(os.getenv("FMA_POOL_TIMEOUT", 999999)),
+)
+
+_http2 = os.getenv("FLYMYAI_HTTP2", "true").lower() in ("1", "true", "yes")
+_limits = httpx.Limits(
+    max_connections=int(os.getenv("FMA_MAX_CONNECTIONS", "100")),
+    max_keepalive_connections=int(os.getenv("FMA_MAX_KEEPALIVE_CONNECTIONS", "50")),
+    keepalive_expiry=float(os.getenv("FMA_KEEPALIVE_EXPIRY", "60")),
 )
 
 

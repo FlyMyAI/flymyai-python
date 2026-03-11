@@ -5,7 +5,14 @@ import httpx
 
 from flymyai.core._streaming import SSEDecoder
 from flymyai.core.authorizations import APIKeyClientInfo
-from flymyai.core.clients.base_client import BaseClient, _predict_timeout
+from flymyai.core.clients.base_client import (
+    BaseClient,
+    _predict_timeout,
+    _http2,
+    _limits,
+    _is_reconnectable_error,
+    _RECONNECT_RETRIES,
+)
 from flymyai.core.exceptions import (
     BaseFlyMyAIException,
     FlyMyAIOpenAPIException,
@@ -29,18 +36,28 @@ from flymyai.utils.utils import retryable_callback
 class BaseSyncClient(BaseClient[httpx.Client]):
     def _construct_client(self):
         return httpx.Client(
-            http2=True,
+            http2=_http2,
+            limits=_limits,
             headers=self.client_info.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://api.flymy.ai/"),
             timeout=_predict_timeout,
         )
 
     def _with_reconnect(self, fn):
-        try:
-            return fn()
-        except httpx.RemoteProtocolError:
-            self._reconnect_client()
-            return fn()
+        last_exc = None
+        for attempt in range(1 + _RECONNECT_RETRIES):
+            try:
+                return fn()
+            except BaseException as e:
+                last_exc = e
+                if not _is_reconnectable_error(e):
+                    raise
+                if attempt < _RECONNECT_RETRIES:
+                    self._reconnect_client()
+                    continue
+                raise
+        assert last_exc is not None
+        raise last_exc
 
     def __enter__(self):
         return self
@@ -165,7 +182,9 @@ class BaseSyncClient(BaseClient[httpx.Client]):
                     except BaseFlyMyAIException as e:
                         raise FlyMyAIPredictException.from_base_exception(e)
                     yield response
-        except httpx.RemoteProtocolError:
+        except BaseException as e:
+            if not _is_reconnectable_error(e):
+                raise
             self._reconnect_client()
             response_iterator = self._stream_iterator(
                 client_info, payload, is_long_stream=True
