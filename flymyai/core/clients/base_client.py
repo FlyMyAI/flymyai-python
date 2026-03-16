@@ -56,7 +56,11 @@ def _is_reconnectable_error(exc: BaseException) -> bool:
         return True
     # HTTP/2 connection closed then reused (e.g. "ConnectionState.CLOSED", "SEND_SETTINGS", "StreamReset")
     msg = str(exc)
-    if "ConnectionState.CLOSED" in msg or "SEND_SETTINGS" in msg or "StreamReset" in msg:
+    if (
+        "ConnectionState.CLOSED" in msg
+        or "SEND_SETTINGS" in msg
+        or "StreamReset" in msg
+    ):
         return True
     return False
 

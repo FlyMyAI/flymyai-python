@@ -32,6 +32,7 @@ from flymyai.core.stream_iterators.AsyncPredictionStream import AsyncPredictionS
 from flymyai.multipart import MultipartPayload
 from flymyai.utils.utils import aretryable_callback
 
+
 class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
     def _construct_client(self):
         return httpx.AsyncClient(
