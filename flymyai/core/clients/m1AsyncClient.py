@@ -93,9 +93,7 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
     ) -> FlyMyAIM1Response:
         while True:
             response = await self._awith_reconnect(
-                lambda: self._client.get(
-                    self._populate_result_path(generation_task)
-                )
+                lambda: self._client.get(self._populate_result_path(generation_task))
             )
             response.raise_for_status()
             response_data = response.json()
