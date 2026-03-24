@@ -312,6 +312,96 @@ async def run_prediction():
 asyncio.run(run_prediction())
 ```
 
+## Agent Sandbox
+
+Run code in a gVisor-isolated Kubernetes pod via the FlyMyAI agent-sandbox service.
+Each call creates a fresh pod, executes the code, and deletes the pod.
+Supported languages: `python` (default), `bash`, `javascript`, `sh`.
+
+#### One-shot (sync)
+
+```python
+from flymyai.agent import execute_code
+
+result = execute_code(
+    sandbox_url="http://agent-sandbox.sandboxes.svc:8080",
+    code="print(sum(range(100)))",
+)
+print(result.stdout)    # 4950
+print(result.exit_code) # 0
+assert result.ok
+```
+
+#### One-shot (async)
+
+```python
+import asyncio
+from flymyai.agent import async_execute_code
+
+async def main():
+    result = await async_execute_code(
+        sandbox_url="http://agent-sandbox.sandboxes.svc:8080",
+        code="print('hello from sandbox')",
+        language="python",
+        timeout=10,
+    )
+    print(result.stdout)
+
+asyncio.run(main())
+```
+
+#### Context manager (sync) — multiple executions, one client
+
+```python
+from flymyai.agent import SandboxClient
+
+with SandboxClient("http://agent-sandbox.sandboxes.svc:8080") as sb:
+    r1 = sb.execute_code("print(2 ** 10)", language="python")
+    r2 = sb.execute_code("echo hello", language="bash")
+    print(r1.stdout, r2.stdout)
+```
+
+#### Context manager (async)
+
+```python
+import asyncio
+from flymyai.agent import AsyncSandboxClient
+
+async def main():
+    async with AsyncSandboxClient("http://agent-sandbox.sandboxes.svc:8080") as sb:
+        result = await sb.execute_code("console.log(42)", language="javascript")
+        print(result.stdout)
+
+asyncio.run(main())
+```
+
+#### Low-level API
+
+```python
+from flymyai.agent import SandboxClient
+
+with SandboxClient("http://agent-sandbox.sandboxes.svc:8080") as sb:
+    sandbox_id = sb.create("python", ttl_seconds=120)
+    try:
+        result = sb.exec(sandbox_id, ["python3", "-c", "print('ok')"])
+        print(result["exit_code"], result["stdout"])
+    finally:
+        sb.delete(sandbox_id)
+```
+
+`SandboxResult` fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `exit_code` | int | 0 = success |
+| `stdout` | str | Captured stdout |
+| `stderr` | str | Captured stderr |
+| `sandbox_id` | str | Pod ID used for this run |
+| `ok` | bool | Shortcut for `exit_code == 0` |
+
+> **Infrastructure**: the sandbox service (`agent-sandbox`) must be deployed separately.
+> See [gitlab.flymy.ai/fma/core/agent-sandbox](https://gitlab.flymy.ai/fma/core/agent-sandbox).
+
 ## M1 Agent Usage
 
 ### Using Synchronous Client
