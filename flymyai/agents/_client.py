@@ -17,7 +17,7 @@ from flymyai.agents._resources import (
 )
 
 
-_DEFAULT_BASE_URL = "https://api.flymy.ai"
+_DEFAULT_BASE_URL = "https://backend.flymy.ai"
 _DEFAULT_TIMEOUT = 60.0
 
 
