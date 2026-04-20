@@ -9,8 +9,10 @@ from flymyai.agents._types import (
     AgentDetail,
     AvailableTool,
     Compilation,
+    CompilationStatus,
     Run,
     RunDetail,
+    SchemaSuggestion,
     Tool,
 )
 
@@ -42,6 +44,9 @@ class Agents:
         name: str,
         goal: str,
         tools: Optional[List[int]] = None,
+        mcp_servers: Optional[List[int]] = None,
+        input_schema: Optional[Dict[str, Any]] = None,
+        output_schema: Optional[Dict[str, Any]] = None,
         status: Optional[str] = None,
     ) -> Agent:
         """Create a new agent.
@@ -52,14 +57,30 @@ class Agents:
             Human-readable agent name.
         goal:
             The agent's prompt / instructions (stored as ``user_prompt``).
+            May contain Jinja2 placeholders like ``{{ topic }}`` — provide
+            matching ``input_schema`` so the backend can validate runtime
+            ``variables``.
         tools:
             List of ``UserMcpTool`` IDs to attach.
+        mcp_servers:
+            List of custom MCP server IDs to attach.
+        input_schema:
+            JSON Schema describing runtime variables accepted by ``run``.
+            Required whenever ``goal`` contains Jinja2 placeholders.
+        output_schema:
+            JSON Schema the agent must produce as its final result.
         status:
             Initial status (default ``draft``).
         """
         body: Dict[str, Any] = {"name": name, "user_prompt": goal}
         if tools is not None:
             body["available_tools"] = tools
+        if mcp_servers is not None:
+            body["available_custom_mcp_servers"] = mcp_servers
+        if input_schema is not None:
+            body["input_schema"] = input_schema
+        if output_schema is not None:
+            body["output_schema"] = output_schema
         if status is not None:
             body["status"] = status
         data = self._c._request("POST", "/api/v1/agents/tasks/", json=body)
@@ -101,15 +122,117 @@ class Agents:
 
     # -- run -------------------------------------------------------------------
 
-    def run(self, agent_id: str) -> RunDetail:
+    def run(
+        self,
+        agent_id: str,
+        *,
+        variables: Optional[Dict[str, Any]] = None,
+    ) -> RunDetail:
         """Create an execution and start the agent loop.
 
-        Returns the newly created :class:`RunDetail` (status will be ``pending``).
+        Parameters
+        ----------
+        agent_id:
+            Agent UUID.
+        variables:
+            Runtime values to substitute into the ``goal`` Jinja2 template.
+            Must match the agent's ``input_schema`` when one is set.
+
+        Returns
+        -------
+        RunDetail
+            Newly created run (status will be ``pending``/``running``).
         """
+        body: Dict[str, Any] = {"variables": variables or {}}
         data = self._c._request(
-            "POST", f"/api/v1/agents/tasks/{agent_id}/run-loop/"
+            "POST", f"/api/v1/agents/tasks/{agent_id}/run-loop/", json=body
         )
         return RunDetail(**data)
+
+    # -- freeze ----------------------------------------------------------------
+
+    def freeze(self, run_id: int) -> Compilation:
+        """Freeze a completed run into a reusable Markdown instruction.
+
+        Distills the full chat + tool trace into an ``instruction_md`` that
+        captures *what the agent does*. Re-run it later with
+        :meth:`Compilations.run_instruction`.
+        """
+        data = self._c._request(
+            "POST", f"/api/v1/agents/compilations/freeze-instruction/{run_id}/"
+        )
+        return Compilation(**data)
+
+    # -- suggest_schema --------------------------------------------------------
+
+    def suggest_schema(
+        self,
+        *,
+        user_prompt: str,
+        input_hint: Optional[str] = None,
+        output_hint: Optional[str] = None,
+        generate_descriptions: bool = False,
+    ) -> SchemaSuggestion:
+        """Draft ``input_schema`` / ``output_schema`` from a prompt.
+
+        Calls ``POST /api/v1/agents/tasks/suggest-schema/``. Server uses
+        Anthropic to infer schemas from ``{{ placeholder }}`` references in
+        the prompt and the optional natural-language hints. Does **not**
+        persist anything — you have to PATCH the agent yourself.
+
+        Parameters
+        ----------
+        user_prompt:
+            The agent prompt. May contain ``{{ var }}`` placeholders.
+        input_hint:
+            One-sentence description of expected inputs. If empty and
+            ``generate_descriptions`` is ``True``, the server drafts one.
+        output_hint:
+            Same for outputs.
+        generate_descriptions:
+            When ``True`` the response includes
+            ``input_description`` / ``output_description``.
+        """
+        body: Dict[str, Any] = {
+            "user_prompt": user_prompt,
+            "generate_descriptions": generate_descriptions,
+        }
+        if input_hint is not None:
+            body["input_hint"] = input_hint
+        if output_hint is not None:
+            body["output_hint"] = output_hint
+        data = self._c._request(
+            "POST", "/api/v1/agents/tasks/suggest-schema/", json=body
+        )
+        return SchemaSuggestion(**data)
+
+    # -- compile_from_run ------------------------------------------------------
+
+    def compile_from_run(
+        self,
+        run_id: int,
+        *,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+    ) -> Compilation:
+        """Freeze a run and wait until the compilation is ready.
+
+        Convenience wrapper: :meth:`freeze` + :meth:`Compilations.wait`.
+        Raises :class:`FlyMyAIAgentError` if the compilation ends in
+        ``FAILED`` state.
+        """
+        comp = self.freeze(run_id)
+        comp = self._c.compilations.wait(
+            comp.id, timeout=timeout, poll_interval=poll_interval
+        )
+        if comp.status == CompilationStatus.FAILED:
+            from flymyai.agents._client import FlyMyAIAgentError
+            raise FlyMyAIAgentError(
+                f"Compilation {comp.id} failed: {comp.error or '(no error)'}",
+                status_code=0,
+                response_body=comp.model_dump(),
+            )
+        return comp
 
 
 class Runs:
@@ -118,12 +241,17 @@ class Runs:
     def __init__(self, client: SyncAgentClient) -> None:
         self._c = client
 
-    def create(self, *, agent_id: str) -> RunDetail:
+    def create(
+        self,
+        *,
+        agent_id: str,
+        variables: Optional[Dict[str, Any]] = None,
+    ) -> RunDetail:
         """Create a new run for the given agent.
 
-        This is a convenience alias for ``client.agents.run(agent_id)``.
+        Convenience alias for ``client.agents.run(agent_id, variables=...)``.
         """
-        return self._c.agents.run(agent_id)
+        return self._c.agents.run(agent_id, variables=variables)
 
     def list(self) -> List[Run]:
         """List all executions for the current user (newest first)."""
@@ -147,6 +275,44 @@ class Runs:
             json={"text": text},
         )
         return RunDetail(**data)
+
+    def suggest_schema(
+        self,
+        run_id: int,
+        *,
+        inputs_prompt: Optional[str] = None,
+        outputs_prompt: Optional[str] = None,
+    ) -> SchemaSuggestion:
+        """Draft ``input_schema`` / ``output_schema`` from a finished run.
+
+        Calls ``POST /api/v1/agents/executions/{id}/suggest-schema/``.
+        The server uses the execution's chat history + tool trace to infer
+        schemas.
+
+        .. warning::
+            **Side effect**: the server also saves the resulting schemas
+            onto the agent (``user_agent_task.input_schema`` /
+            ``output_schema``). Fetch the agent again with
+            :meth:`Agents.get` to read them back.
+
+        Parameters
+        ----------
+        inputs_prompt:
+            Optional natural-language hint guiding the input schema draft.
+        outputs_prompt:
+            Same for outputs.
+        """
+        body: Dict[str, Any] = {}
+        if inputs_prompt is not None:
+            body["inputs_prompt"] = inputs_prompt
+        if outputs_prompt is not None:
+            body["outputs_prompt"] = outputs_prompt
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/executions/{run_id}/suggest-schema/",
+            json=body or None,
+        )
+        return SchemaSuggestion(**data)
 
     def wait(
         self,
@@ -269,7 +435,7 @@ class Tools:
 
 
 class Compilations:
-    """Script compilations. Maps to ``/api/v1/agents/compilations/``."""
+    """Frozen agent instructions. Maps to ``/api/v1/agents/compilations/``."""
 
     def __init__(self, client: SyncAgentClient) -> None:
         self._c = client
@@ -285,18 +451,83 @@ class Compilations:
         return Compilation(**data)
 
     def compile(self, *, execution_id: int) -> Compilation:
-        """Create a script compilation from an execution."""
+        """Compile an execution into a reusable Python script."""
         data = self._c._request(
             "POST", f"/api/v1/agents/compilations/compile/{execution_id}/"
         )
         return Compilation(**data)
 
+    def freeze(self, *, execution_id: int) -> Compilation:
+        """Freeze an execution into a reusable Markdown instruction.
+
+        Alias for :meth:`Agents.freeze`.
+        """
+        data = self._c._request(
+            "POST", f"/api/v1/agents/compilations/freeze-instruction/{execution_id}/"
+        )
+        return Compilation(**data)
+
     def run(self, compilation_id: int) -> Compilation:
-        """Execute a compiled script."""
+        """Re-execute a compiled script."""
         data = self._c._request(
             "POST", f"/api/v1/agents/compilations/{compilation_id}/run/"
         )
         return Compilation(**data)
+
+    def run_instruction(
+        self,
+        compilation_id: int,
+        *,
+        variables: Optional[Dict[str, Any]] = None,
+    ) -> RunDetail:
+        """Run a frozen agent from its Markdown instruction.
+
+        Spawns a fresh execution that follows the compiled instruction.
+        Pass ``variables`` matching the source agent's ``input_schema``.
+        Raises :class:`VariablesValidationError` on HTTP 400.
+        """
+        body: Dict[str, Any] = {}
+        if variables:
+            body["variables"] = variables
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/compilations/{compilation_id}/run-instruction/",
+            json=body or None,
+        )
+        return RunDetail(**data)
+
+    def run_instruction_and_wait(
+        self,
+        compilation_id: int,
+        *,
+        variables: Optional[Dict[str, Any]] = None,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+    ) -> RunDetail:
+        """Run an instruction and block until the resulting run finishes."""
+        run = self.run_instruction(compilation_id, variables=variables)
+        return self._c.runs.wait(
+            run.id, timeout=timeout, poll_interval=poll_interval
+        )
+
+    def wait(
+        self,
+        compilation_id: int,
+        *,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+    ) -> Compilation:
+        """Poll until the compilation leaves the ``compiling`` state."""
+        deadline = time.monotonic() + timeout
+        while True:
+            comp = self.get(compilation_id)
+            if comp.status != CompilationStatus.COMPILING and comp.status != CompilationStatus.PENDING:
+                return comp
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Compilation {compilation_id} still {comp.status} after {timeout}s"
+                )
+            time.sleep(poll_interval)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -316,11 +547,20 @@ class AsyncAgents:
         name: str,
         goal: str,
         tools: Optional[List[int]] = None,
+        mcp_servers: Optional[List[int]] = None,
+        input_schema: Optional[Dict[str, Any]] = None,
+        output_schema: Optional[Dict[str, Any]] = None,
         status: Optional[str] = None,
     ) -> Agent:
         body: Dict[str, Any] = {"name": name, "user_prompt": goal}
         if tools is not None:
             body["available_tools"] = tools
+        if mcp_servers is not None:
+            body["available_custom_mcp_servers"] = mcp_servers
+        if input_schema is not None:
+            body["input_schema"] = input_schema
+        if output_schema is not None:
+            body["output_schema"] = output_schema
         if status is not None:
             body["status"] = status
         data = await self._c._request("POST", "/api/v1/agents/tasks/", json=body)
@@ -345,11 +585,67 @@ class AsyncAgents:
     async def delete(self, agent_id: str) -> None:
         await self._c._request("DELETE", f"/api/v1/agents/tasks/{agent_id}/")
 
-    async def run(self, agent_id: str) -> RunDetail:
+    async def run(
+        self,
+        agent_id: str,
+        *,
+        variables: Optional[Dict[str, Any]] = None,
+    ) -> RunDetail:
+        body: Dict[str, Any] = {"variables": variables or {}}
         data = await self._c._request(
-            "POST", f"/api/v1/agents/tasks/{agent_id}/run-loop/"
+            "POST", f"/api/v1/agents/tasks/{agent_id}/run-loop/", json=body
         )
         return RunDetail(**data)
+
+    async def freeze(self, run_id: int) -> Compilation:
+        """Freeze a completed run into a reusable instruction."""
+        data = await self._c._request(
+            "POST", f"/api/v1/agents/compilations/freeze-instruction/{run_id}/"
+        )
+        return Compilation(**data)
+
+    async def suggest_schema(
+        self,
+        *,
+        user_prompt: str,
+        input_hint: Optional[str] = None,
+        output_hint: Optional[str] = None,
+        generate_descriptions: bool = False,
+    ) -> SchemaSuggestion:
+        """Async variant of :meth:`Agents.suggest_schema`."""
+        body: Dict[str, Any] = {
+            "user_prompt": user_prompt,
+            "generate_descriptions": generate_descriptions,
+        }
+        if input_hint is not None:
+            body["input_hint"] = input_hint
+        if output_hint is not None:
+            body["output_hint"] = output_hint
+        data = await self._c._request(
+            "POST", "/api/v1/agents/tasks/suggest-schema/", json=body
+        )
+        return SchemaSuggestion(**data)
+
+    async def compile_from_run(
+        self,
+        run_id: int,
+        *,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+    ) -> Compilation:
+        """Async variant of :meth:`Agents.compile_from_run`."""
+        comp = await self.freeze(run_id)
+        comp = await self._c.compilations.wait(
+            comp.id, timeout=timeout, poll_interval=poll_interval
+        )
+        if comp.status == CompilationStatus.FAILED:
+            from flymyai.agents._client import FlyMyAIAgentError
+            raise FlyMyAIAgentError(
+                f"Compilation {comp.id} failed: {comp.error or '(no error)'}",
+                status_code=0,
+                response_body=comp.model_dump(),
+            )
+        return comp
 
 
 class AsyncRuns:
@@ -358,9 +654,14 @@ class AsyncRuns:
     def __init__(self, client: AsyncAgentClient) -> None:
         self._c = client
 
-    async def create(self, *, agent_id: str) -> RunDetail:
+    async def create(
+        self,
+        *,
+        agent_id: str,
+        variables: Optional[Dict[str, Any]] = None,
+    ) -> RunDetail:
         """Create a new run for the given agent (async)."""
-        return await self._c.agents.run(agent_id)
+        return await self._c.agents.run(agent_id, variables=variables)
 
     async def list(self) -> List[Run]:
         data = await self._c._request("GET", "/api/v1/agents/executions/")
@@ -384,6 +685,30 @@ class AsyncRuns:
             json={"text": text},
         )
         return RunDetail(**data)
+
+    async def suggest_schema(
+        self,
+        run_id: int,
+        *,
+        inputs_prompt: Optional[str] = None,
+        outputs_prompt: Optional[str] = None,
+    ) -> SchemaSuggestion:
+        """Async variant of :meth:`Runs.suggest_schema`.
+
+        .. warning::
+            Also saves the resulting schemas onto the source agent.
+        """
+        body: Dict[str, Any] = {}
+        if inputs_prompt is not None:
+            body["inputs_prompt"] = inputs_prompt
+        if outputs_prompt is not None:
+            body["outputs_prompt"] = outputs_prompt
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/executions/{run_id}/suggest-schema/",
+            json=body or None,
+        )
+        return SchemaSuggestion(**data)
 
     async def wait(
         self,
@@ -505,8 +830,68 @@ class AsyncCompilations:
         )
         return Compilation(**data)
 
+    async def freeze(self, *, execution_id: int) -> Compilation:
+        """Freeze an execution into a reusable Markdown instruction."""
+        data = await self._c._request(
+            "POST", f"/api/v1/agents/compilations/freeze-instruction/{execution_id}/"
+        )
+        return Compilation(**data)
+
     async def run(self, compilation_id: int) -> Compilation:
         data = await self._c._request(
             "POST", f"/api/v1/agents/compilations/{compilation_id}/run/"
         )
         return Compilation(**data)
+
+    async def run_instruction(
+        self,
+        compilation_id: int,
+        *,
+        variables: Optional[Dict[str, Any]] = None,
+    ) -> RunDetail:
+        """Run a frozen agent from its Markdown instruction.
+
+        Raises :class:`VariablesValidationError` on HTTP 400.
+        """
+        body: Dict[str, Any] = {}
+        if variables:
+            body["variables"] = variables
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/compilations/{compilation_id}/run-instruction/",
+            json=body or None,
+        )
+        return RunDetail(**data)
+
+    async def run_instruction_and_wait(
+        self,
+        compilation_id: int,
+        *,
+        variables: Optional[Dict[str, Any]] = None,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+    ) -> RunDetail:
+        """Run an instruction and await the resulting run."""
+        run = await self.run_instruction(compilation_id, variables=variables)
+        return await self._c.runs.wait(
+            run.id, timeout=timeout, poll_interval=poll_interval
+        )
+
+    async def wait(
+        self,
+        compilation_id: int,
+        *,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+    ) -> Compilation:
+        """Poll until the compilation leaves the ``compiling`` state."""
+        deadline = time.monotonic() + timeout
+        while True:
+            comp = await self.get(compilation_id)
+            if comp.status != CompilationStatus.COMPILING and comp.status != CompilationStatus.PENDING:
+                return comp
+            if time.monotonic() >= deadline:
+                raise TimeoutError(
+                    f"Compilation {compilation_id} still {comp.status} after {timeout}s"
+                )
+            await asyncio.sleep(poll_interval)

@@ -51,10 +51,15 @@ class Agent(BaseModel):
     name: str
     user_prompt: str
     available_tools: Any = Field(default_factory=list)
+    available_custom_mcp_servers: List[int] = Field(default_factory=list)
+    input_schema: Optional[Dict[str, Any]] = None
+    output_schema: Optional[Dict[str, Any]] = None
     all_tools_configured: bool = False
     tools_need_to_configure: List[int] = Field(default_factory=list)
     generated_pipeline: Dict[str, Any] = Field(default_factory=dict)
     status: AgentStatus = AgentStatus.DRAFT
+    cron_schedule: str = ""
+    webhook_url: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -92,6 +97,7 @@ class Run(BaseModel):
     user_agent_task: int
     previous_execution: Optional[int] = None
     original_prompt: str
+    variables: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
     messages: List[Dict[str, Any]] = Field(default_factory=list)
@@ -174,13 +180,40 @@ class AvailableTool(BaseModel):
 
 
 class Compilation(BaseModel):
-    """A compiled script derived from an agent execution."""
+    """A compiled/frozen script or instruction derived from an agent execution."""
 
     id: int
     execution: int
     status: CompilationStatus = CompilationStatus.PENDING
     script_code: str = ""
+    instruction_md: str = ""
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def is_ready(self) -> bool:
+        """True once the compilation/instruction can be executed."""
+        return self.status in (
+            CompilationStatus.COMPILED,
+            CompilationStatus.COMPLETED,
+            CompilationStatus.RUNNING,
+        )
+
+
+# ── Schema suggestion ───────────────────────────────────────────────────────
+
+
+class SchemaSuggestion(BaseModel):
+    """Result of a ``suggest_schema`` call.
+
+    ``input_description`` / ``output_description`` are only populated when
+    the request asked the server to draft them.
+    """
+
+    reasoning: str = ""
+    input_schema: Dict[str, Any]
+    output_schema: Dict[str, Any]
+    input_description: Optional[str] = None
+    output_description: Optional[str] = None
