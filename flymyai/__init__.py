@@ -2,7 +2,14 @@ import httpx
 
 from flymyai.core.client import FlyMyAI, AsyncFlyMyAI, FlyMyAIM1, AsyncFlymyAIM1
 from flymyai.core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
-from flymyai.agents import AgentClient, AsyncAgentClient, FlyMyAIAgentError
+from flymyai.agents import (
+    AgentClient,
+    AsyncAgentClient,
+    FlyMyAIAgentError,
+    SchemaSuggestion,
+    SuggestSchemaError,
+    VariablesValidationError,
+)
 
 __all__ = [
     # Prediction clients
@@ -17,6 +24,9 @@ __all__ = [
     "AgentClient",
     "AsyncAgentClient",
     "FlyMyAIAgentError",
+    "VariablesValidationError",
+    "SuggestSchemaError",
+    "SchemaSuggestion",
 ]
 
 

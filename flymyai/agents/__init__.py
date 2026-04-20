@@ -1,7 +1,9 @@
 from flymyai.agents._client import (
     AsyncAgentClient,
     FlyMyAIAgentError,
+    SuggestSchemaError,
     SyncAgentClient,
+    VariablesValidationError,
 )
 from flymyai.agents._types import (
     Agent,
@@ -16,6 +18,7 @@ from flymyai.agents._types import (
     ExecutionStatus,
     Run,
     RunDetail,
+    SchemaSuggestion,
     Tool,
 )
 
@@ -26,7 +29,10 @@ __all__ = [
     "AgentClient",
     "SyncAgentClient",
     "AsyncAgentClient",
+    # Exceptions
     "FlyMyAIAgentError",
+    "VariablesValidationError",
+    "SuggestSchemaError",
     # Models
     "Agent",
     "AgentDetail",
@@ -40,5 +46,6 @@ __all__ = [
     "ExecutionStatus",
     "Run",
     "RunDetail",
+    "SchemaSuggestion",
     "Tool",
 ]

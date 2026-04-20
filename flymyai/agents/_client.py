@@ -36,8 +36,74 @@ class FlyMyAIAgentError(Exception):
 
     def __repr__(self) -> str:
         return (
-            f"FlyMyAIAgentError(status_code={self.status_code}, message={str(self)!r})"
+            f"{type(self).__name__}(status_code={self.status_code}, "
+            f"message={str(self)!r})"
         )
+
+
+class VariablesValidationError(FlyMyAIAgentError):
+    """Raised when the backend rejects ``variables`` on run / run_instruction.
+
+    The server responds with HTTP 400 and a body of the form
+    ``{"variables": ["'foo' is required", ...]}`` — those messages are
+    exposed here as :attr:`messages`, and the field-to-message mapping
+    (best-effort parse) as :attr:`field_errors`.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any,
+        messages: list[str],
+        field_errors: Dict[str, str],
+    ) -> None:
+        super().__init__(
+            message, status_code=status_code, response_body=response_body
+        )
+        self.messages = messages
+        self.field_errors = field_errors
+
+
+class SuggestSchemaError(FlyMyAIAgentError):
+    """Raised when the server fails to generate schemas (HTTP 502).
+
+    Typically means the server's Anthropic key is missing or the upstream
+    call failed. The user-facing message is in :attr:`args`.
+    """
+
+
+def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
+    """Return a :class:`VariablesValidationError` if ``body`` looks like one."""
+    if not isinstance(body, dict):
+        return None
+    raw = body.get("variables")
+    messages: list[str] = []
+    if isinstance(raw, list):
+        messages = [str(m) for m in raw]
+    elif isinstance(raw, str):
+        messages = [raw]
+    elif isinstance(raw, dict):
+        messages = [f"{k}: {v}" for k, v in raw.items()]
+    else:
+        return None
+
+    field_errors: Dict[str, str] = {}
+    for msg in messages:
+        # Messages often start with a quoted field name, e.g.
+        #   "'website_url' is a required property"
+        if msg.startswith("'"):
+            end = msg.find("'", 1)
+            if end > 1:
+                field_errors[msg[1:end]] = msg
+    return VariablesValidationError(
+        f"Invalid variables: {'; '.join(messages)}",
+        status_code=400,
+        response_body=body,
+        messages=messages,
+        field_errors=field_errors,
+    )
 
 
 def _raise_for_status(resp: httpx.Response) -> None:
@@ -47,7 +113,19 @@ def _raise_for_status(resp: httpx.Response) -> None:
         body = resp.json()
     except Exception:
         body = resp.text
+
+    if resp.status_code == 400:
+        err = _parse_variables_errors(body)
+        if err is not None:
+            raise err
+
     detail = body.get("detail", body) if isinstance(body, dict) else body
+    if resp.status_code == 502:
+        raise SuggestSchemaError(
+            f"HTTP 502: {detail}",
+            status_code=502,
+            response_body=body,
+        )
     raise FlyMyAIAgentError(
         f"HTTP {resp.status_code}: {detail}",
         status_code=resp.status_code,

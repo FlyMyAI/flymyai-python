@@ -381,3 +381,82 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Agent variables, freeze & re-run
+
+Agents can accept runtime `{{ variables }}` and be "compiled" into a
+reusable Markdown instruction that you re-run later with fresh values.
+
+### Draft an `input_schema` from a prompt
+
+```python
+from flymyai import AgentClient
+
+client = AgentClient(api_key="fly-secret-key")
+
+suggestion = client.agents.suggest_schema(
+    user_prompt="Summarize {{ url }} in {{ n_sentences }} sentences.",
+    generate_descriptions=True,
+)
+print(suggestion.input_schema)
+print(suggestion.input_description)
+```
+
+### Create an agent, run it with variables, then freeze + re-run
+
+```python
+agent = client.agents.create(
+    name="Web summarizer",
+    goal="Summarize {{ url }} in {{ n_sentences }} sentences.",
+    input_schema=suggestion.input_schema,
+    output_schema=suggestion.output_schema,
+)
+
+# 1) First run — with variables
+run = client.agents.run(
+    agent.id,
+    variables={"url": "https://example.com", "n_sentences": 3},
+)
+run = client.runs.wait(run.id)
+print(run.output)
+
+# 2) Freeze this run into a reusable instruction (Compile)
+compilation = client.agents.compile_from_run(run.id)
+print(compilation.instruction_md)
+
+# 3) Re-run later with different variables — no chat history carried over
+later = client.compilations.run_instruction_and_wait(
+    compilation.id,
+    variables={"url": "https://news.ycombinator.com", "n_sentences": 5},
+)
+print(later.output)
+```
+
+### Handling invalid variables
+
+When `variables` don't match the agent's `input_schema` the server replies
+`HTTP 400` and the client raises `VariablesValidationError`:
+
+```python
+from flymyai import VariablesValidationError
+
+try:
+    client.agents.run(agent.id, variables={})
+except VariablesValidationError as err:
+    print(err.messages)       # ["'url' is a required property", ...]
+    print(err.field_errors)   # {"url": "'url' is a required property"}
+```
+
+### Drafting schemas from an existing run
+
+If you already have a completed run, you can ask the server to infer
+schemas from the actual chat history and tool trace:
+
+```python
+# NOTE: this also persists the resulting schemas onto the source agent.
+suggestion = client.runs.suggest_schema(
+    run.id,
+    inputs_prompt="A URL and a sentence count",
+    outputs_prompt="A short summary",
+)
+```
