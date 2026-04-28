@@ -19,7 +19,6 @@ from flymyai.agents._types import (
     Tool,
 )
 
-# Convenience alias — docs use `AgentClient`
 AgentClient = SyncAgentClient
 
 __all__ = [

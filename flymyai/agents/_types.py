@@ -6,8 +6,6 @@ from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
-# ── Enums ────────────────────────────────────────────────────────────────────
-
 
 class AgentStatus(str, Enum):
     DRAFT = "draft"
@@ -40,9 +38,6 @@ class ExecutionLogType(str, Enum):
     TASK_CANCELLED = "task_cancelled"
 
 
-# ── Agent (backend: UserAgentTask) ───────────────────────────────────────────
-
-
 class Agent(BaseModel):
     """An agent task — the top-level configuration for an autonomous agent."""
 
@@ -70,9 +65,6 @@ class AgentDetail(Agent):
     """Agent with nested tool objects instead of IDs."""
 
     available_tools: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-# ── Execution / Run (backend: UserAgentExecution) ───────────────────────────
 
 
 class ExecutionLog(BaseModel):
@@ -117,9 +109,6 @@ class RunDetail(Run):
 
     logs: List[ExecutionLog] = Field(default_factory=list)
     user_agent_task_uuid: Optional[str] = None
-
-
-# ── Tool (backend: UserMcpTool) ─────────────────────────────────────────────
 
 
 class ConfigurationStep(BaseModel):
@@ -167,9 +156,6 @@ class AvailableTool(BaseModel):
     custom_class: Optional[str] = None
     github_link: Optional[str] = None
     configuration_steps: List[Dict[str, Any]] = Field(default_factory=list)
-
-
-# ── Script Compilation ──────────────────────────────────────────────────────
 
 
 class Compilation(BaseModel):

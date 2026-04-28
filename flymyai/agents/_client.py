@@ -55,11 +55,6 @@ def _raise_for_status(resp: httpx.Response) -> None:
     )
 
 
-# ══════════════════════════════════════════════════════════════════════════════
-#  Synchronous client
-# ══════════════════════════════════════════════════════════════════════════════
-
-
 class SyncAgentClient:
     """Synchronous client for the FlyMyAI Agents API.
 
@@ -96,7 +91,6 @@ class SyncAgentClient:
             timeout=httpx.Timeout(timeout),
         )
 
-        # resource namespaces
         self.agents = Agents(self)
         self.runs = Runs(self)
         self.tools = Tools(self)
@@ -117,11 +111,6 @@ class SyncAgentClient:
 
     def close(self) -> None:
         self._http.close()
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  Asynchronous client
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class AsyncAgentClient:
@@ -159,13 +148,10 @@ class AsyncAgentClient:
             timeout=httpx.Timeout(timeout),
         )
 
-        # resource namespaces
         self.agents = AsyncAgents(self)
         self.runs = AsyncRuns(self)
         self.tools = AsyncTools(self)
         self.compilations = AsyncCompilations(self)
-
-    # -- low-level request -----------------------------------------------------
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = await self._http.request(method, path, **kwargs)
@@ -173,8 +159,6 @@ class AsyncAgentClient:
         if resp.status_code == 204:
             return None
         return resp.json()
-
-    # -- context manager -------------------------------------------------------
 
     async def __aenter__(self) -> AsyncAgentClient:
         return self

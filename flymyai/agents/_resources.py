@@ -18,14 +18,7 @@ if TYPE_CHECKING:
     from flymyai.agents._client import AsyncAgentClient, SyncAgentClient
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
-
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  SYNC resources
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class Agents:
@@ -33,8 +26,6 @@ class Agents:
 
     def __init__(self, client: SyncAgentClient) -> None:
         self._c = client
-
-    # -- create ----------------------------------------------------------------
 
     def create(
         self,
@@ -65,21 +56,15 @@ class Agents:
         data = self._c._request("POST", "/api/v1/agents/tasks/", json=body)
         return Agent(**data)
 
-    # -- list ------------------------------------------------------------------
-
     def list(self) -> List[Agent]:
         """Return all non-archived agents for the current user."""
         data = self._c._request("GET", "/api/v1/agents/tasks/")
         return [Agent(**item) for item in data]
 
-    # -- get -------------------------------------------------------------------
-
     def get(self, agent_id: str) -> AgentDetail:
         """Get agent by UUID (returns full detail with nested tools)."""
         data = self._c._request("GET", f"/api/v1/agents/tasks/{agent_id}/")
         return AgentDetail(**data)
-
-    # -- update ----------------------------------------------------------------
 
     def update(self, agent_id: str, **kwargs: Any) -> Agent:
         """Partial update (PATCH).
@@ -93,13 +78,9 @@ class Agents:
         )
         return Agent(**data)
 
-    # -- delete ----------------------------------------------------------------
-
     def delete(self, agent_id: str) -> None:
         """Soft-delete (archive) an agent."""
         self._c._request("DELETE", f"/api/v1/agents/tasks/{agent_id}/")
-
-    # -- run -------------------------------------------------------------------
 
     def run(self, agent_id: str) -> RunDetail:
         """Create an execution and start the agent loop.
@@ -291,11 +272,6 @@ class Compilations:
             "POST", f"/api/v1/agents/compilations/{compilation_id}/run/"
         )
         return Compilation(**data)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-#  ASYNC resources
-# ══════════════════════════════════════════════════════════════════════════════
 
 
 class AsyncAgents:
