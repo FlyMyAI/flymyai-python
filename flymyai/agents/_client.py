@@ -16,7 +16,6 @@ from flymyai.agents._resources import (
     Tools,
 )
 
-
 _DEFAULT_BASE_URL = "https://backend.flymy.ai"
 _DEFAULT_TIMEOUT = 60.0
 
@@ -37,8 +36,7 @@ class FlyMyAIAgentError(Exception):
 
     def __repr__(self) -> str:
         return (
-            f"FlyMyAIAgentError(status_code={self.status_code}, "
-            f"message={str(self)!r})"
+            f"FlyMyAIAgentError(status_code={self.status_code}, message={str(self)!r})"
         )
 
 
@@ -90,11 +88,7 @@ class SyncAgentClient:
             raise ValueError(
                 "api_key is required. Pass it directly or set FLYMYAI_API_KEY."
             )
-        self._base_url = (
-            base_url
-            or os.environ.get("FLYMYAI_DSN")
-            or _DEFAULT_BASE_URL
-        )
+        self._base_url = base_url or os.environ.get("FLYMYAI_DSN") or _DEFAULT_BASE_URL
         self._max_retries = max_retries
         self._http = httpx.Client(
             base_url=self._base_url,
@@ -108,18 +102,12 @@ class SyncAgentClient:
         self.tools = Tools(self)
         self.compilations = Compilations(self)
 
-    # -- low-level request -----------------------------------------------------
-
-    def _request(
-        self, method: str, path: str, **kwargs: Any
-    ) -> Any:
+    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._http.request(method, path, **kwargs)
         _raise_for_status(resp)
         if resp.status_code == 204:
             return None
         return resp.json()
-
-    # -- context manager -------------------------------------------------------
 
     def __enter__(self) -> SyncAgentClient:
         return self
@@ -163,11 +151,7 @@ class AsyncAgentClient:
             raise ValueError(
                 "api_key is required. Pass it directly or set FLYMYAI_API_KEY."
             )
-        self._base_url = (
-            base_url
-            or os.environ.get("FLYMYAI_DSN")
-            or _DEFAULT_BASE_URL
-        )
+        self._base_url = base_url or os.environ.get("FLYMYAI_DSN") or _DEFAULT_BASE_URL
         self._max_retries = max_retries
         self._http = httpx.AsyncClient(
             base_url=self._base_url,
@@ -183,9 +167,7 @@ class AsyncAgentClient:
 
     # -- low-level request -----------------------------------------------------
 
-    async def _request(
-        self, method: str, path: str, **kwargs: Any
-    ) -> Any:
+    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = await self._http.request(method, path, **kwargs)
         _raise_for_status(resp)
         if resp.status_code == 204:

@@ -93,7 +93,10 @@ def mock_SyncStreamIteratorWith_5000():
     client = BaseSyncClient("123", "123/123", max_retries=3)
 
     def mocked_stream(*args, **kwargs):
-        yield b'data: {"details": "Unexpected broker error! Contact support!", "status": 5000}'
+        yield (
+            b'data: {"details": "Unexpected broker error! Contact support!", "status":'
+            b" 5000}"
+        )
         yield b""
 
     client._client.stream = lambda *_, **__: MockedStream(mocked_stream(), 200)
@@ -129,7 +132,10 @@ def mock_AsyncStreamIteratorWith_5000():
     client = BaseAsyncClient("123", "123/123", max_retries=3)
 
     async def mocked_stream(*args, **kwargs):
-        yield b'data: {"details": "Unexpected broker error! Contact support!", "status": 5000}'
+        yield (
+            b'data: {"details": "Unexpected broker error! Contact support!", "status":'
+            b" 5000}"
+        )
         yield b""
 
     client._client.stream = lambda *_, **__: MockedStream(mocked_stream(), 200)

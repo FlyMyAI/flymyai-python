@@ -106,9 +106,7 @@ class Agents:
 
         Returns the newly created :class:`RunDetail` (status will be ``pending``).
         """
-        data = self._c._request(
-            "POST", f"/api/v1/agents/tasks/{agent_id}/run-loop/"
-        )
+        data = self._c._request("POST", f"/api/v1/agents/tasks/{agent_id}/run-loop/")
         return RunDetail(**data)
 
 
@@ -241,9 +239,7 @@ class Tools:
     def delete(self, tool_id: int) -> None:
         self._c._request("DELETE", f"/api/v1/agents/tools/{tool_id}/")
 
-    def provide_config(
-        self, tool_id: int, *, user_response: Any
-    ) -> Tool:
+    def provide_config(self, tool_id: int, *, user_response: Any) -> Tool:
         """Answer the current ``ask_user`` configuration step."""
         data = self._c._request(
             "POST",
@@ -279,9 +275,7 @@ class Compilations:
         return [Compilation(**item) for item in data]
 
     def get(self, compilation_id: int) -> Compilation:
-        data = self._c._request(
-            "GET", f"/api/v1/agents/compilations/{compilation_id}/"
-        )
+        data = self._c._request("GET", f"/api/v1/agents/compilations/{compilation_id}/")
         return Compilation(**data)
 
     def compile(self, *, execution_id: int) -> Compilation:
@@ -367,15 +361,11 @@ class AsyncRuns:
         return [Run(**item) for item in data]
 
     async def get(self, run_id: int) -> RunDetail:
-        data = await self._c._request(
-            "GET", f"/api/v1/agents/executions/{run_id}/"
-        )
+        data = await self._c._request("GET", f"/api/v1/agents/executions/{run_id}/")
         return RunDetail(**data)
 
     async def cancel(self, run_id: int) -> None:
-        await self._c._request(
-            "POST", f"/api/v1/agents/executions/{run_id}/cancel/"
-        )
+        await self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
 
     async def append_message(self, run_id: int, *, text: str) -> RunDetail:
         data = await self._c._request(
@@ -458,9 +448,7 @@ class AsyncTools:
     async def delete(self, tool_id: int) -> None:
         await self._c._request("DELETE", f"/api/v1/agents/tools/{tool_id}/")
 
-    async def provide_config(
-        self, tool_id: int, *, user_response: Any
-    ) -> Tool:
+    async def provide_config(self, tool_id: int, *, user_response: Any) -> Tool:
         data = await self._c._request(
             "POST",
             f"/api/v1/agents/tools/{tool_id}/provide-config/",

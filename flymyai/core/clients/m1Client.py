@@ -106,7 +106,8 @@ class BaseM1SyncClient(BaseM1Client[httpx.Client]):
                 continue
 
             raise RuntimeError(
-                f"Generation failed with status {response_data.get('status')}: {response_data.get('error')}"
+                f"Generation failed with status {response_data.get('status')}:"
+                f" {response_data.get('error')}"
             )
 
     def upload_image(self, image: Union[str, Path]) -> str:

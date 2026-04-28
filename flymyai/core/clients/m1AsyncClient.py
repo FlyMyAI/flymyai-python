@@ -118,7 +118,8 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
                 continue
 
             raise RuntimeError(
-                f"Generation failed with status {response_data.get('status')}: {response_data.get('error')}"
+                f"Generation failed with status {response_data.get('status')}:"
+                f" {response_data.get('error')}"
             )
 
     async def upload_image(self, image: Union[str, Path]) -> str:
