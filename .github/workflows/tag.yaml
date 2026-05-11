@@ -33,12 +33,12 @@ jobs:
         run: |
           git fetch --all
           git describe --tags
-          
+
           export TAG=$(git describe --tags)
           echo "---------------------------------------"
           echo "Current version: ${TAG:1}"
           echo "---------------------------------------"
-          
+
           echo "$(FLYMYAI_PYTHON_VERSION=${TAG:1} envsubst < setup.py.template)" > setup.py
           echo "$(FLYMYAI_PYTHON_VERSION=${TAG:1} envsubst < pyproject.toml.template)" > pyproject.toml
 

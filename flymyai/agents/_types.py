@@ -36,6 +36,14 @@ class ExecutionLogType(str, Enum):
     TOOL_CALLED = "tool_called"
     TOOL_CALL_EXCEPTION = "tool_call_exception"
     TASK_CANCELLED = "task_cancelled"
+    USER_ADDED_MESSAGE = "user_added_message"
+
+    @classmethod
+    def _missing_(cls, value: object):
+        obj = str.__new__(cls, value)
+        obj._value_ = value
+        obj._name_ = str(value).upper()
+        return obj
 
 
 class Agent(BaseModel):

@@ -24,7 +24,7 @@ _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
 class Agents:
     """CRUD for agents. Maps to ``/api/v1/agents/tasks/``."""
 
-    def __init__(self, client: SyncAgentClient) -> None:
+    def __init__(self, client: "SyncAgentClient") -> None:
         self._c = client
 
     def create(
@@ -277,7 +277,7 @@ class Compilations:
 class AsyncAgents:
     """Async variant of :class:`Agents`."""
 
-    def __init__(self, client: AsyncAgentClient) -> None:
+    def __init__(self, client: "AsyncAgentClient") -> None:
         self._c = client
 
     async def create(
