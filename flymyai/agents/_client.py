@@ -17,6 +17,12 @@ from flymyai.agents._resources import (
 )
 
 _DEFAULT_BASE_URL = "https://backend.flymy.ai"
+# Agents live on a different host from model inference (api.flymy.ai),
+# so they use their own env var. `FLYMYAI_DSN` is reserved for the
+# inference client and is intentionally NOT consulted here, otherwise
+# pointing the model client to a staging host would silently break
+# agents too.
+_AGENTS_BASE_URL_ENV = "FLYMYAI_AGENTS_BASE_URL"
 _DEFAULT_TIMEOUT = 60.0
 
 
@@ -161,7 +167,11 @@ class SyncAgentClient:
             raise ValueError(
                 "api_key is required. Pass it directly or set FLYMYAI_API_KEY."
             )
-        self._base_url = base_url or os.environ.get("FLYMYAI_DSN") or _DEFAULT_BASE_URL
+        self._base_url = (
+            base_url
+            or os.environ.get(_AGENTS_BASE_URL_ENV)
+            or _DEFAULT_BASE_URL
+        )
         self._max_retries = max_retries
         self._http = httpx.Client(
             base_url=self._base_url,
@@ -218,7 +228,11 @@ class AsyncAgentClient:
             raise ValueError(
                 "api_key is required. Pass it directly or set FLYMYAI_API_KEY."
             )
-        self._base_url = base_url or os.environ.get("FLYMYAI_DSN") or _DEFAULT_BASE_URL
+        self._base_url = (
+            base_url
+            or os.environ.get(_AGENTS_BASE_URL_ENV)
+            or _DEFAULT_BASE_URL
+        )
         self._max_retries = max_retries
         self._http = httpx.AsyncClient(
             base_url=self._base_url,

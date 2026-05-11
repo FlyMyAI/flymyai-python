@@ -58,7 +58,9 @@ class Agent(BaseModel):
     available_tools: Any = Field(default_factory=list)
     available_custom_mcp_servers: List[int] = Field(default_factory=list)
     input_schema: Optional[Dict[str, Any]] = None
+    input_description: str = ""
     output_schema: Optional[Dict[str, Any]] = None
+    output_description: str = ""
     all_tools_configured: bool = False
     tools_need_to_configure: List[int] = Field(default_factory=list)
     generated_pipeline: Dict[str, Any] = Field(default_factory=dict)
@@ -183,6 +185,8 @@ class Compilation(BaseModel):
     status: CompilationStatus = CompilationStatus.PENDING
     script_code: str = ""
     instruction_md: str = ""
+    cron_schedule: str = ""
+    timezone: str = "UTC"
     result: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
     created_at: datetime

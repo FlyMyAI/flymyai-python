@@ -38,7 +38,9 @@ class Agents:
         tools: Optional[List[int]] = None,
         mcp_servers: Optional[List[int]] = None,
         input_schema: Optional[Dict[str, Any]] = None,
+        input_description: Optional[str] = None,
         output_schema: Optional[Dict[str, Any]] = None,
+        output_description: Optional[str] = None,
         status: Optional[str] = None,
     ) -> Agent:
         """Create a new agent.
@@ -59,8 +61,16 @@ class Agents:
         input_schema:
             JSON Schema describing runtime variables accepted by ``run``.
             Required whenever ``goal`` contains Jinja2 placeholders.
+        input_description:
+            Plain-text description of what the agent expects as input.
+            Used together with ``input_schema`` at freeze time as the
+            authoritative scope: chat steps outside the input→output
+            canonical flow are dropped from the frozen instruction.
         output_schema:
             JSON Schema the agent must produce as its final result.
+        output_description:
+            Plain-text description of what the agent returns. Paired
+            with ``output_schema`` to bound the canonical pipeline.
         status:
             Initial status (default ``draft``).
         """
@@ -71,8 +81,12 @@ class Agents:
             body["available_custom_mcp_servers"] = mcp_servers
         if input_schema is not None:
             body["input_schema"] = input_schema
+        if input_description is not None:
+            body["input_description"] = input_description
         if output_schema is not None:
             body["output_schema"] = output_schema
+        if output_description is not None:
+            body["output_description"] = output_description
         if status is not None:
             body["status"] = status
         data = self._c._request("POST", "/api/v1/agents/tasks/", json=body)
@@ -430,6 +444,46 @@ class Compilations:
         data = self._c._request("GET", f"/api/v1/agents/compilations/{compilation_id}/")
         return Compilation(**data)
 
+    def update(
+        self,
+        compilation_id: ResourceID,
+        *,
+        instruction_md: Optional[str] = None,
+        cron_schedule: Optional[str] = None,
+        timezone: Optional[str] = None,
+    ) -> Compilation:
+        """Edit a frozen compilation (PATCH).
+
+        Useful when you want to tweak the Markdown plan by hand after the
+        backend froze it. Only allowed when the compilation is already in
+        a terminal state (``compiled`` / ``running`` / ``completed``);
+        editing during ``pending`` / ``compiling`` raises HTTP 400.
+
+        Parameters
+        ----------
+        compilation_id:
+            ID of the compilation to update.
+        instruction_md:
+            New Markdown instruction body. Pass a non-blank string.
+        cron_schedule:
+            New cron expression for scheduled re-runs (or ``""`` to clear).
+        timezone:
+            IANA timezone name for the cron schedule.
+        """
+        body: Dict[str, Any] = {}
+        if instruction_md is not None:
+            body["instruction_md"] = instruction_md
+        if cron_schedule is not None:
+            body["cron_schedule"] = cron_schedule
+        if timezone is not None:
+            body["timezone"] = timezone
+        data = self._c._request(
+            "PATCH",
+            f"/api/v1/agents/compilations/{compilation_id}/",
+            json=body,
+        )
+        return Compilation(**data)
+
     def compile(self, *, execution_id: ResourceID) -> Compilation:
         """Compile an execution into a reusable Python script.
 
@@ -528,9 +582,12 @@ class AsyncAgents:
         tools: Optional[List[int]] = None,
         mcp_servers: Optional[List[int]] = None,
         input_schema: Optional[Dict[str, Any]] = None,
+        input_description: Optional[str] = None,
         output_schema: Optional[Dict[str, Any]] = None,
+        output_description: Optional[str] = None,
         status: Optional[str] = None,
     ) -> Agent:
+        """Async variant of :meth:`Agents.create`. Same parameters."""
         body: Dict[str, Any] = {"name": name, "user_prompt": goal}
         if tools is not None:
             body["available_tools"] = tools
@@ -538,8 +595,12 @@ class AsyncAgents:
             body["available_custom_mcp_servers"] = mcp_servers
         if input_schema is not None:
             body["input_schema"] = input_schema
+        if input_description is not None:
+            body["input_description"] = input_description
         if output_schema is not None:
             body["output_schema"] = output_schema
+        if output_description is not None:
+            body["output_description"] = output_description
         if status is not None:
             body["status"] = status
         data = await self._c._request("POST", "/api/v1/agents/tasks/", json=body)
@@ -794,6 +855,29 @@ class AsyncCompilations:
     async def get(self, compilation_id: ResourceID) -> Compilation:
         data = await self._c._request(
             "GET", f"/api/v1/agents/compilations/{compilation_id}/"
+        )
+        return Compilation(**data)
+
+    async def update(
+        self,
+        compilation_id: ResourceID,
+        *,
+        instruction_md: Optional[str] = None,
+        cron_schedule: Optional[str] = None,
+        timezone: Optional[str] = None,
+    ) -> Compilation:
+        """Async variant of :meth:`Compilations.update`."""
+        body: Dict[str, Any] = {}
+        if instruction_md is not None:
+            body["instruction_md"] = instruction_md
+        if cron_schedule is not None:
+            body["cron_schedule"] = cron_schedule
+        if timezone is not None:
+            body["timezone"] = timezone
+        data = await self._c._request(
+            "PATCH",
+            f"/api/v1/agents/compilations/{compilation_id}/",
+            json=body,
         )
         return Compilation(**data)
 

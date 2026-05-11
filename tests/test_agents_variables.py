@@ -348,3 +348,64 @@ class TestHighLevelHelpers:
             1, variables={"x": 1}, poll_interval=0.01
         )
         assert run.status == ExecutionStatus.COMPLETED
+
+
+# ── Agents.create with input/output descriptions ────────────────────────────
+
+
+class TestAgentsCreateDescriptions:
+    def test_create_sends_input_output_description(self):
+        captured: List[Dict[str, Any]] = []
+
+        def create(request: httpx.Request) -> httpx.Response:
+            captured.append(json.loads(request.content))
+            return httpx.Response(
+                201,
+                json={
+                    "uuid": "u",
+                    "name": "n",
+                    "user_prompt": "p",
+                    "input_description": "a URL to audit",
+                    "output_description": "a numeric score",
+                    "created_at": _now_iso(),
+                    "updated_at": _now_iso(),
+                },
+            )
+
+        client = _build_client({("POST", "/api/v1/agents/tasks/"): create})
+        agent = client.agents.create(
+            name="n",
+            goal="p",
+            input_description="a URL to audit",
+            output_description="a numeric score",
+        )
+
+        assert captured[0]["input_description"] == "a URL to audit"
+        assert captured[0]["output_description"] == "a numeric score"
+        assert agent.input_description == "a URL to audit"
+        assert agent.output_description == "a numeric score"
+
+    def test_create_omits_descriptions_when_not_provided(self):
+        captured: List[Dict[str, Any]] = []
+
+        def create(request: httpx.Request) -> httpx.Response:
+            captured.append(json.loads(request.content))
+            return httpx.Response(
+                201,
+                json={
+                    "uuid": "u",
+                    "name": "n",
+                    "user_prompt": "p",
+                    "created_at": _now_iso(),
+                    "updated_at": _now_iso(),
+                },
+            )
+
+        client = _build_client({("POST", "/api/v1/agents/tasks/"): create})
+        agent = client.agents.create(name="n", goal="p")
+
+        assert "input_description" not in captured[0]
+        assert "output_description" not in captured[0]
+        # Default empty string when backend omits the field too.
+        assert agent.input_description == ""
+        assert agent.output_description == ""
