@@ -31,6 +31,9 @@ from flymyai.agents._types import (
 )
 
 NOW = datetime.now(tz=timezone.utc).isoformat()
+RUN_ID = "won-gsfr-mxp"
+PREVIOUS_RUN_ID = "won-prev-mxp"
+COMPILATION_ID = "cmp-gsfr-mxp"
 
 
 def _agent_payload(**overrides) -> dict:
@@ -52,7 +55,7 @@ def _agent_payload(**overrides) -> dict:
 
 def _run_payload(**overrides) -> dict:
     base = {
-        "id": 42,
+        "id": RUN_ID,
         "user_agent_task": 1,
         "previous_execution": None,
         "original_prompt": "Do something useful",
@@ -105,8 +108,8 @@ def _tool_payload(**overrides) -> dict:
 
 def _compilation_payload(**overrides) -> dict:
     base = {
-        "id": 3,
-        "execution": 42,
+        "id": COMPILATION_ID,
+        "execution": RUN_ID,
         "status": "compiled",
         "script_code": "print('hello')",
         "result": None,
@@ -328,8 +331,9 @@ class TestSyncRuns:
 
     def test_get_returns_run_detail(self):
         client = self._client_with_run(status="running")
-        run = client.runs.get(42)
+        run = client.runs.get(RUN_ID)
         assert isinstance(run, RunDetail)
+        assert run.id == RUN_ID
         assert run.status == ExecutionStatus.RUNNING
 
     def test_list_returns_runs(self):
@@ -348,15 +352,16 @@ class TestSyncRuns:
             204, content=b"", request=httpx.Request("POST", "https://backend.flymy.ai/")
         )
         client = _sync_client(mock_http)
-        client.runs.cancel(42)
+        client.runs.cancel(RUN_ID)
         args, _ = mock_http.request.call_args
         assert "cancel" in args[1]
+        assert RUN_ID in args[1]
 
     def test_append_message(self):
         mock_http = MagicMock()
         mock_http.request.return_value = _make_response(_run_payload())
         client = _sync_client(mock_http)
-        result = client.runs.append_message(42, text="continue please")
+        result = client.runs.append_message(RUN_ID, text="continue please")
         assert isinstance(result, RunDetail)
         _, call_kwargs = mock_http.request.call_args
         assert call_kwargs["json"]["text"] == "continue please"
@@ -503,7 +508,9 @@ class TestSyncCompilations:
         mock_http = MagicMock()
         mock_http.request.return_value = _make_response(_compilation_payload())
         client = _sync_client(mock_http)
-        comp = client.compilations.get(3)
+        comp = client.compilations.get(COMPILATION_ID)
+        assert comp.id == COMPILATION_ID
+        assert comp.execution == RUN_ID
         assert comp.script_code == "print('hello')"
         assert comp.status == CompilationStatus.COMPILED
 
@@ -511,10 +518,11 @@ class TestSyncCompilations:
         mock_http = MagicMock()
         mock_http.request.return_value = _make_response(_compilation_payload())
         client = _sync_client(mock_http)
-        comp = client.compilations.compile(execution_id=42)
+        comp = client.compilations.compile(execution_id=RUN_ID)
         assert isinstance(comp, Compilation)
+        assert comp.execution == RUN_ID
         args, _ = mock_http.request.call_args
-        assert "42" in args[1]
+        assert RUN_ID in args[1]
 
     def test_run_compilation(self):
         mock_http = MagicMock()
@@ -522,7 +530,7 @@ class TestSyncCompilations:
             _compilation_payload(status="completed", result={"output": "done"})
         )
         client = _sync_client(mock_http)
-        comp = client.compilations.run(3)
+        comp = client.compilations.run(COMPILATION_ID)
         assert comp.status == CompilationStatus.COMPLETED
         assert comp.result == {"output": "done"}
 
@@ -615,7 +623,7 @@ class TestAsyncRuns:
         mock_http = AsyncMock()
         mock_http.request.return_value = _make_response(_run_payload())
         client = _async_client(mock_http)
-        result = await client.runs.append_message(42, text="go on")
+        result = await client.runs.append_message(RUN_ID, text="go on")
         assert isinstance(result, RunDetail)
 
 
@@ -642,8 +650,9 @@ class TestAsyncCompilations:
         mock_http = AsyncMock()
         mock_http.request.return_value = _make_response(_compilation_payload())
         client = _async_client(mock_http)
-        comp = await client.compilations.compile(execution_id=42)
+        comp = await client.compilations.compile(execution_id=RUN_ID)
         assert isinstance(comp, Compilation)
+        assert comp.execution == RUN_ID
 
     async def test_run(self):
         mock_http = AsyncMock()
@@ -651,7 +660,7 @@ class TestAsyncCompilations:
             _compilation_payload(status="completed")
         )
         client = _async_client(mock_http)
-        comp = await client.compilations.run(3)
+        comp = await client.compilations.run(COMPILATION_ID)
         assert comp.status == CompilationStatus.COMPLETED
 
 
@@ -667,6 +676,10 @@ class TestModels:
     def test_run_output_property(self):
         run = RunDetail(**_run_payload(agent_result={"key": "val"}))
         assert run.output == {"key": "val"}
+
+    def test_run_accepts_string_previous_execution(self):
+        run = RunDetail(**_run_payload(previous_execution=PREVIOUS_RUN_ID))
+        assert run.previous_execution == PREVIOUS_RUN_ID
 
     def test_agent_id_property(self):
         agent = Agent(**_agent_payload())

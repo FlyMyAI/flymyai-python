@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
+
+
+ResourceID = Union[str, int]
 
 
 class AgentStatus(str, Enum):
@@ -87,9 +90,9 @@ class ExecutionLog(BaseModel):
 class Run(BaseModel):
     """A single agent execution (run)."""
 
-    id: int
+    id: ResourceID
     user_agent_task: int
-    previous_execution: Optional[int] = None
+    previous_execution: Optional[ResourceID] = None
     original_prompt: str
     created_at: datetime
     updated_at: datetime
@@ -169,8 +172,8 @@ class AvailableTool(BaseModel):
 class Compilation(BaseModel):
     """A compiled script derived from an agent execution."""
 
-    id: int
-    execution: int
+    id: ResourceID
+    execution: ResourceID
     status: CompilationStatus = CompilationStatus.PENDING
     script_code: str = ""
     result: Optional[Dict[str, Any]] = None

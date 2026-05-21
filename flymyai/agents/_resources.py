@@ -9,6 +9,7 @@ from flymyai.agents._types import (
     AgentDetail,
     AvailableTool,
     Compilation,
+    ResourceID,
     Run,
     RunDetail,
     Tool,
@@ -109,16 +110,16 @@ class Runs:
         data = self._c._request("GET", "/api/v1/agents/executions/")
         return [Run(**item) for item in data]
 
-    def get(self, run_id: int) -> RunDetail:
+    def get(self, run_id: ResourceID) -> RunDetail:
         """Get a single execution with logs."""
         data = self._c._request("GET", f"/api/v1/agents/executions/{run_id}/")
         return RunDetail(**data)
 
-    def cancel(self, run_id: int) -> None:
+    def cancel(self, run_id: ResourceID) -> None:
         """Cancel a running execution."""
         self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
 
-    def append_message(self, run_id: int, *, text: str) -> RunDetail:
+    def append_message(self, run_id: ResourceID, *, text: str) -> RunDetail:
         """Append a user message to the conversation and restart the agent loop."""
         data = self._c._request(
             "POST",
@@ -129,7 +130,7 @@ class Runs:
 
     def wait(
         self,
-        run_id: int,
+        run_id: ResourceID,
         *,
         timeout: float = 300,
         poll_interval: float = 2.0,
@@ -159,7 +160,7 @@ class Runs:
 
     def stream_events(
         self,
-        run_id: int,
+        run_id: ResourceID,
         *,
         timeout: float = 300,
         poll_interval: float = 1.0,
@@ -255,18 +256,18 @@ class Compilations:
         data = self._c._request("GET", "/api/v1/agents/compilations/")
         return [Compilation(**item) for item in data]
 
-    def get(self, compilation_id: int) -> Compilation:
+    def get(self, compilation_id: ResourceID) -> Compilation:
         data = self._c._request("GET", f"/api/v1/agents/compilations/{compilation_id}/")
         return Compilation(**data)
 
-    def compile(self, *, execution_id: int) -> Compilation:
+    def compile(self, *, execution_id: ResourceID) -> Compilation:
         """Create a script compilation from an execution."""
         data = self._c._request(
             "POST", f"/api/v1/agents/compilations/compile/{execution_id}/"
         )
         return Compilation(**data)
 
-    def run(self, compilation_id: int) -> Compilation:
+    def run(self, compilation_id: ResourceID) -> Compilation:
         """Execute a compiled script."""
         data = self._c._request(
             "POST", f"/api/v1/agents/compilations/{compilation_id}/run/"
@@ -336,14 +337,14 @@ class AsyncRuns:
         data = await self._c._request("GET", "/api/v1/agents/executions/")
         return [Run(**item) for item in data]
 
-    async def get(self, run_id: int) -> RunDetail:
+    async def get(self, run_id: ResourceID) -> RunDetail:
         data = await self._c._request("GET", f"/api/v1/agents/executions/{run_id}/")
         return RunDetail(**data)
 
-    async def cancel(self, run_id: int) -> None:
+    async def cancel(self, run_id: ResourceID) -> None:
         await self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
 
-    async def append_message(self, run_id: int, *, text: str) -> RunDetail:
+    async def append_message(self, run_id: ResourceID, *, text: str) -> RunDetail:
         data = await self._c._request(
             "POST",
             f"/api/v1/agents/executions/{run_id}/append-message/",
@@ -353,7 +354,7 @@ class AsyncRuns:
 
     async def wait(
         self,
-        run_id: int,
+        run_id: ResourceID,
         *,
         timeout: float = 300,
         poll_interval: float = 2.0,
@@ -372,7 +373,7 @@ class AsyncRuns:
 
     async def stream_events(
         self,
-        run_id: int,
+        run_id: ResourceID,
         *,
         timeout: float = 300,
         poll_interval: float = 1.0,
@@ -457,19 +458,19 @@ class AsyncCompilations:
         data = await self._c._request("GET", "/api/v1/agents/compilations/")
         return [Compilation(**item) for item in data]
 
-    async def get(self, compilation_id: int) -> Compilation:
+    async def get(self, compilation_id: ResourceID) -> Compilation:
         data = await self._c._request(
             "GET", f"/api/v1/agents/compilations/{compilation_id}/"
         )
         return Compilation(**data)
 
-    async def compile(self, *, execution_id: int) -> Compilation:
+    async def compile(self, *, execution_id: ResourceID) -> Compilation:
         data = await self._c._request(
             "POST", f"/api/v1/agents/compilations/compile/{execution_id}/"
         )
         return Compilation(**data)
 
-    async def run(self, compilation_id: int) -> Compilation:
+    async def run(self, compilation_id: ResourceID) -> Compilation:
         data = await self._c._request(
             "POST", f"/api/v1/agents/compilations/{compilation_id}/run/"
         )
