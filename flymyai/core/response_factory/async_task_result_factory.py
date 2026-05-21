@@ -1,7 +1,8 @@
 from flymyai.core.response_factory.base_response_factory import ResponseFactory
 
 
-class MaybeNotExistent(Exception): ...
+class MaybeNotExistent(Exception):
+    ...
 
 
 class AsyncTaskResultFactory(ResponseFactory):

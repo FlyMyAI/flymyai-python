@@ -7,7 +7,8 @@ from typing import Any, Iterator, AsyncIterator
 from typing_extensions import override
 
 
-class SSEException(Exception): ...
+class SSEException(Exception):
+    ...
 
 
 class ServerSentEvent:

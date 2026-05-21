@@ -7,7 +7,8 @@ from flymyai.core._streaming import ServerSentEvent
 from flymyai.core.exceptions import BaseFlyMyAIException
 
 
-class ResponseFactoryException(Exception): ...
+class ResponseFactoryException(Exception):
+    ...
 
 
 class ResponseFactory(object):

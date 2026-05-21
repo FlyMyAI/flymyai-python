@@ -48,38 +48,46 @@ class BaseM1Client(Generic[_PossibleClients]):
     @overload
     def generate(
         self, prompt: str, image: Optional[Union[str, Path]] = None
-    ) -> FlyMyAIM1Response: ...
+    ) -> FlyMyAIM1Response:
+        ...
 
     @overload
     def generation_task(
         self, prompt: str, image: Optional[Union[str, Path]] = None
-    ) -> M1GenerationTask: ...
+    ) -> M1GenerationTask:
+        ...
 
     @overload
     def generation_task_result(
         self, generation_task: M1GenerationTask
-    ) -> FlyMyAIM1Response: ...
+    ) -> FlyMyAIM1Response:
+        ...
 
     @overload
-    def upload_image(self, image: Union[str, Path]): ...
+    def upload_image(self, image: Union[str, Path]):
+        ...
 
     @overload
     async def generate(
         self, prompt: str, image: Optional[Union[str, Path]] = None
-    ) -> FlyMyAIM1Response: ...
+    ) -> FlyMyAIM1Response:
+        ...
 
     @overload
     async def generation_task(
         self, prompt: str, image: Optional[Union[str, Path]] = None
-    ) -> M1GenerationTask: ...
+    ) -> M1GenerationTask:
+        ...
 
     @overload
     async def generation_task_result(
         self, generation_task: M1GenerationTask
-    ) -> FlyMyAIM1Response: ...
+    ) -> FlyMyAIM1Response:
+        ...
 
     @overload
-    async def upload_image(self, image: Union[str, Path]): ...
+    async def upload_image(self, image: Union[str, Path]):
+        ...
 
     @property
     def _headers(self):
