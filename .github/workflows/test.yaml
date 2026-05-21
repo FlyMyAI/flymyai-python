@@ -25,7 +25,7 @@ jobs:
         run: git config --global --add safe.directory '*'
 
       - name: Install dependencies
-        run: pip3 install poetry flake8 black && poetry config virtualenvs.create ${USE_VENV} && poetry install && pip install black
+        run: pip3 install poetry==2.2.1 flake8==7.3.0 black==23.12.1 && poetry config virtualenvs.create ${USE_VENV} && poetry install
 #
 #      - name: flake8
 #        run: flake8 --max-line-length=120 .

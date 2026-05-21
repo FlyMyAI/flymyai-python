@@ -43,12 +43,10 @@ class ChatResponseData:
             text=data.get("text"),
             tool_used=data.get("tool_used"),
             file_url=(
-                "".join(
-                    [
-                        os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/"),
-                        data.get("file_url"),
-                    ]
-                )
+                "".join([
+                    os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/"),
+                    data.get("file_url"),
+                ])
                 if data.get("file_url")
                 else None
             ),
