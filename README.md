@@ -111,7 +111,7 @@ async def main():
         payload={"prompt": "a cute cat astronaut floating in a neon nebula, studio lighting"},
     )
     with open("nano_banana.jpg", "wb") as f:
-        f.write(base64.b64decode(response.output_data["image"]))
+        f.write(base64.b64decode(response.output_data["image"][0]))
 
 asyncio.run(main())
 ```
@@ -128,7 +128,7 @@ async def main():
         model="flymyai/veo31-fast-generate",
         payload={"prompt": "a red sports car driving along a coastal road at sunset, cinematic"},
     )
-    print(response.output_data["video"])  # public URL to the generated .mp4
+    print(response.output_data["video"][0])  # public URL to the generated .mp4
 
 asyncio.run(main())
 ```
@@ -155,7 +155,7 @@ async def main():
     ])
     for i, r in enumerate(results):
         with open(f"img_{i}.jpg", "wb") as f:
-            f.write(base64.b64decode(r.output_data["image"]))
+            f.write(base64.b64decode(r.output_data["image"][0]))
 
 asyncio.run(main())
 ```
