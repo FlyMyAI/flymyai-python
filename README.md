@@ -1,14 +1,14 @@
 <p align="center">
-  <img src="assets/flymyai-logo.svg" alt="FlyMy.AI" width="300" />
+  <img src="assets/flymyai-logo.png" alt="FlyMy.AI" width="260" />
 </p>
 
 <p align="center">
   <pre>
-   ᕦ[▀̿_▀̿]ᕤ "Hi!"      ◢▆[◉◡◉]▆◣      o=[•_•]=o      ╾━[⊙▂⊙]━╼ "Generate image"
+   ᕦ[▀̿_▀̿]ᕤ   ◢▆[◉◡◉]▆◣   o=[•_•]=o   ╾━[⊙▂⊙]━╼
 
-            ¬[°□°]¬      凸[¬_¬]凸      <|¤_¤|>      ʕ[•ᴥ•]ʔ "beep boop"      ╚[ʘᗜʘ]╝
+      ¬[°□°]¬   凸[¬_¬]凸   <|¤_¤|>   ʕ[•ᴥ•]ʔ   ╚[ʘᗜʘ]╝
 
-   d[-_-]b      q[◔౪◔]p "Freeze it!"      \[T_T]/      ✧[◕‿◕]✧      ¬[•‿•]╦═ =^.^= ═╦[•‿•]¬
+   d[-_-]b   q[◔౪◔]p   \[T_T]/   ✧[◕‿◕]✧   ¬[•‿•]╦═ =^.^= ═╦[•‿•]¬
 </pre>
 </p>
 
