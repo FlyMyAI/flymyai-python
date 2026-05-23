@@ -10,20 +10,24 @@
 </pre>
 </p>
 
-Welcome to FlyMy.AI inference platform. Our goal is to provide the fastest and most affordable deployment solutions for neural networks and AI applications.
+**FlyMy.AI is the Agentic Cloud - Agents. Models. Serverless.**
 
-- **Fast Inference**: Experience the fastest Stable Diffusion inference globally.
-- **Scalability**: Autoscaling to millions of users per second.
-- **Ease of Use**: One-click deployment for any publicly available neural networks.
+Ship autonomous AI workers that plan, call tools (MCP), and deliver results - not just chat. Access any model through a unified API, or deploy your own custom models on serverless GPUs. One platform, pay per use, production-ready in minutes.
+
+- **Agents**: build autonomous workers that plan, execute tools, and return structured results - then freeze a good run into a reusable, deterministic instruction you call as an API.
+- **Models**: run any model through one unified API (image, video, audio, LLMs) in sync or async mode.
+- **Serverless**: deploy your own custom models on autoscaling GPUs.
+- **MCP tools**: plug in any MCP - web search, browsers, files, external APIs.
+
+Agents tie everything together; Models and Serverless also work standalone - pick what you need and plug the rest in later.
 
 ## Website
 
-For more information, visit our website: [FlyMy.AI](https://flymy.ai)
-Or connect with us and other users on Discord: [Join Discord](https://discord.com/invite/t6hPBpSebw)
+For more information, visit [FlyMy.AI](https://flymy.ai), read the [docs](https://docs.flymy.ai), or join us on [Discord](https://discord.com/invite/t6hPBpSebw).
 
 ## Getting Started
 
-This is a Python client for [FlyMyAI](https://flymy.ai). It allows you to easily run models and get predictions from your Python code in sync and async mode.
+This is the Python client for [FlyMy.AI](https://flymy.ai). Build and run agents, call any model, and drive serverless endpoints from Python - in sync or async mode.
 
 ## Requirements
 
