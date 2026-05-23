@@ -6,9 +6,8 @@
 
   ¬[°□°]¬     凸[¬_¬]凸     <|¤_¤|>     ʕ[•ᴥ•]ʔ ╓"beep boop"     ╤[■_■]╤     d[-_-]b
 
-  q[◔౪◔]p ╓"Freeze it!"     \[T_T]/     ▟[•̪●]▙       two bots lift the cat →  ¬[•‿•]╦═ =^.^= ═╦[•‿•]¬
+  q[◔౪◔]p ╓"Freeze it!"     \[T_T]/     ▟[•̪●]▙       ¬[•‿•]╦═ =^.^= ═╦[•‿•]¬
 </pre>
-  </br>Generated with FlyMy.AI  <b>in 🚀 70ms </b>
 </p>
 
 Welcome to FlyMy.AI inference platform. Our goal is to provide the fastest and most affordable deployment solutions for neural networks and AI applications.
