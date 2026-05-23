@@ -65,9 +65,7 @@ class VariablesValidationError(FlyMyAIAgentError):
         messages: list[str],
         field_errors: Dict[str, str],
     ) -> None:
-        super().__init__(
-            message, status_code=status_code, response_body=response_body
-        )
+        super().__init__(message, status_code=status_code, response_body=response_body)
         self.messages = messages
         self.field_errors = field_errors
 
@@ -168,9 +166,7 @@ class SyncAgentClient:
                 "api_key is required. Pass it directly or set FLYMYAI_API_KEY."
             )
         self._base_url = (
-            base_url
-            or os.environ.get(_AGENTS_BASE_URL_ENV)
-            or _DEFAULT_BASE_URL
+            base_url or os.environ.get(_AGENTS_BASE_URL_ENV) or _DEFAULT_BASE_URL
         )
         self._max_retries = max_retries
         self._http = httpx.Client(
@@ -229,9 +225,7 @@ class AsyncAgentClient:
                 "api_key is required. Pass it directly or set FLYMYAI_API_KEY."
             )
         self._base_url = (
-            base_url
-            or os.environ.get(_AGENTS_BASE_URL_ENV)
-            or _DEFAULT_BASE_URL
+            base_url or os.environ.get(_AGENTS_BASE_URL_ENV) or _DEFAULT_BASE_URL
         )
         self._max_retries = max_retries
         self._http = httpx.AsyncClient(

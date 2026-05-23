@@ -225,6 +225,7 @@ class Agents:
         )
         if comp.status == CompilationStatus.FAILED:
             from flymyai.agents._client import FlyMyAIAgentError
+
             raise FlyMyAIAgentError(
                 f"Compilation {comp.id} failed: {comp.error or '(no error)'}",
                 status_code=0,
@@ -544,9 +545,7 @@ class Compilations:
     ) -> RunDetail:
         """Run an instruction and block until the resulting run finishes."""
         run = self.run_instruction(compilation_id, variables=variables)
-        return self._c.runs.wait(
-            run.id, timeout=timeout, poll_interval=poll_interval
-        )
+        return self._c.runs.wait(run.id, timeout=timeout, poll_interval=poll_interval)
 
     def wait(
         self,
@@ -559,7 +558,10 @@ class Compilations:
         deadline = time.monotonic() + timeout
         while True:
             comp = self.get(compilation_id)
-            if comp.status != CompilationStatus.COMPILING and comp.status != CompilationStatus.PENDING:
+            if (
+                comp.status != CompilationStatus.COMPILING
+                and comp.status != CompilationStatus.PENDING
+            ):
                 return comp
             if time.monotonic() >= deadline:
                 raise TimeoutError(
@@ -680,6 +682,7 @@ class AsyncAgents:
         )
         if comp.status == CompilationStatus.FAILED:
             from flymyai.agents._client import FlyMyAIAgentError
+
             raise FlyMyAIAgentError(
                 f"Compilation {comp.id} failed: {comp.error or '(no error)'}",
                 status_code=0,
@@ -945,7 +948,10 @@ class AsyncCompilations:
         deadline = time.monotonic() + timeout
         while True:
             comp = await self.get(compilation_id)
-            if comp.status != CompilationStatus.COMPILING and comp.status != CompilationStatus.PENDING:
+            if (
+                comp.status != CompilationStatus.COMPILING
+                and comp.status != CompilationStatus.PENDING
+            ):
                 return comp
             if time.monotonic() >= deadline:
                 raise TimeoutError(

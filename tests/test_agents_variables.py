@@ -129,14 +129,12 @@ class TestAgentsSuggestSchema:
         assert isinstance(result, SchemaSuggestion)
         assert result.input_schema == {"type": "object"}
         assert result.output_schema == {"type": "object"}
-        assert captured == [
-            {
-                "user_prompt": "Summarize {{ url }}.",
-                "generate_descriptions": False,
-                "input_hint": "A URL to summarize",
-                "output_hint": "A short summary",
-            }
-        ]
+        assert captured == [{
+            "user_prompt": "Summarize {{ url }}.",
+            "generate_descriptions": False,
+            "input_hint": "A URL to summarize",
+            "output_hint": "A short summary",
+        }]
 
     def test_with_generate_descriptions_parses_both(self):
         def suggest(request: httpx.Request) -> httpx.Response:
@@ -165,9 +163,7 @@ class TestAgentsSuggestSchema:
 
     def test_maps_502_to_suggest_schema_error(self):
         def suggest(_: httpx.Request) -> httpx.Response:
-            return httpx.Response(
-                502, json={"detail": "ANTHROPIC_API_KEY missing"}
-            )
+            return httpx.Response(502, json={"detail": "ANTHROPIC_API_KEY missing"})
 
         client = _build_client(
             {("POST", "/api/v1/agents/tasks/suggest-schema/"): suggest}
@@ -204,9 +200,7 @@ class TestRunsSuggestSchema:
             inputs_prompt="one URL",
             outputs_prompt="a summary",
         )
-        assert captured == [
-            {"inputs_prompt": "one URL", "outputs_prompt": "a summary"}
-        ]
+        assert captured == [{"inputs_prompt": "one URL", "outputs_prompt": "a summary"}]
 
     def test_empty_body_sends_no_hints(self):
         seen_body: List[Any] = []
@@ -246,11 +240,9 @@ class TestVariablesValidationError:
                 },
             )
 
-        client = _build_client(
-            {
-                ("POST", "/api/v1/agents/tasks/abc-123/run-loop/"): run_loop,
-            }
-        )
+        client = _build_client({
+            ("POST", "/api/v1/agents/tasks/abc-123/run-loop/"): run_loop,
+        })
         with pytest.raises(VariablesValidationError) as excinfo:
             client.agents.run("abc-123", variables={})
         err = excinfo.value
@@ -270,14 +262,12 @@ class TestVariablesValidationError:
                 },
             )
 
-        client = _build_client(
-            {
-                (
-                    "POST",
-                    "/api/v1/agents/compilations/9/run-instruction/",
-                ): run_instruction,
-            }
-        )
+        client = _build_client({
+            (
+                "POST",
+                "/api/v1/agents/compilations/9/run-instruction/",
+            ): run_instruction,
+        })
         with pytest.raises(VariablesValidationError) as excinfo:
             client.compilations.run_instruction(9)
         assert excinfo.value.messages == [
@@ -296,26 +286,20 @@ class TestHighLevelHelpers:
         poll_state = {"i": 0}
 
         def freeze(_: httpx.Request) -> httpx.Response:
-            return httpx.Response(
-                200, json=_compilation_payload(status="compiling")
-            )
+            return httpx.Response(200, json=_compilation_payload(status="compiling"))
 
         def get_comp(_: httpx.Request) -> httpx.Response:
             poll_state["i"] += 1
             status = "compiled" if poll_state["i"] >= 2 else "compiling"
-            return httpx.Response(
-                200, json=_compilation_payload(status=status)
-            )
+            return httpx.Response(200, json=_compilation_payload(status=status))
 
-        client = _build_client(
-            {
-                (
-                    "POST",
-                    "/api/v1/agents/compilations/freeze-instruction/100/",
-                ): freeze,
-                ("GET", "/api/v1/agents/compilations/1/"): get_comp,
-            }
-        )
+        client = _build_client({
+            (
+                "POST",
+                "/api/v1/agents/compilations/freeze-instruction/100/",
+            ): freeze,
+            ("GET", "/api/v1/agents/compilations/1/"): get_comp,
+        })
         comp = client.agents.compile_from_run(100, poll_interval=0.01)
         assert comp.status == CompilationStatus.COMPILED
         assert poll_state["i"] >= 2
@@ -324,26 +308,20 @@ class TestHighLevelHelpers:
         poll_state = {"i": 0}
 
         def run_instruction(_: httpx.Request) -> httpx.Response:
-            return httpx.Response(
-                200, json=_run_payload(run_id=100, status="pending")
-            )
+            return httpx.Response(200, json=_run_payload(run_id=100, status="pending"))
 
         def get_run(_: httpx.Request) -> httpx.Response:
             poll_state["i"] += 1
             status = "completed" if poll_state["i"] >= 2 else "running"
-            return httpx.Response(
-                200, json=_run_payload(run_id=100, status=status)
-            )
+            return httpx.Response(200, json=_run_payload(run_id=100, status=status))
 
-        client = _build_client(
-            {
-                (
-                    "POST",
-                    "/api/v1/agents/compilations/1/run-instruction/",
-                ): run_instruction,
-                ("GET", "/api/v1/agents/executions/100/"): get_run,
-            }
-        )
+        client = _build_client({
+            (
+                "POST",
+                "/api/v1/agents/compilations/1/run-instruction/",
+            ): run_instruction,
+            ("GET", "/api/v1/agents/executions/100/"): get_run,
+        })
         run = client.compilations.run_instruction_and_wait(
             1, variables={"x": 1}, poll_interval=0.01
         )
