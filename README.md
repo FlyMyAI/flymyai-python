@@ -2,6 +2,8 @@
   <img src="assets/flymyai-logo.png" alt="FlyMy.AI" width="260" />
 </p>
 
+<h3 align="center">FlyMy.AI - the Agentic Cloud.</h3>
+
 <p align="center">
   <pre>
    ᕦ[▀̿_▀̿]ᕤ   ◢▆[◉◡◉]▆◣   o=[•_•]=o   ╾━[⊙▂⊙]━╼
