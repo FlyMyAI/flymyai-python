@@ -1,7 +1,34 @@
 # FlyMy.AI
 
 <p align="center">
-  <img src="https://telegra.ph/file/d76588fc58b3445be4291.png" alt="Generated with FlyMy.AI in 🚀 70ms" width="500" />
+  <pre>
+                            (( ◌ ))
+                               │
+                    ╔══════════╧══════════╗
+                  ╔═╝░░░░░░░░░░░░░░░░░░░░░╚═╗
+                  ║░╭───────────────────╮░║
+                  ║░│   ▟▀▀▀▙     ▟▀▀▀▙   │░║
+                  ║░│   ▐ ◉ ▌     ▐ ◉ ▌   │░║      ╭────────────────╮
+                  ║░│   ▜▄▄▄▛     ▜▄▄▄▛   │░║◖─────┤  analyzing ...  │
+                  ║░│        ▁▁▁▁▁        │░║      ╰────────────────╯
+                  ║░│     ╰┴┴┴┴┴┴┴┴╯      │░║
+                  ║░╰───────────────────╯░║
+                  ╚═╗░░░░░░░░░░░░░░░░░░░░░╔═╝
+            ▟▀▀▙    ╚═════════╤═════════╝    ▟▀▀▙
+            █▒▒█▆▆▆▆▆▆▆╗       │       ╔▆▆▆▆▆▆▆█▒▒█
+            ▜▄▄▛       ╚═╗ ╔═══╧═══╗ ╔═╝       ▜▄▄▛
+                         ╚═╝▓▓▓▓▓▓▓╚═╝
+                       ╔═══╝▓ F M A ▓╚═══╗
+                       ║▓▓▓▓▓ AGENT ▓▓▓▓▓║
+                       ║▓▓░▒▓██▓▒░▓▓▓▓▓▓▓║
+                       ║▓▓ ⌬ · CORE · ⌬ ▓║
+                       ╚═╗▓▓▓▓▓▓▓▓▓▓▓▓▓╔═╝
+                         ║▆▆▆▆▆▆▆▆▆▆▆▆▆║
+                      ╔══╝             ╚══╗
+                   ▟██▛                   ▜██▙
+                  ▟███▙                   ▟███▙
+                  ▀▀▀▀▀                   ▀▀▀▀▀
+</pre>
   </br>Generated with FlyMy.AI  <b>in 🚀 70ms </b>
 </p>
 
@@ -36,9 +63,54 @@ pip install flymyai
 
 Before using the client, you need to have your API key, username, and project name. In order to get credentials, you have to sign up on flymy.ai and get your personal data on [the profile](https://app.flymy.ai/profile).
 
-## Basic Usage
+## Agents
 
-Here's a simple example of how to use the FlyMyAI client:
+Autonomous agents plan, call tools (MCP), and return structured results. Declare an `input_schema` to make an agent reusable with runtime `{{ variables }}`, then freeze a good run into a Markdown instruction you can re-run as an API.
+
+```python
+from flymyai import AgentClient
+
+client = AgentClient(api_key="fly-secret-key")
+
+# 1. Attach a tool (browse the full catalog with client.tools.available())
+tool = client.tools.create(mcp_tool="tavily")
+
+# 2. Create a reusable agent. {{ variables }} require an input_schema.
+agent = client.agents.create(
+    name="News Brief",
+    goal="Find the biggest news about {{ topic }} on {{ date }}. Return a one-line headline.",
+    tools=[tool.id],
+    input_schema={
+        "type": "object",
+        "properties": {"topic": {"type": "string"}, "date": {"type": "string"}},
+        "required": ["topic", "date"],
+    },
+)
+
+# 3. Run with variables; stream progress; get the structured result
+run = client.runs.create(agent_id=agent.id, variables={"topic": "Tesla", "date": "2026-05-21"})
+for event in client.runs.stream_events(run.id):
+    print(f"[{event.type}] {event.message}")
+result = client.runs.wait(run.id)
+print(result.output)
+
+# 4. Chat: append a follow-up message and continue the same run
+client.runs.append_message(run.id, text="Make it punchier.")
+client.runs.wait(run.id)
+
+# 5. Freeze into a reusable instruction, then re-run with fresh variables — your API
+compilation = client.agents.compile_from_run(run.id)
+later = client.compilations.run_instruction_and_wait(
+    compilation.id, variables={"topic": "Bitcoin", "date": "2026-05-19"}
+)
+print(later.output)
+```
+
+Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction). Use `AsyncAgentClient` with `await` for async. See more under **Agent variables, freeze & re-run** below and at [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
+
+## Neural Network Inference
+
+Run any model on the platform with `flymyai.run` (sync) or `flymyai.async_run` (async).
 
 #### BERT Sentiment analysis
 
@@ -51,6 +123,34 @@ response = flymyai.run(
     payload={"text": "What a fabulous fancy building! It looks like a palace!"}
 )
 print(response.output_data["logits"][0])
+```
+
+#### Image generation — Nano Banana 🍌
+
+```python
+import base64
+import flymyai
+
+response = flymyai.run(
+    apikey="fly-secret-key",
+    model="flymyai/nano-banana",
+    payload={"prompt": "a cute cat astronaut floating in a neon nebula, studio lighting"},
+)
+with open("nano_banana.jpg", "wb") as f:
+    f.write(base64.b64decode(response.output_data["image"]))
+```
+
+#### Video generation — Veo 3.1 Fast
+
+```python
+import flymyai
+
+response = flymyai.run(
+    apikey="fly-secret-key",
+    model="flymyai/veo31-fast-generate",
+    payload={"prompt": "a red sports car driving along a coastal road at sunset, cinematic"},
+)
+print(response.output_data["video"])  # public URL to the generated .mp4
 ```
 
 ## Sync Streams
