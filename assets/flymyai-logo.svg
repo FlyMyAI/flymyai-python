@@ -1,8 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 180" width="440" height="180">
-  <rect width="440" height="180" fill="white"/>
-  <!-- lightning bolt: two offset slabs forming the flash -->
-  <polygon points="120,18 60,98 105,98 70,162 165,74 120,74 165,18" fill="#0a0a0a"/>
-  <!-- wordmark -->
-  <text x="195" y="86" font-family="Helvetica, Arial, sans-serif" font-size="74" font-weight="700" fill="#0a0a0a">Flymy</text>
-  <text x="195" y="158" font-family="Helvetica, Arial, sans-serif" font-size="74" font-weight="700" fill="#0a0a0a">AI</text>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 480" width="960" height="480">
+  <rect width="960" height="480" fill="white"/>
+  <polygon points="250,20 50,250 200,250" fill="#0a0a0a"/>
+  <polygon points="200,266 60,266 20,470" fill="#0a0a0a"/>
+  <polygon points="50,250 200,250 200,266 60,266" fill="#0a0a0a"/>
+  <text x="300" y="205" font-family="Helvetica, Arial, sans-serif" font-size="150" font-weight="700" fill="#0a0a0a">Flymy</text>
+  <text x="300" y="380" font-family="Helvetica, Arial, sans-serif" font-size="150" font-weight="700" fill="#0a0a0a">AI</text>
 </svg>
