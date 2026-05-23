@@ -1,5 +1,4 @@
 import os
-import warnings
 from pathlib import Path
 from typing import overload, Union, TypeVar, Generic, Optional
 
@@ -10,6 +9,14 @@ from flymyai.core.types.m1 import M1GenerationTask
 from flymyai.core.models.m1_history import M1History
 
 DEFAULT_RETRY_COUNT = os.getenv("FLYMYAI_MAX_RETRIES", 2)
+
+M1_DEPRECATION_MESSAGE = (
+    "FlyMyAI M1 (m1_client / async_m1_client / FlyMyAIM1 / AsyncFlymyAIM1) is "
+    "deprecated and will be removed in a future release. Use the Agents API "
+    "(`from flymyai import AgentClient`) or `flymyai.run` / `flymyai.async_run` "
+    "with media models such as 'flymyai/nano-banana' (image) and "
+    "'flymyai/veo31-fast-generate' (video) instead."
+)
 
 _PossibleClients = TypeVar(
     "_PossibleClients", bound=Union[httpx.Client, httpx.AsyncClient]
@@ -30,16 +37,6 @@ class BaseM1Client(Generic[_PossibleClients]):
     _image: Optional[str]
 
     def __init__(self, apikey: str):
-        warnings.warn(
-            "FlyMyAI M1 (m1_client / async_m1_client / FlyMyAIM1) is deprecated "
-            "and will be removed in a future release. Use the Agents API "
-            "(`from flymyai import AgentClient`) or `flymyai.run` / "
-            "`flymyai.async_run` with media models such as "
-            "'flymyai/nano-banana' (image) and 'flymyai/veo31-fast-generate' "
-            "(video) instead.",
-            DeprecationWarning,
-            stacklevel=2,
-        )
         self._apikey = apikey
         self._client = self._construct_client()
         self._m1_history = M1History()

@@ -1,5 +1,6 @@
 import asyncio
 import os
+import warnings
 from typing import Union, Optional
 from pathlib import Path
 
@@ -7,7 +8,11 @@ import httpx
 
 from flymyai.core._response import FlyMyAIM1Response
 from flymyai.core.types.m1 import M1GenerationTask, M1Record, M1Role
-from flymyai.core.clients.base_m1_client import BaseM1Client, _predict_timeout
+from flymyai.core.clients.base_m1_client import (
+    BaseM1Client,
+    M1_DEPRECATION_MESSAGE,
+    _predict_timeout,
+)
 
 
 class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
@@ -54,6 +59,7 @@ class BaseM1AsyncClient(BaseM1Client[httpx.AsyncClient]):
         :param image: Local image file (as `Path`) or remote image URL (as `str`).
         :return: FlyMyAIM1Response with generated content and metadata.
         """
+        warnings.warn(M1_DEPRECATION_MESSAGE, DeprecationWarning, stacklevel=2)
         await self._process_image(image)
         self._m1_history.add(M1Record(role=M1Role.user, content=prompt))
         generation_task = await self.generation_task()
