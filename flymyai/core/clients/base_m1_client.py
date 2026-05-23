@@ -1,4 +1,5 @@
 import os
+import warnings
 from pathlib import Path
 from typing import overload, Union, TypeVar, Generic, Optional
 
@@ -29,6 +30,16 @@ class BaseM1Client(Generic[_PossibleClients]):
     _image: Optional[str]
 
     def __init__(self, apikey: str):
+        warnings.warn(
+            "FlyMyAI M1 (m1_client / async_m1_client / FlyMyAIM1) is deprecated "
+            "and will be removed in a future release. Use the Agents API "
+            "(`from flymyai import AgentClient`) or `flymyai.run` / "
+            "`flymyai.async_run` with media models such as "
+            "'flymyai/nano-banana' (image) and 'flymyai/veo31-fast-generate' "
+            "(video) instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self._apikey = apikey
         self._client = self._construct_client()
         self._m1_history = M1History()
