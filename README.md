@@ -2,12 +2,11 @@
 
 <p align="center">
   <pre>
-  d[o_0]b  ╓"Hi!"      [¬º-°]¬    {⌐■_■}    ◖|◔◡◉|◗    [^_^] ╓"Generate image"    [•_•]
+  ᕦ[▀̿_▀̿]ᕤ  ╓"Hi!"        ◢▆[◉◡◉]▆◣        o=[•_•]=o        ╾━[⊙▂⊙]━╼  ╓"Generate image"
 
-  q[•ᴥ•]p   [o_o]   ⊙▂⊙   [♥‿♥]   [¬_¬]   凹[◎凸◎]凹   [@_@]   [ʘ‿ʘ]   (•_•)   [¬‿¬]
+  ¬[°□°]¬     凸[¬_¬]凸     <|¤_¤|>     ʕ[•ᴥ•]ʔ ╓"beep boop"     ╤[■_■]╤     d[-_-]b
 
-  ╙"beep boop"   └[∵┌]  [┐∵]┘   [×_×]   [>_<]   ╚[◣_◢]╝   ┳"Freeze it!"      .---. =^.^=
-                                                          two bots saving the cat →( o.o )
+  q[◔౪◔]p ╓"Freeze it!"     \[T_T]/     ▟[•̪●]▙       two bots lift the cat →  ¬[•‿•]╦═ =^.^= ═╦[•‿•]¬
 </pre>
   </br>Generated with FlyMy.AI  <b>in 🚀 70ms </b>
 </p>
