@@ -57,6 +57,7 @@ class Agent(BaseModel):
     user_prompt: str
     available_tools: Any = Field(default_factory=list)
     available_custom_mcp_servers: List[int] = Field(default_factory=list)
+    available_skills: Any = Field(default_factory=list)
     input_schema: Optional[Dict[str, Any]] = None
     input_description: str = ""
     output_schema: Optional[Dict[str, Any]] = None
@@ -159,6 +160,26 @@ class Tool(BaseModel):
     @property
     def name(self) -> str:
         return self.mcp_tool
+
+
+class Skill(BaseModel):
+    """A curated, attachable skill (authored how-to / SKILL.md package).
+
+    List and attach payloads omit the body; ``skills.get`` includes
+    ``instructions_md`` (the full SKILL.md body).
+    """
+
+    id: int
+    name: str
+    slug: str
+    description: str = ""
+    instructions_md: Optional[str] = None
+    frontmatter_json: Dict[str, Any] = Field(default_factory=dict)
+    is_favorite: bool = False
+    is_active: bool = True
+    is_public: bool = False
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
 
 
 class AvailableTool(BaseModel):

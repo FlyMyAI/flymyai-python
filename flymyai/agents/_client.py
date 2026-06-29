@@ -10,9 +10,11 @@ from flymyai.agents._resources import (
     AsyncAgents,
     AsyncCompilations,
     AsyncRuns,
+    AsyncSkills,
     AsyncTools,
     Compilations,
     Runs,
+    Skills,
     Tools,
 )
 
@@ -178,6 +180,7 @@ class SyncAgentClient:
         self.agents = Agents(self)
         self.runs = Runs(self)
         self.tools = Tools(self)
+        self.skills = Skills(self)
         self.compilations = Compilations(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -237,6 +240,7 @@ class AsyncAgentClient:
         self.agents = AsyncAgents(self)
         self.runs = AsyncRuns(self)
         self.tools = AsyncTools(self)
+        self.skills = AsyncSkills(self)
         self.compilations = AsyncCompilations(self)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:

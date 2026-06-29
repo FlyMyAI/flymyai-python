@@ -14,6 +14,7 @@ from flymyai.agents._types import (
     Run,
     RunDetail,
     SchemaSuggestion,
+    Skill,
     Tool,
 )
 
@@ -42,6 +43,7 @@ class Agents:
         output_schema: Optional[Dict[str, Any]] = None,
         output_description: Optional[str] = None,
         status: Optional[str] = None,
+        skills: Optional[List[int]] = None,
     ) -> Agent:
         """Create a new agent.
 
@@ -90,6 +92,14 @@ class Agents:
         if status is not None:
             body["status"] = status
         data = self._c._request("POST", "/api/v1/agents/tasks/", json=body)
+        if skills:
+            # Attach via the validated endpoint (global-only + cap), not the
+            # create body, so skill selection cannot bypass server-side checks.
+            self._c._request(
+                "POST",
+                f"/api/v1/agents/tasks/{data['uuid']}/skills/attach/",
+                json={"skill_ids": skills},
+            )
         return Agent(**data)
 
     def list(self) -> List[Agent]:
@@ -431,6 +441,53 @@ class Tools:
         return data
 
 
+class Skills:
+    """Curated skills you can attach to agents. Maps to ``/api/v1/agents/skills/``.
+
+    v1 is admin-curated: ``list`` returns the global catalog; ``attach`` /
+    ``detach`` enable/disable skills on a specific agent (validated server-side,
+    hard cap 24).
+    """
+
+    def __init__(self, client: SyncAgentClient) -> None:
+        self._c = client
+
+    def list(self) -> List[Skill]:
+        """List curated global skills available to attach (no body)."""
+        data = self._c._request("GET", "/api/v1/agents/skills/")
+        return [Skill(**item) for item in data]
+
+    def get(self, skill_id: int) -> Skill:
+        """Get one skill including its full ``instructions_md`` body."""
+        data = self._c._request("GET", f"/api/v1/agents/skills/{skill_id}/")
+        return Skill(**data)
+
+    def create(self, *, name: str, slug: str, description: str, **kwargs: Any) -> Skill:
+        """Create a curated global skill (staff only)."""
+        body = {"name": name, "slug": slug, "description": description, **kwargs}
+        data = self._c._request("POST", "/api/v1/agents/skills/", json=body)
+        return Skill(**data)
+
+    def attach(self, agent_id: str, skill_ids: List[int]) -> List[Skill]:
+        """Attach curated skills to an agent (enable them). Returns the agent's
+        skills after attach."""
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/tasks/{agent_id}/skills/attach/",
+            json={"skill_ids": skill_ids},
+        )
+        return [Skill(**item) for item in data]
+
+    def detach(self, agent_id: str, skill_ids: List[int]) -> List[Skill]:
+        """Detach skills from an agent."""
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/tasks/{agent_id}/skills/detach/",
+            json={"skill_ids": skill_ids},
+        )
+        return [Skill(**item) for item in data]
+
+
 class Compilations:
     """Frozen agent instructions. Maps to ``/api/v1/agents/compilations/``."""
 
@@ -588,6 +645,7 @@ class AsyncAgents:
         output_schema: Optional[Dict[str, Any]] = None,
         output_description: Optional[str] = None,
         status: Optional[str] = None,
+        skills: Optional[List[int]] = None,
     ) -> Agent:
         """Async variant of :meth:`Agents.create`. Same parameters."""
         body: Dict[str, Any] = {"name": name, "user_prompt": goal}
@@ -606,6 +664,12 @@ class AsyncAgents:
         if status is not None:
             body["status"] = status
         data = await self._c._request("POST", "/api/v1/agents/tasks/", json=body)
+        if skills:
+            await self._c._request(
+                "POST",
+                f"/api/v1/agents/tasks/{data['uuid']}/skills/attach/",
+                json={"skill_ids": skills},
+            )
         return Agent(**data)
 
     async def list(self) -> List[Agent]:
@@ -843,6 +907,44 @@ class AsyncTools:
             json={"action": action, "arguments": arguments or {}},
         )
         return data
+
+
+class AsyncSkills:
+    """Async variant of :class:`Skills`."""
+
+    def __init__(self, client: AsyncAgentClient) -> None:
+        self._c = client
+
+    async def list(self) -> List[Skill]:
+        data = await self._c._request("GET", "/api/v1/agents/skills/")
+        return [Skill(**item) for item in data]
+
+    async def get(self, skill_id: int) -> Skill:
+        data = await self._c._request("GET", f"/api/v1/agents/skills/{skill_id}/")
+        return Skill(**data)
+
+    async def create(
+        self, *, name: str, slug: str, description: str, **kwargs: Any
+    ) -> Skill:
+        body = {"name": name, "slug": slug, "description": description, **kwargs}
+        data = await self._c._request("POST", "/api/v1/agents/skills/", json=body)
+        return Skill(**data)
+
+    async def attach(self, agent_id: str, skill_ids: List[int]) -> List[Skill]:
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/tasks/{agent_id}/skills/attach/",
+            json={"skill_ids": skill_ids},
+        )
+        return [Skill(**item) for item in data]
+
+    async def detach(self, agent_id: str, skill_ids: List[int]) -> List[Skill]:
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/tasks/{agent_id}/skills/detach/",
+            json={"skill_ids": skill_ids},
+        )
+        return [Skill(**item) for item in data]
 
 
 class AsyncCompilations:

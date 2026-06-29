@@ -19,6 +19,7 @@ from flymyai.agents._types import (
     Run,
     RunDetail,
     SchemaSuggestion,
+    Skill,
     Tool,
 )
 
@@ -47,5 +48,6 @@ __all__ = [
     "Run",
     "RunDetail",
     "SchemaSuggestion",
+    "Skill",
     "Tool",
 ]
