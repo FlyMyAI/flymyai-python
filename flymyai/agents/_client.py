@@ -9,11 +9,15 @@ from flymyai.agents._resources import (
     Agents,
     AsyncAgents,
     AsyncCompilations,
+    AsyncDeployments,
     AsyncRuns,
     AsyncTools,
+    AsyncVersions,
     Compilations,
+    Deployments,
     Runs,
     Tools,
+    Versions,
 )
 
 _DEFAULT_BASE_URL = "https://backend.flymy.ai"
@@ -179,6 +183,8 @@ class SyncAgentClient:
         self.runs = Runs(self)
         self.tools = Tools(self)
         self.compilations = Compilations(self)
+        self.versions = Versions(self)
+        self.deployments = Deployments(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._http.request(method, path, **kwargs)
@@ -238,6 +244,8 @@ class AsyncAgentClient:
         self.runs = AsyncRuns(self)
         self.tools = AsyncTools(self)
         self.compilations = AsyncCompilations(self)
+        self.versions = AsyncVersions(self)
+        self.deployments = AsyncDeployments(self)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = await self._http.request(method, path, **kwargs)

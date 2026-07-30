@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Optional, Set, Tuple
+from urllib.parse import parse_qsl, urlsplit
 
 from flymyai.agents._types import (
     Agent,
+    AgentConnectionSession,
+    AgentDeployment,
+    AgentDeploymentAccess,
+    AgentDeploymentPreflight,
     AgentDetail,
+    AgentVersion,
     AvailableTool,
     Compilation,
     CompilationStatus,
@@ -22,6 +28,62 @@ if TYPE_CHECKING:
 
 
 _TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+_MAX_CURSOR_PAGES = 100
+_PaginationKey = Tuple[Tuple[str, str], ...]
+
+
+def _idempotency_headers(idempotency_key: Optional[str]) -> Dict[str, str]:
+    """Build per-request headers without changing legacy calls."""
+    if idempotency_key is None:
+        return {}
+    return {"Idempotency-Key": idempotency_key}
+
+
+def _list_results(data: Any) -> List[Any]:
+    """Accept both paginated DRF responses and legacy plain lists."""
+    if isinstance(data, dict):
+        results = data.get("results", [])
+        return results if isinstance(results, list) else []
+    return data if isinstance(data, list) else []
+
+
+def _next_list_params(data: Any) -> Optional[Dict[str, str]]:
+    if not isinstance(data, dict):
+        return None
+    next_url = data.get("next")
+    if not isinstance(next_url, str) or not next_url:
+        return None
+    return dict(parse_qsl(urlsplit(next_url).query, keep_blank_values=True))
+
+
+def _guarded_next_list_params(
+    data: Any,
+    *,
+    base_params: Mapping[str, str],
+    visited: Set[_PaginationKey],
+    page_count: int,
+    resource_name: str,
+) -> Optional[Dict[str, str]]:
+    parsed = _next_list_params(data)
+    if parsed is None:
+        return None
+    params = {**parsed, **base_params}
+    if "cursor" in parsed:
+        key = (("cursor", parsed["cursor"]),)
+    else:
+        key = tuple(sorted(parsed.items()))
+    if key in visited:
+        raise RuntimeError(
+            f"{resource_name} pagination repeated a cursor; "
+            "refusing to continue."
+        )
+    if page_count >= _MAX_CURSOR_PAGES:
+        raise RuntimeError(
+            f"{resource_name} pagination exceeded {_MAX_CURSOR_PAGES} pages; "
+            "refusing to continue."
+        )
+    visited.add(key)
+    return params
 
 
 class Agents:
@@ -135,7 +197,6 @@ class Agents:
         variables:
             Runtime values to substitute into the ``goal`` Jinja2 template.
             Must match the agent's ``input_schema`` when one is set.
-
         Returns
         -------
         RunDetail
@@ -518,20 +579,41 @@ class Compilations:
         compilation_id: int,
         *,
         variables: Optional[Dict[str, Any]] = None,
+        external_user_id: Optional[str] = None,
+        deployment_id: Optional[str] = None,
+        connections: Optional[Mapping[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
     ) -> RunDetail:
         """Run a frozen agent from its Markdown instruction.
 
         Spawns a fresh execution that follows the compiled instruction.
         Pass ``variables`` matching the source agent's ``input_schema``.
+        For embedded runs, ``external_user_id`` and ``deployment_id`` must be
+        supplied together. ``external_user_id`` is the application's stable,
+        non-secret customer ID. ``connections`` is an optional mapping from a
+        logical requirement slot to one connection UUID, or to a list of up to
+        25 connection UUIDs for a multi-connection slot. Omitting ``connections``
+        uses the customer's saved bindings for that deployment.
+        ``idempotency_key`` is sent as the ``Idempotency-Key`` HTTP header.
         Raises :class:`VariablesValidationError` on HTTP 400.
         """
         body: Dict[str, Any] = {}
         if variables:
             body["variables"] = variables
+        if external_user_id is not None:
+            body["external_user_id"] = external_user_id
+        if deployment_id is not None:
+            body["deployment_id"] = deployment_id
+        if connections is not None:
+            body["connections"] = dict(connections)
+        request_kwargs: Dict[str, Any] = {"json": body or None}
+        headers = _idempotency_headers(idempotency_key)
+        if headers:
+            request_kwargs["headers"] = headers
         data = self._c._request(
             "POST",
             f"/api/v1/agents/compilations/{compilation_id}/run-instruction/",
-            json=body or None,
+            **request_kwargs,
         )
         return RunDetail(**data)
 
@@ -540,11 +622,26 @@ class Compilations:
         compilation_id: int,
         *,
         variables: Optional[Dict[str, Any]] = None,
+        external_user_id: Optional[str] = None,
+        deployment_id: Optional[str] = None,
+        connections: Optional[Mapping[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
         timeout: float = 300,
         poll_interval: float = 2.0,
     ) -> RunDetail:
-        """Run an instruction and block until the resulting run finishes."""
-        run = self.run_instruction(compilation_id, variables=variables)
+        """Run an instruction and block until the resulting run finishes.
+
+        Embedded context has the same contract as :meth:`run_instruction`.
+        Reuse an idempotency key only for retries of the same logical request.
+        """
+        run = self.run_instruction(
+            compilation_id,
+            variables=variables,
+            external_user_id=external_user_id,
+            deployment_id=deployment_id,
+            connections=connections,
+            idempotency_key=idempotency_key,
+        )
         return self._c.runs.wait(run.id, timeout=timeout, poll_interval=poll_interval)
 
     def wait(
@@ -568,6 +665,257 @@ class Compilations:
                     f"Compilation {compilation_id} still {comp.status} after {timeout}s"
                 )
             time.sleep(poll_interval)
+
+
+class Versions:
+    """Read immutable frozen versions for publishing."""
+
+    def __init__(self, client: "SyncAgentClient") -> None:
+        self._c = client
+
+    def list(self, *, agent_id: Optional[str] = None) -> List[AgentVersion]:
+        base_params = {"agent_task": agent_id} if agent_id is not None else {}
+        params = base_params or None
+        results: List[Any] = []
+        visited: Set[_PaginationKey] = set()
+        page_count = 0
+        while True:
+            page_count += 1
+            data = self._c._request(
+                "GET",
+                "/api/v1/agents/versions/",
+                params=params,
+            )
+            results.extend(_list_results(data))
+            params = _guarded_next_list_params(
+                data,
+                base_params=base_params,
+                visited=visited,
+                page_count=page_count,
+                resource_name="Agent versions",
+            )
+            if params is None:
+                return [AgentVersion(**item) for item in results]
+
+    def get(self, version_id: str) -> AgentVersion:
+        data = self._c._request(
+            "GET",
+            f"/api/v1/agents/versions/{version_id}/",
+        )
+        return AgentVersion(**data)
+
+
+class Deployments:
+    """Publish and run frozen versions for embedded customers."""
+
+    def __init__(self, client: "SyncAgentClient") -> None:
+        self._c = client
+
+    def list(
+        self,
+        *,
+        agent_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[AgentDeployment]:
+        base_params = {
+            key: value
+            for key, value in {
+                "agent_task": agent_id,
+                "status": status,
+            }.items()
+            if value is not None
+        }
+        page_params = base_params or None
+        results: List[Any] = []
+        visited: Set[_PaginationKey] = set()
+        page_count = 0
+        while True:
+            page_count += 1
+            data = self._c._request(
+                "GET",
+                "/api/v1/agents/deployments/",
+                params=page_params,
+            )
+            results.extend(_list_results(data))
+            page_params = _guarded_next_list_params(
+                data,
+                base_params=base_params,
+                visited=visited,
+                page_count=page_count,
+                resource_name="Agent deployments",
+            )
+            if page_params is None:
+                return [AgentDeployment(**item) for item in results]
+
+    def get(self, deployment_id: str) -> AgentDeployment:
+        data = self._c._request(
+            "GET",
+            f"/api/v1/agents/deployments/{deployment_id}/",
+        )
+        return AgentDeployment(**data)
+
+    def create(
+        self,
+        *,
+        agent_id: str,
+        version_id: Optional[str],
+        name: str = "Production",
+        status: str = "draft",
+        publish_mode: str = "embedded",
+    ) -> AgentDeployment:
+        body: Dict[str, Any] = {
+            "agent_task": agent_id,
+            "candidate_version": version_id,
+            "name": name,
+            "status": status,
+            "publish_mode": publish_mode,
+        }
+        data = self._c._request(
+            "POST",
+            "/api/v1/agents/deployments/",
+            json=body,
+        )
+        return AgentDeployment(**data)
+
+    def update(self, deployment_id: str, **kwargs: Any) -> AgentDeployment:
+        data = self._c._request(
+            "PATCH",
+            f"/api/v1/agents/deployments/{deployment_id}/",
+            json=kwargs,
+        )
+        return AgentDeployment(**data)
+
+    def publish(
+        self,
+        deployment_id: str,
+        *,
+        publish_mode: str = "embedded",
+        version_id: Optional[str] = None,
+    ) -> AgentDeployment:
+        body: Dict[str, Any] = {"publish_mode": publish_mode}
+        if version_id is not None:
+            body["candidate_version"] = version_id
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/deployments/{deployment_id}/publish/",
+            json=body,
+        )
+        return AgentDeployment(**data)
+
+    def preflight(
+        self,
+        deployment_id: str,
+        *,
+        publish_mode: str = "embedded",
+        version_id: Optional[str] = None,
+    ) -> AgentDeploymentPreflight:
+        body: Dict[str, Any] = {"publish_mode": publish_mode}
+        if version_id is not None:
+            body["candidate_version"] = version_id
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/deployments/{deployment_id}/preflight/",
+            json=body,
+        )
+        return AgentDeploymentPreflight(**data)
+
+    def access(
+        self,
+        deployment_id: str,
+        *,
+        external_user_id: Optional[str] = None,
+    ) -> AgentDeploymentAccess:
+        params = (
+            {"external_user_id": external_user_id}
+            if external_user_id is not None
+            else None
+        )
+        data = self._c._request(
+            "GET",
+            f"/api/v1/agents/deployments/{deployment_id}/access/",
+            params=params,
+        )
+        return AgentDeploymentAccess(**data)
+
+    def create_connection_link(
+        self,
+        deployment_id: str,
+        *,
+        external_user_id: str,
+        slot: str,
+        alias: Optional[str] = None,
+    ) -> AgentConnectionSession:
+        body: Dict[str, Any] = {
+            "external_user_id": external_user_id,
+            "slot": slot,
+        }
+        if alias is not None:
+            body["alias"] = alias
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/deployments/{deployment_id}/connect-session/",
+            json=body,
+        )
+        return AgentConnectionSession(**data)
+
+    def run(
+        self,
+        deployment_id: str,
+        *,
+        external_user_id: str,
+        variables: Optional[Dict[str, Any]] = None,
+        connections: Optional[Mapping[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> RunDetail:
+        """Run the deployment's active frozen version for one customer.
+
+        ``deployment_id`` is the deployment public UUID and remains stable when
+        a newer immutable version is published. ``external_user_id`` is your
+        application's stable, non-secret customer ID. ``connections`` can
+        override saved bindings for this run by mapping a logical slot to one
+        FlyMyAI connection UUID, or to up to 25 UUIDs for a multi-connection
+        slot. Reuse ``idempotency_key`` only when retrying the same request.
+        """
+        body: Dict[str, Any] = {"external_user_id": external_user_id}
+        if variables is not None:
+            body["variables"] = variables
+        if connections is not None:
+            body["connections"] = dict(connections)
+        request_kwargs: Dict[str, Any] = {"json": body}
+        headers = _idempotency_headers(idempotency_key)
+        if headers:
+            request_kwargs["headers"] = headers
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/deployments/{deployment_id}/run/",
+            **request_kwargs,
+        )
+        return RunDetail(**data)
+
+    def run_and_wait(
+        self,
+        deployment_id: str,
+        *,
+        external_user_id: str,
+        variables: Optional[Dict[str, Any]] = None,
+        connections: Optional[Mapping[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+    ) -> RunDetail:
+        """Run a deployment and block until its execution finishes."""
+        run = self.run(
+            deployment_id,
+            external_user_id=external_user_id,
+            variables=variables,
+            connections=connections,
+            idempotency_key=idempotency_key,
+        )
+        return self._c.runs.wait(
+            run.id,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
 
 
 class AsyncAgents:
@@ -908,18 +1256,38 @@ class AsyncCompilations:
         compilation_id: int,
         *,
         variables: Optional[Dict[str, Any]] = None,
+        external_user_id: Optional[str] = None,
+        deployment_id: Optional[str] = None,
+        connections: Optional[Mapping[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
     ) -> RunDetail:
         """Run a frozen agent from its Markdown instruction.
 
+        For embedded runs, ``external_user_id`` and ``deployment_id`` must be
+        supplied together. ``connections`` maps each logical slot to one
+        connection UUID, or to a list of up to 25 UUIDs for a multi-connection
+        slot.
+        Omitting it uses the customer's saved deployment bindings.
+        ``idempotency_key`` is safe to reuse only for an identical retry.
         Raises :class:`VariablesValidationError` on HTTP 400.
         """
         body: Dict[str, Any] = {}
         if variables:
             body["variables"] = variables
+        if external_user_id is not None:
+            body["external_user_id"] = external_user_id
+        if deployment_id is not None:
+            body["deployment_id"] = deployment_id
+        if connections is not None:
+            body["connections"] = dict(connections)
+        request_kwargs: Dict[str, Any] = {"json": body or None}
+        headers = _idempotency_headers(idempotency_key)
+        if headers:
+            request_kwargs["headers"] = headers
         data = await self._c._request(
             "POST",
             f"/api/v1/agents/compilations/{compilation_id}/run-instruction/",
-            json=body or None,
+            **request_kwargs,
         )
         return RunDetail(**data)
 
@@ -928,11 +1296,25 @@ class AsyncCompilations:
         compilation_id: int,
         *,
         variables: Optional[Dict[str, Any]] = None,
+        external_user_id: Optional[str] = None,
+        deployment_id: Optional[str] = None,
+        connections: Optional[Mapping[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
         timeout: float = 300,
         poll_interval: float = 2.0,
     ) -> RunDetail:
-        """Run an instruction and await the resulting run."""
-        run = await self.run_instruction(compilation_id, variables=variables)
+        """Run an instruction and await the resulting run.
+
+        Embedded context has the same contract as :meth:`run_instruction`.
+        """
+        run = await self.run_instruction(
+            compilation_id,
+            variables=variables,
+            external_user_id=external_user_id,
+            deployment_id=deployment_id,
+            connections=connections,
+            idempotency_key=idempotency_key,
+        )
         return await self._c.runs.wait(
             run.id, timeout=timeout, poll_interval=poll_interval
         )
@@ -958,3 +1340,254 @@ class AsyncCompilations:
                     f"Compilation {compilation_id} still {comp.status} after {timeout}s"
                 )
             await asyncio.sleep(poll_interval)
+
+
+class AsyncVersions:
+    """Async variant of :class:`Versions`."""
+
+    def __init__(self, client: "AsyncAgentClient") -> None:
+        self._c = client
+
+    async def list(
+        self,
+        *,
+        agent_id: Optional[str] = None,
+    ) -> List[AgentVersion]:
+        base_params = {"agent_task": agent_id} if agent_id is not None else {}
+        params = base_params or None
+        results: List[Any] = []
+        visited: Set[_PaginationKey] = set()
+        page_count = 0
+        while True:
+            page_count += 1
+            data = await self._c._request(
+                "GET",
+                "/api/v1/agents/versions/",
+                params=params,
+            )
+            results.extend(_list_results(data))
+            params = _guarded_next_list_params(
+                data,
+                base_params=base_params,
+                visited=visited,
+                page_count=page_count,
+                resource_name="Agent versions",
+            )
+            if params is None:
+                return [AgentVersion(**item) for item in results]
+
+    async def get(self, version_id: str) -> AgentVersion:
+        data = await self._c._request(
+            "GET",
+            f"/api/v1/agents/versions/{version_id}/",
+        )
+        return AgentVersion(**data)
+
+
+class AsyncDeployments:
+    """Async variant of :class:`Deployments`."""
+
+    def __init__(self, client: "AsyncAgentClient") -> None:
+        self._c = client
+
+    async def list(
+        self,
+        *,
+        agent_id: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> List[AgentDeployment]:
+        base_params = {
+            key: value
+            for key, value in {
+                "agent_task": agent_id,
+                "status": status,
+            }.items()
+            if value is not None
+        }
+        page_params = base_params or None
+        results: List[Any] = []
+        visited: Set[_PaginationKey] = set()
+        page_count = 0
+        while True:
+            page_count += 1
+            data = await self._c._request(
+                "GET",
+                "/api/v1/agents/deployments/",
+                params=page_params,
+            )
+            results.extend(_list_results(data))
+            page_params = _guarded_next_list_params(
+                data,
+                base_params=base_params,
+                visited=visited,
+                page_count=page_count,
+                resource_name="Agent deployments",
+            )
+            if page_params is None:
+                return [AgentDeployment(**item) for item in results]
+
+    async def get(self, deployment_id: str) -> AgentDeployment:
+        data = await self._c._request(
+            "GET",
+            f"/api/v1/agents/deployments/{deployment_id}/",
+        )
+        return AgentDeployment(**data)
+
+    async def create(
+        self,
+        *,
+        agent_id: str,
+        version_id: Optional[str],
+        name: str = "Production",
+        status: str = "draft",
+        publish_mode: str = "embedded",
+    ) -> AgentDeployment:
+        body: Dict[str, Any] = {
+            "agent_task": agent_id,
+            "candidate_version": version_id,
+            "name": name,
+            "status": status,
+            "publish_mode": publish_mode,
+        }
+        data = await self._c._request(
+            "POST",
+            "/api/v1/agents/deployments/",
+            json=body,
+        )
+        return AgentDeployment(**data)
+
+    async def update(
+        self,
+        deployment_id: str,
+        **kwargs: Any,
+    ) -> AgentDeployment:
+        data = await self._c._request(
+            "PATCH",
+            f"/api/v1/agents/deployments/{deployment_id}/",
+            json=kwargs,
+        )
+        return AgentDeployment(**data)
+
+    async def publish(
+        self,
+        deployment_id: str,
+        *,
+        publish_mode: str = "embedded",
+        version_id: Optional[str] = None,
+    ) -> AgentDeployment:
+        body: Dict[str, Any] = {"publish_mode": publish_mode}
+        if version_id is not None:
+            body["candidate_version"] = version_id
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/deployments/{deployment_id}/publish/",
+            json=body,
+        )
+        return AgentDeployment(**data)
+
+    async def preflight(
+        self,
+        deployment_id: str,
+        *,
+        publish_mode: str = "embedded",
+        version_id: Optional[str] = None,
+    ) -> AgentDeploymentPreflight:
+        body: Dict[str, Any] = {"publish_mode": publish_mode}
+        if version_id is not None:
+            body["candidate_version"] = version_id
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/deployments/{deployment_id}/preflight/",
+            json=body,
+        )
+        return AgentDeploymentPreflight(**data)
+
+    async def access(
+        self,
+        deployment_id: str,
+        *,
+        external_user_id: Optional[str] = None,
+    ) -> AgentDeploymentAccess:
+        params = (
+            {"external_user_id": external_user_id}
+            if external_user_id is not None
+            else None
+        )
+        data = await self._c._request(
+            "GET",
+            f"/api/v1/agents/deployments/{deployment_id}/access/",
+            params=params,
+        )
+        return AgentDeploymentAccess(**data)
+
+    async def create_connection_link(
+        self,
+        deployment_id: str,
+        *,
+        external_user_id: str,
+        slot: str,
+        alias: Optional[str] = None,
+    ) -> AgentConnectionSession:
+        body: Dict[str, Any] = {
+            "external_user_id": external_user_id,
+            "slot": slot,
+        }
+        if alias is not None:
+            body["alias"] = alias
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/deployments/{deployment_id}/connect-session/",
+            json=body,
+        )
+        return AgentConnectionSession(**data)
+
+    async def run(
+        self,
+        deployment_id: str,
+        *,
+        external_user_id: str,
+        variables: Optional[Dict[str, Any]] = None,
+        connections: Optional[Mapping[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
+    ) -> RunDetail:
+        """Run the deployment's active frozen version for one customer."""
+        body: Dict[str, Any] = {"external_user_id": external_user_id}
+        if variables is not None:
+            body["variables"] = variables
+        if connections is not None:
+            body["connections"] = dict(connections)
+        request_kwargs: Dict[str, Any] = {"json": body}
+        headers = _idempotency_headers(idempotency_key)
+        if headers:
+            request_kwargs["headers"] = headers
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/deployments/{deployment_id}/run/",
+            **request_kwargs,
+        )
+        return RunDetail(**data)
+
+    async def run_and_wait(
+        self,
+        deployment_id: str,
+        *,
+        external_user_id: str,
+        variables: Optional[Dict[str, Any]] = None,
+        connections: Optional[Mapping[str, Any]] = None,
+        idempotency_key: Optional[str] = None,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+    ) -> RunDetail:
+        """Run a deployment and await its execution."""
+        run = await self.run(
+            deployment_id,
+            external_user_id=external_user_id,
+            variables=variables,
+            connections=connections,
+            idempotency_key=idempotency_key,
+        )
+        return await self._c.runs.wait(
+            run.id,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )

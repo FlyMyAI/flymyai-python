@@ -97,6 +97,106 @@ asyncio.run(main())
 
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction). A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
+## Embedded customer agents
+
+An embedded deployment publishes one immutable frozen version while each
+customer authorizes their own MCP accounts. Hosted authorization links must be
+created by your trusted application backend because the FlyMyAI API key must
+never be sent to the customer browser.
+
+Synchronous flow:
+
+```python
+from flymyai import AgentClient
+
+customer_id = "customer-42"  # Stable ID from your application, not an email or secret
+
+with AgentClient(api_key="fly-secret-key") as client:
+    # compile_from_run freezes and polls until compilation has finished.
+    compilation = client.agents.compile_from_run(run_id)
+    version = next(
+        item
+        for item in client.versions.list(agent_id=agent_id)
+        if item.source_compilation == compilation.id
+    )
+
+    deployment = client.deployments.create(
+        agent_id=agent_id,
+        version_id=version.id,
+        name="Production",
+    )
+    access = client.deployments.access(deployment.id)
+    deployment = client.deployments.publish(deployment.id)
+
+    # Create one hosted link for each required access slot and redirect the
+    # customer to every session.redirect_url. Each callback saves a binding.
+    sessions = [
+        client.deployments.create_connection_link(
+            deployment.id,
+            external_user_id=customer_id,
+            slot=requirement.slot,
+        )
+        for requirement in access.requirements
+        if requirement.connection_required
+    ]
+
+    result = client.deployments.run_and_wait(
+        deployment.id,
+        variables={"topic": "Q3 pipeline"},
+        external_user_id=customer_id,
+        idempotency_key="customer-42-q3-pipeline-v1",
+    )
+```
+
+The same flow is available asynchronously:
+
+```python
+from flymyai import AsyncAgentClient
+
+async with AsyncAgentClient(api_key="fly-secret-key") as client:
+    compilation = await client.agents.compile_from_run(run_id)
+    versions = await client.versions.list(agent_id=agent_id)
+    version = next(
+        item for item in versions if item.source_compilation == compilation.id
+    )
+    deployment = await client.deployments.create(
+        agent_id=agent_id,
+        version_id=version.id,
+    )
+    access = await client.deployments.access(deployment.id)
+    deployment = await client.deployments.publish(deployment.id)
+    sessions = []
+    for requirement in access.requirements:
+        if requirement.connection_required:
+            sessions.append(
+                await client.deployments.create_connection_link(
+                    deployment.id,
+                    external_user_id="customer-42",
+                    slot=requirement.slot,
+                )
+            )
+    result = await client.deployments.run_and_wait(
+        deployment.id,
+        variables={"topic": "Q3 pipeline"},
+        external_user_id="customer-42",
+        idempotency_key="customer-42-q3-pipeline-v1",
+    )
+```
+
+`client.deployments.run()` and `run_and_wait()` call the stable deployment
+endpoint, so callers need the deployment UUID but never need a compilation ID.
+Normally a run uses the saved customer bindings. To choose among several
+authorized accounts for one run, pass
+`connections={"sender_inbox": "8335876a-ee78-45db-9d49-0ae148bd0158"}` or a
+list of up to 25 connection UUIDs for a multi-connection slot. Provider account
+IDs and aliases are not accepted in this mapping. Customer file attachments
+are not enabled for embedded runs in this beta. Wait for every hosted
+authorization callback to complete before starting the customer's first run.
+
+The legacy `client.compilations.run_instruction()` and
+`run_instruction_and_wait()` methods remain available for compilation-scoped
+owner runs.
+
 ## Neural Network Inference
 
 Run any model on the platform with `flymyai.async_run` (async) or `flymyai.run` (sync).

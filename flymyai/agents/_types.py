@@ -194,12 +194,99 @@ class Compilation(BaseModel):
 
     @property
     def is_ready(self) -> bool:
-        """True once the compilation/instruction can be executed."""
-        return self.status in (
+        """Match the backend's runnable compilation and instruction states."""
+        if self.status in (
             CompilationStatus.COMPILED,
             CompilationStatus.COMPLETED,
+        ):
+            return True
+        return bool(self.instruction_md) and self.status in (
             CompilationStatus.RUNNING,
+            CompilationStatus.FAILED,
         )
+
+
+class AgentVersion(BaseModel):
+    """Immutable frozen runtime version of an agent."""
+
+    public_id: str
+    agent_task: str
+    source_compilation: Optional[int] = None
+    version_number: int
+    instruction_md: str = ""
+    runtime_manifest: Dict[str, Any] = Field(default_factory=dict)
+    input_schema: Optional[Dict[str, Any]] = None
+    output_schema: Optional[Dict[str, Any]] = None
+    llm_model: str = ""
+    effort: str = ""
+    created_at: datetime
+
+    @property
+    def id(self) -> str:
+        return self.public_id
+
+
+class AgentAccessRequirement(BaseModel):
+    """One logical MCP access slot declared by an immutable version."""
+
+    public_id: str
+    agent_version: str
+    slot: str
+    toolkit_slug: str
+    adapter_provider: Optional[str] = None
+    connection_required: bool = True
+    hosted_setup_supported: bool = False
+    cardinality: str
+    exact_actions: List[str] = Field(default_factory=list)
+    inferred_actions: List[str] = Field(default_factory=list)
+    risk_class: str = "read"
+    policy: Dict[str, Any] = Field(default_factory=dict)
+    created_at: datetime
+    updated_at: datetime
+
+
+class AgentDeployment(BaseModel):
+    """Stable endpoint that publishes one immutable agent version."""
+
+    public_id: str
+    agent_task: str
+    active_version: Optional[str] = None
+    candidate_version: Optional[str] = None
+    name: str
+    status: str
+    publish_mode: str
+    created_at: datetime
+    updated_at: datetime
+
+    @property
+    def id(self) -> str:
+        return self.public_id
+
+
+class AgentDeploymentAccess(BaseModel):
+    """Publish manifest plus optional exact-customer connection metadata."""
+
+    deployment: AgentDeployment
+    active_version: Optional[AgentVersion] = None
+    candidate_version: Optional[AgentVersion] = None
+    requirements: List[AgentAccessRequirement] = Field(default_factory=list)
+    principals: List[Dict[str, Any]] = Field(default_factory=list)
+    connections: List[Dict[str, Any]] = Field(default_factory=list)
+    bindings: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+class AgentConnectionSession(BaseModel):
+    """Short-lived hosted authorization link for one customer access slot."""
+
+    redirect_url: str
+    expires_at: datetime
+    provider: str
+
+
+class AgentDeploymentPreflight(BaseModel):
+    """Authoritative server-side validation for a staged deployment release."""
+
+    ready: bool
 
 
 # ── Schema suggestion ───────────────────────────────────────────────────────
