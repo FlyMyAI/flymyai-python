@@ -94,27 +94,29 @@ def _deployment_payload(*, status: str = "draft") -> dict:
     }
 
 
-def test_agent_run_preserves_legacy_request_shape():
+def test_agent_run_requires_and_forwards_idempotency_header():
     client = _sync_resources()
 
-    client.agents.run(AGENT_ID)
+    client.agents.run(AGENT_ID, idempotency_key="agent-run-42")
 
     client._request.assert_called_once_with(
         "POST",
         f"/api/v1/agents/tasks/{AGENT_ID}/run-loop/",
         json={"variables": {}},
+        headers={"Idempotency-Key": "agent-run-42"},
     )
 
 
-def test_run_instruction_preserves_legacy_empty_body():
+def test_run_instruction_forwards_required_key_with_empty_body():
     client = _sync_resources()
 
-    client.compilations.run_instruction(7)
+    client.compilations.run_instruction(7, idempotency_key="frozen-run-empty-7")
 
     client._request.assert_called_once_with(
         "POST",
         "/api/v1/agents/compilations/7/run-instruction/",
         json=None,
+        headers={"Idempotency-Key": "frozen-run-empty-7"},
     )
 
 
@@ -220,10 +222,7 @@ def test_versions_follow_paginated_backend_response():
     client._request.side_effect = [
         {
             "results": [_version_payload()],
-            "next": (
-                "http://internal-backend/api/v1/agents/versions/"
-                "?cursor=next-page"
-            ),
+            "next": "http://internal-backend/api/v1/agents/versions/?cursor=next-page",
         },
         {"results": [second_version], "next": None},
     ]
@@ -256,10 +255,7 @@ def test_versions_reject_repeated_pagination_cursor():
     client = MagicMock()
     client._request.return_value = {
         "results": [_version_payload()],
-        "next": (
-            "http://internal-backend/api/v1/agents/versions/"
-            "?cursor=repeated"
-        ),
+        "next": "http://internal-backend/api/v1/agents/versions/?cursor=repeated",
     }
     versions = Versions(client)
 
@@ -304,8 +300,7 @@ def test_async_deployments_reject_repeated_pagination_cursor():
             return_value={
                 "results": [_deployment_payload()],
                 "next": (
-                    "http://internal-backend/api/v1/agents/deployments/"
-                    "?cursor=repeated"
+                    "http://internal-backend/api/v1/agents/deployments/?cursor=repeated"
                 ),
             }
         )
@@ -484,6 +479,7 @@ def test_deployment_run_and_wait_forwards_only_deployment_context():
     completed = deployments.run_and_wait(
         DEPLOYMENT_ID,
         external_user_id="customer-42",
+        idempotency_key="deployment-run-wait-42",
         timeout=15,
         poll_interval=0.1,
     )
@@ -493,6 +489,7 @@ def test_deployment_run_and_wait_forwards_only_deployment_context():
         "POST",
         f"/api/v1/agents/deployments/{DEPLOYMENT_ID}/run/",
         json={"external_user_id": "customer-42"},
+        headers={"Idempotency-Key": "deployment-run-wait-42"},
     )
     client.runs.wait.assert_called_once_with(
         "run-123",
@@ -542,6 +539,7 @@ def test_async_deployment_run_and_wait_uses_run_resource():
         completed = await deployments.run_and_wait(
             DEPLOYMENT_ID,
             external_user_id="customer-42",
+            idempotency_key="deployment-run-wait-42",
             timeout=15,
             poll_interval=0.1,
         )
@@ -551,6 +549,7 @@ def test_async_deployment_run_and_wait_uses_run_resource():
             "POST",
             f"/api/v1/agents/deployments/{DEPLOYMENT_ID}/run/",
             json={"external_user_id": "customer-42"},
+            headers={"Idempotency-Key": "deployment-run-wait-42"},
         )
         client.runs.wait.assert_awaited_once_with(
             "run-123",

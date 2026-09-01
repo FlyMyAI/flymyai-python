@@ -1,4 +1,4 @@
-"""Tests for flymyai.agents — SyncAgentClient, AsyncAgentClient, and helpers."""
+"""Tests for flymyai.agents - SyncAgentClient, AsyncAgentClient, and helpers."""
 
 import asyncio
 import time
@@ -318,7 +318,10 @@ class TestSyncAgents:
 
     def test_run_returns_run_detail(self):
         client = self._client(_run_payload())
-        run = client.agents.run("aaaaaaaa-0000-0000-0000-000000000001")
+        run = client.agents.run(
+            "aaaaaaaa-0000-0000-0000-000000000001",
+            idempotency_key="agent-run-sync-1",
+        )
         assert isinstance(run, RunDetail)
         assert run.status == ExecutionStatus.PENDING
 
@@ -491,8 +494,15 @@ class TestSyncTools:
         mock_http = MagicMock()
         mock_http.request.return_value = _make_response({"result": "found it"})
         client = _sync_client(mock_http)
-        result = client.tools.call(7, action="search", arguments={"query": "AI"})
+        result = client.tools.call(
+            7,
+            action="search",
+            arguments={"query": "AI"},
+            idempotency_key="search-ai-v1",
+        )
         assert result == {"result": "found it"}
+        _, call_kwargs = mock_http.request.call_args
+        assert call_kwargs["headers"]["Idempotency-Key"] == "search-ai-v1"
 
 
 class TestSyncCompilations:
@@ -526,13 +536,10 @@ class TestSyncCompilations:
 
     def test_run_compilation(self):
         mock_http = MagicMock()
-        mock_http.request.return_value = _make_response(
-            _compilation_payload(status="completed", result={"output": "done"})
-        )
         client = _sync_client(mock_http)
-        comp = client.compilations.run(COMPILATION_ID)
-        assert comp.status == CompilationStatus.COMPLETED
-        assert comp.result == {"output": "done"}
+        with pytest.raises(NotImplementedError, match="caller-owned replay contract"):
+            client.compilations.run(COMPILATION_ID)
+        mock_http.request.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -577,7 +584,10 @@ class TestAsyncAgents:
 
     async def test_run(self):
         client = await self._client(_run_payload())
-        run = await client.agents.run("aaaaaaaa-0000-0000-0000-000000000001")
+        run = await client.agents.run(
+            "aaaaaaaa-0000-0000-0000-000000000001",
+            idempotency_key="agent-run-async-1",
+        )
         assert isinstance(run, RunDetail)
 
 
@@ -640,8 +650,14 @@ class TestAsyncTools:
         mock_http = AsyncMock()
         mock_http.request.return_value = _make_response({"result": "ok"})
         client = _async_client(mock_http)
-        r = await client.tools.call(7, action="ping")
+        r = await client.tools.call(
+            7,
+            action="ping",
+            idempotency_key="async-ping-v1",
+        )
         assert r == {"result": "ok"}
+        _, call_kwargs = mock_http.request.await_args
+        assert call_kwargs["headers"]["Idempotency-Key"] == "async-ping-v1"
 
 
 @pytest.mark.asyncio
@@ -656,12 +672,10 @@ class TestAsyncCompilations:
 
     async def test_run(self):
         mock_http = AsyncMock()
-        mock_http.request.return_value = _make_response(
-            _compilation_payload(status="completed")
-        )
         client = _async_client(mock_http)
-        comp = await client.compilations.run(COMPILATION_ID)
-        assert comp.status == CompilationStatus.COMPLETED
+        with pytest.raises(NotImplementedError, match="caller-owned replay contract"):
+            await client.compilations.run(COMPILATION_ID)
+        mock_http.request.assert_not_awaited()
 
 
 class TestModels:

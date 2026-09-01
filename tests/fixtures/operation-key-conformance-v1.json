@@ -1,0 +1,70 @@
+{
+  "accepted": [
+    {
+      "name": "opaque-ascii-punctuation",
+      "value": "logical call !#$%&'()*+,/;<=>?@[]^`{|}~"
+    },
+    {
+      "name": "accented-unicode",
+      "value": "café-operation"
+    },
+    {
+      "name": "cyrillic-unicode",
+      "value": "запуск-42"
+    },
+    {
+      "name": "ascii-255-code-points",
+      "repeat": {
+        "value": "x",
+        "count": 255
+      }
+    },
+    {
+      "name": "astral-255-code-points",
+      "repeat": {
+        "value": "😀",
+        "count": 255
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "name": "empty",
+      "value": ""
+    },
+    {
+      "name": "blank",
+      "value": "   "
+    },
+    {
+      "name": "ascii-256-code-points",
+      "repeat": {
+        "value": "x",
+        "count": 256
+      }
+    },
+    {
+      "name": "astral-256-code-points",
+      "repeat": {
+        "value": "😀",
+        "count": 256
+      }
+    },
+    {
+      "name": "newline-control",
+      "value": "line\nbreak"
+    },
+    {
+      "name": "delete-control",
+      "value": "delete\u007fcharacter"
+    },
+    {
+      "name": "zero-width-space",
+      "value": "zero\u200bwidth"
+    },
+    {
+      "name": "non-breaking-space",
+      "value": "non\u00a0breaking-space"
+    }
+  ]
+}

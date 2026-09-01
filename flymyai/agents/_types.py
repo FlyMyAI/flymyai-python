@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, cast
 
-from pydantic import BaseModel, Field
-
+from pydantic import BaseModel, ConfigDict, Field
 
 ResourceID = Union[str, int]
+RuntimeConnections = Mapping[str, Union[str, Sequence[str]]]
 
 
 class AgentStatus(str, Enum):
@@ -15,6 +15,13 @@ class AgentStatus(str, Enum):
     INITIALIZATION_REQUIRED = "initialization_required"
     ACTIVE = "active"
     ARCHIVED = "archived"
+
+
+class McpAccessMode(str, Enum):
+    """How an agent resolves connector authority at runtime."""
+
+    LEGACY = "legacy"
+    SCOPED = "scoped"
 
 
 class ExecutionStatus(str, Enum):
@@ -34,6 +41,43 @@ class CompilationStatus(str, Enum):
     FAILED = "failed"
 
 
+class McpResourceType(str, Enum):
+    """Exact resource kinds accepted by an MCP resource set."""
+
+    USER_MCP_TOOL = "user_mcp_tool"
+    CUSTOM_MCP_SERVER = "custom_mcp_server"
+    INTEGRATION_CONNECTION = "integration_connection"
+
+
+class McpResourceSetStatus(str, Enum):
+    ACTIVE = "active"
+    DISABLED = "disabled"
+
+
+class McpResourceSetManagementMode(str, Enum):
+    FLYMYAI = "flymyai"
+    CUSTOMER = "customer"
+
+
+class McpResourceSetAuthorityType(str, Enum):
+    OWNER = "owner"
+    EXTERNAL_PRINCIPAL = "external_principal"
+
+
+class ExternalPrincipalStatus(str, Enum):
+    ACTIVE = "active"
+    DISABLED = "disabled"
+
+
+class IntegrationConnectionStatus(str, Enum):
+    PENDING = "pending"
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+    ERROR = "error"
+    DISABLED = "disabled"
+
+
 class ExecutionLogType(str, Enum):
     DECLARED_FUNCTIONS = "declared_functions"
     TOOL_CALLED = "tool_called"
@@ -44,19 +88,21 @@ class ExecutionLogType(str, Enum):
     @classmethod
     def _missing_(cls, value: object):
         obj = str.__new__(cls, value)
-        obj._value_ = value
+        obj._value_ = cast(str, value)
         obj._name_ = str(value).upper()
         return obj
 
 
 class Agent(BaseModel):
-    """An agent task — the top-level configuration for an autonomous agent."""
+    """An agent task - the top-level configuration for an autonomous agent."""
 
     uuid: str
     name: str
     user_prompt: str
     available_tools: Any = Field(default_factory=list)
     available_custom_mcp_servers: List[int] = Field(default_factory=list)
+    mcp_resource_set_ids: List[str] = Field(default_factory=list)
+    mcp_access_mode: McpAccessMode = McpAccessMode.LEGACY
     input_schema: Optional[Dict[str, Any]] = None
     input_description: str = ""
     output_schema: Optional[Dict[str, Any]] = None
@@ -143,7 +189,9 @@ class Tool(BaseModel):
     """A configured MCP tool belonging to the user."""
 
     id: int
+    public_id: Optional[str] = None
     mcp_tool: str
+    alias: str = "default"
     user_config: Dict[str, Any] = Field(default_factory=dict)
     is_configured: bool = False
     is_active: bool = True
@@ -159,6 +207,87 @@ class Tool(BaseModel):
     @property
     def name(self) -> str:
         return self.mcp_tool
+
+
+class McpResourceSetMemberInput(BaseModel):
+    """One exact resource in one logical slot for an atomic membership update."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    resource_type: McpResourceType
+    resource_id: str
+    slot: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9_-]+$",
+    )
+    allowed_actions: List[str] = Field(default_factory=list)
+    position: Optional[int] = Field(default=None, ge=0)
+
+
+class McpResourceSetMember(BaseModel):
+    """Secret-free projection of one exact MCP resource-set member."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    public_id: str
+    resource_type: McpResourceType
+    resource_id: str
+    toolkit_slug: str
+    alias: str
+    display_name: str
+    slot: str
+    allowed_actions: List[str] = Field(default_factory=list)
+    position: int
+    created_at: datetime
+    updated_at: datetime
+
+
+class McpResourceSetSummary(BaseModel):
+    """Bounded collection projection without nested membership payloads."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    public_id: str
+    name: str
+    description: str = ""
+    status: McpResourceSetStatus = McpResourceSetStatus.ACTIVE
+    management_mode: McpResourceSetManagementMode
+    authority_type: McpResourceSetAuthorityType
+    principal_id: Optional[str] = None
+    revision: int = Field(ge=1, strict=True)
+    member_count: int = Field(ge=0, strict=True)
+    created_at: datetime
+    updated_at: datetime
+
+    @property
+    def id(self) -> str:
+        return self.public_id
+
+
+class McpResourceSet(McpResourceSetSummary):
+    """Full resource-set detail with all bounded members included."""
+
+    members: List[McpResourceSetMember]
+
+
+class AgentGroup(BaseModel):
+    """Flat owner-scoped group with atomic agent and resource-set assignments."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    public_id: str
+    name: str
+    description: str = ""
+    is_active: bool = True
+    agent_ids: List[str] = Field(default_factory=list)
+    resource_set_ids: List[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    @property
+    def id(self) -> str:
+        return self.public_id
 
 
 class AvailableTool(BaseModel):
@@ -263,6 +392,71 @@ class AgentDeployment(BaseModel):
         return self.public_id
 
 
+class ExternalPrincipal(BaseModel):
+    """Typed, secret-free identity for one product customer and deployment."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    public_id: str
+    deployment: str
+    external_user_id: str
+    display_name: str = ""
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    status: ExternalPrincipalStatus = ExternalPrincipalStatus.ACTIVE
+    created_at: datetime
+    updated_at: datetime
+
+    @property
+    def id(self) -> str:
+        return self.public_id
+
+
+class IntegrationConnection(BaseModel):
+    """Secret-free projection of one exact external connector account."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    public_id: str
+    principal: str
+    toolkit_slug: str
+    alias: str = ""
+    status: IntegrationConnectionStatus = IntegrationConnectionStatus.PENDING
+    provider: str = ""
+    provider_connection_id: str = ""
+    provider_account_id: str = ""
+    granted_scopes: List[str] = Field(default_factory=list)
+    legacy_user_mcp_tool: Optional[int] = None
+    credentials_configured: bool = False
+    credential_revision: int = Field(default=1, ge=1, strict=True)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    last_error: str = ""
+    expires_at: Optional[datetime] = None
+    revoked_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+    @property
+    def id(self) -> str:
+        return self.public_id
+
+
+class ConnectionBinding(BaseModel):
+    """Exact logical slot to connection UUID assignment for one principal."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    public_id: str
+    principal: str
+    slot: str
+    connections: List[str] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
+
+    @property
+    def id(self) -> str:
+        return self.public_id
+
+
 class AgentDeploymentAccess(BaseModel):
     """Publish manifest plus optional exact-customer connection metadata."""
 
@@ -270,9 +464,70 @@ class AgentDeploymentAccess(BaseModel):
     active_version: Optional[AgentVersion] = None
     candidate_version: Optional[AgentVersion] = None
     requirements: List[AgentAccessRequirement] = Field(default_factory=list)
-    principals: List[Dict[str, Any]] = Field(default_factory=list)
-    connections: List[Dict[str, Any]] = Field(default_factory=list)
-    bindings: List[Dict[str, Any]] = Field(default_factory=list)
+    principals: List[ExternalPrincipal] = Field(default_factory=list)
+    connections: List[IntegrationConnection] = Field(default_factory=list)
+    bindings: List[ConnectionBinding] = Field(default_factory=list)
+
+    def principal_for_external_user(
+        self,
+        external_user_id: str,
+    ) -> ExternalPrincipal:
+        """Return one exact principal or fail closed on missing/ambiguous data."""
+        if not isinstance(external_user_id, str) or not external_user_id.strip():
+            raise ValueError("external_user_id must be a non-blank string.")
+        matches = [
+            principal
+            for principal in self.principals
+            if principal.external_user_id == external_user_id
+        ]
+        if len(matches) != 1:
+            raise ValueError(
+                "Expected exactly one external principal for external_user_id "
+                f"{external_user_id!r}; found {len(matches)}."
+            )
+        return matches[0]
+
+    def ready_connection_ids_for_slot(
+        self,
+        *,
+        principal_id: str,
+        slot: str,
+    ) -> List[str]:
+        """Return exact active connection UUIDs or fail closed until ready."""
+        if not isinstance(principal_id, str) or not principal_id.strip():
+            raise ValueError("principal_id must be a non-blank string.")
+        if not isinstance(slot, str) or not slot.strip():
+            raise ValueError("slot must be a non-blank string.")
+        bindings = [
+            binding
+            for binding in self.bindings
+            if binding.principal == principal_id and binding.slot == slot
+        ]
+        if len(bindings) != 1:
+            raise ValueError(
+                "Expected exactly one connection binding for principal_id "
+                f"{principal_id!r} and slot {slot!r}; found {len(bindings)}."
+            )
+        connection_ids = bindings[0].connections
+        if not connection_ids:
+            raise ValueError(f"Connection slot {slot!r} is not ready.")
+        connections_by_id = {
+            connection.id: connection for connection in self.connections
+        }
+        if len(connections_by_id) != len(self.connections):
+            raise ValueError("Deployment access contains duplicate connection UUIDs.")
+        for connection_id in connection_ids:
+            connection = connections_by_id.get(connection_id)
+            if connection is None or connection.principal != principal_id:
+                raise ValueError(
+                    f"Connection slot {slot!r} contains an invalid connection UUID."
+                )
+            if (
+                connection.status is not IntegrationConnectionStatus.ACTIVE
+                or not connection.credentials_configured
+            ):
+                raise ValueError(f"Connection slot {slot!r} is not ready.")
+        return list(connection_ids)
 
 
 class AgentConnectionSession(BaseModel):

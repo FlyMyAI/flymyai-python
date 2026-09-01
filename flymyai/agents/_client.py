@@ -6,7 +6,9 @@ from typing import Any, Dict, Optional
 import httpx
 
 from flymyai.agents._resources import (
+    AgentGroups,
     Agents,
+    AsyncAgentGroups,
     AsyncAgents,
     AsyncCompilations,
     AsyncDeployments,
@@ -15,6 +17,8 @@ from flymyai.agents._resources import (
     AsyncVersions,
     Compilations,
     Deployments,
+    McpResourceSets,
+    AsyncMcpResourceSets,
     Runs,
     Tools,
     Versions,
@@ -55,7 +59,7 @@ class VariablesValidationError(FlyMyAIAgentError):
     """Raised when the backend rejects ``variables`` on run / run_instruction.
 
     The server responds with HTTP 400 and a body of the form
-    ``{"variables": ["'foo' is required", ...]}`` — those messages are
+    ``{"variables": ["'foo' is required", ...]}`` - those messages are
     exposed here as :attr:`messages`, and the field-to-message mapping
     (best-effort parse) as :attr:`field_errors`.
     """
@@ -80,6 +84,21 @@ class SuggestSchemaError(FlyMyAIAgentError):
     Typically means the server's Anthropic key is missing or the upstream
     call failed. The user-facing message is in :attr:`args`.
     """
+
+
+class McpResourceSetStaleRevisionError(FlyMyAIAgentError):
+    """Raised when a resource-set metadata or member write is stale."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any,
+        current_revision: Optional[int],
+    ) -> None:
+        super().__init__(message, status_code=status_code, response_body=response_body)
+        self.current_revision = current_revision
 
 
 def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
@@ -127,6 +146,21 @@ def _raise_for_status(resp: httpx.Response) -> None:
         if err is not None:
             raise err
 
+    if (
+        resp.status_code == 409
+        and isinstance(body, dict)
+        and body.get("code") == "stale_revision"
+    ):
+        current_revision = body.get("current_revision")
+        raise McpResourceSetStaleRevisionError(
+            str(body.get("detail", "The MCP resource set changed.")),
+            status_code=409,
+            response_body=body,
+            current_revision=(
+                current_revision if isinstance(current_revision, int) else None
+            ),
+        )
+
     detail = body.get("detail", body) if isinstance(body, dict) else body
     if resp.status_code == 502:
         raise SuggestSchemaError(
@@ -151,7 +185,7 @@ class SyncAgentClient:
         client = AgentClient(api_key="fly-...")
 
         agent = client.agents.create(name="Researcher", goal="Search the web")
-        run   = client.agents.run(agent.id)
+        run   = client.agents.run(agent.id, idempotency_key="research-run-1")
         result = client.runs.wait(run.id)
         print(result.output)
     """
@@ -185,6 +219,8 @@ class SyncAgentClient:
         self.compilations = Compilations(self)
         self.versions = Versions(self)
         self.deployments = Deployments(self)
+        self.mcp_resource_sets = McpResourceSets(self)
+        self.agent_groups = AgentGroups(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._http.request(method, path, **kwargs)
@@ -212,7 +248,10 @@ class AsyncAgentClient:
 
         async with AsyncAgentClient(api_key="fly-...") as client:
             agent = await client.agents.create(name="Researcher", goal="Search the web")
-            run   = await client.agents.run(agent.id)
+            run   = await client.agents.run(
+                agent.id,
+                idempotency_key="research-run-1",
+            )
             result = await client.runs.wait(run.id)
             print(result.output)
     """
@@ -246,6 +285,8 @@ class AsyncAgentClient:
         self.compilations = AsyncCompilations(self)
         self.versions = AsyncVersions(self)
         self.deployments = AsyncDeployments(self)
+        self.mcp_resource_sets = AsyncMcpResourceSets(self)
+        self.agent_groups = AsyncAgentGroups(self)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = await self._http.request(method, path, **kwargs)
