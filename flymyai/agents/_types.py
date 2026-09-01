@@ -179,6 +179,31 @@ class RunDetail(Run):
     user_agent_task_uuid: Optional[str] = None
 
 
+class AppendMessageResponse(BaseModel):
+    """Bounded acknowledgement returned after appending to a run."""
+
+    id: ResourceID
+    status: ExecutionStatus = ExecutionStatus.PENDING
+    effort: str = ""
+    model: str = ""
+    run_seq: int = 0
+    error: Optional[str] = None
+    agent_result: Optional[Dict[str, Any]] = None
+    chat_files: List[Dict[str, Any]] = Field(default_factory=list)
+
+    @property
+    def output(self) -> Optional[Dict[str, Any]]:
+        return self.agent_result
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.status in (
+            ExecutionStatus.COMPLETED,
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+        )
+
+
 class ConfigurationStep(BaseModel):
     description: str
     step_type: str

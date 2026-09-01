@@ -12,6 +12,7 @@ import pytest
 from flymyai.agents import (
     AgentClient,
     AgentStatus,
+    AppendMessageResponse,
     AsyncAgentClient,
     CompilationStatus,
     ExecutionLogType,
@@ -68,6 +69,21 @@ def _run_payload(**overrides) -> dict:
         "agent_result": None,
         "logs": [],
         "user_agent_task_uuid": "aaaaaaaa-0000-0000-0000-000000000001",
+    }
+    base.update(overrides)
+    return base
+
+
+def _append_message_payload(**overrides) -> dict:
+    base = {
+        "id": RUN_ID,
+        "status": "running",
+        "effort": "medium",
+        "model": "claude-sonnet",
+        "run_seq": 1,
+        "error": None,
+        "agent_result": None,
+        "chat_files": [],
     }
     base.update(overrides)
     return base
@@ -349,6 +365,34 @@ class TestSyncRuns:
         assert len(runs) == 2
         assert all(isinstance(r, Run) for r in runs)
 
+    def test_list_follows_paginated_backend_response(self):
+        mock_http = MagicMock()
+        mock_http.request.side_effect = [
+            _make_response(
+                {
+                    "next": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=next-page",
+                    "previous": None,
+                    "results": [_run_payload()],
+                }
+            ),
+            _make_response(
+                {
+                    "next": None,
+                    "previous": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=previous-page",
+                    "results": [_run_payload(id="run-second")],
+                }
+            ),
+        ]
+        client = _sync_client(mock_http)
+
+        runs = client.runs.list()
+
+        assert [run.id for run in runs] == [RUN_ID, "run-second"]
+        assert mock_http.request.call_count == 2
+        assert mock_http.request.call_args_list[1].kwargs["params"] == {
+            "cursor": "next-page"
+        }
+
     def test_cancel_calls_correct_endpoint(self):
         mock_http = MagicMock()
         mock_http.request.return_value = httpx.Response(
@@ -362,12 +406,25 @@ class TestSyncRuns:
 
     def test_append_message(self):
         mock_http = MagicMock()
-        mock_http.request.return_value = _make_response(_run_payload())
+        mock_http.request.return_value = _make_response(
+            _append_message_payload(agent_result={"answer": "done"})
+        )
         client = _sync_client(mock_http)
-        result = client.runs.append_message(RUN_ID, text="continue please")
-        assert isinstance(result, RunDetail)
+        result = client.runs.append_message(
+            RUN_ID,
+            text="continue please",
+            effort="high",
+            model="gpt-5.6",
+        )
+        assert isinstance(result, AppendMessageResponse)
+        assert result.output == {"answer": "done"}
+        assert mock_http.request.call_count == 1
         _, call_kwargs = mock_http.request.call_args
-        assert call_kwargs["json"]["text"] == "continue please"
+        assert call_kwargs["json"] == {
+            "text": "continue please",
+            "effort": "high",
+            "model": "gpt-5.6",
+        }
 
     def test_wait_returns_on_completed(self):
         mock_http = MagicMock()
@@ -593,6 +650,34 @@ class TestAsyncAgents:
 
 @pytest.mark.asyncio
 class TestAsyncRuns:
+    async def test_list_follows_paginated_backend_response(self):
+        mock_http = AsyncMock()
+        mock_http.request.side_effect = [
+            _make_response(
+                {
+                    "next": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=next-page",
+                    "previous": None,
+                    "results": [_run_payload()],
+                }
+            ),
+            _make_response(
+                {
+                    "next": None,
+                    "previous": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=previous-page",
+                    "results": [_run_payload(id="run-second")],
+                }
+            ),
+        ]
+        client = _async_client(mock_http)
+
+        runs = await client.runs.list()
+
+        assert [run.id for run in runs] == [RUN_ID, "run-second"]
+        assert mock_http.request.await_count == 2
+        assert mock_http.request.await_args_list[1].kwargs["params"] == {
+            "cursor": "next-page"
+        }
+
     async def test_wait_completed(self):
         mock_http = AsyncMock()
         mock_http.request.side_effect = [
@@ -631,10 +716,11 @@ class TestAsyncRuns:
 
     async def test_append_message(self):
         mock_http = AsyncMock()
-        mock_http.request.return_value = _make_response(_run_payload())
+        mock_http.request.return_value = _make_response(_append_message_payload())
         client = _async_client(mock_http)
         result = await client.runs.append_message(RUN_ID, text="go on")
-        assert isinstance(result, RunDetail)
+        assert isinstance(result, AppendMessageResponse)
+        assert mock_http.request.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -718,3 +804,12 @@ class TestModels:
     def test_compilation_status_enum(self):
         comp = Compilation(**_compilation_payload(status="failed"))
         assert comp.status == CompilationStatus.FAILED
+
+
+def test_idempotency_key_rejects_non_ascii_header_values():
+    from flymyai.agents._resources import _idempotency_headers
+
+    assert _idempotency_headers("run-42")["Idempotency-Key"] == "run-42"
+    with pytest.raises(ValueError, match="printable ASCII"):
+        _idempotency_headers("запуск-42")
+

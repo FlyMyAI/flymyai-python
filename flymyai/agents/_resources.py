@@ -27,6 +27,7 @@ from flymyai.agents._types import (
     AgentDeploymentPreflight,
     AgentDetail,
     AgentVersion,
+    AppendMessageResponse,
     AvailableTool,
     Compilation,
     CompilationStatus,
@@ -86,6 +87,10 @@ def _idempotency_headers(idempotency_key: str) -> Dict[str, str]:
         raise ValueError(
             "idempotency_key must not contain control or non-printable characters."
         )
+    if not all(0x20 <= ord(character) <= 0x7E for character in idempotency_key):
+        # The key travels as an HTTP header; HTTP clients reject header values
+        # outside Latin-1 and servers may mangle anything outside printable ASCII.
+        raise ValueError("idempotency_key must contain only printable ASCII characters.")
     return {"Idempotency-Key": idempotency_key}
 
 
@@ -787,8 +792,27 @@ class Runs:
 
     def list(self) -> List[Run]:
         """List all executions for the current user (newest first)."""
-        data = self._c._request("GET", "/api/v1/agents/executions/")
-        return [Run(**item) for item in data]
+        params: Optional[Dict[str, str]] = None
+        results: List[Any] = []
+        visited: Set[_PaginationKey] = set()
+        page_count = 0
+        while True:
+            page_count += 1
+            data = self._c._request(
+                "GET",
+                "/api/v1/agents/executions/",
+                params=params,
+            )
+            results.extend(_list_results(data))
+            params = _guarded_next_list_params(
+                data,
+                base_params={},
+                visited=visited,
+                page_count=page_count,
+                resource_name="Agent runs",
+            )
+            if params is None:
+                return [Run(**item) for item in results]
 
     def get(self, run_id: ResourceID) -> RunDetail:
         """Get a single execution with logs."""
@@ -799,14 +823,26 @@ class Runs:
         """Cancel a running execution."""
         self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
 
-    def append_message(self, run_id: ResourceID, *, text: str) -> RunDetail:
-        """Append a user message to the conversation and restart the agent loop."""
+    def append_message(
+        self,
+        run_id: ResourceID,
+        *,
+        text: str,
+        effort: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> AppendMessageResponse:
+        """Append a message and return the backend's bounded acknowledgement."""
+        body: Dict[str, Any] = {"text": text}
+        if effort is not None:
+            body["effort"] = effort
+        if model is not None:
+            body["model"] = model
         data = self._c._request(
             "POST",
             f"/api/v1/agents/executions/{run_id}/append-message/",
-            json={"text": text},
+            json=body,
         )
-        return RunDetail(**data)
+        return AppendMessageResponse(**data)
 
     def suggest_schema(
         self,
@@ -2032,8 +2068,27 @@ class AsyncRuns:
         )
 
     async def list(self) -> List[Run]:
-        data = await self._c._request("GET", "/api/v1/agents/executions/")
-        return [Run(**item) for item in data]
+        params: Optional[Dict[str, str]] = None
+        results: List[Any] = []
+        visited: Set[_PaginationKey] = set()
+        page_count = 0
+        while True:
+            page_count += 1
+            data = await self._c._request(
+                "GET",
+                "/api/v1/agents/executions/",
+                params=params,
+            )
+            results.extend(_list_results(data))
+            params = _guarded_next_list_params(
+                data,
+                base_params={},
+                visited=visited,
+                page_count=page_count,
+                resource_name="Agent runs",
+            )
+            if params is None:
+                return [Run(**item) for item in results]
 
     async def get(self, run_id: ResourceID) -> RunDetail:
         data = await self._c._request("GET", f"/api/v1/agents/executions/{run_id}/")
@@ -2042,13 +2097,25 @@ class AsyncRuns:
     async def cancel(self, run_id: ResourceID) -> None:
         await self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
 
-    async def append_message(self, run_id: ResourceID, *, text: str) -> RunDetail:
+    async def append_message(
+        self,
+        run_id: ResourceID,
+        *,
+        text: str,
+        effort: Optional[str] = None,
+        model: Optional[str] = None,
+    ) -> AppendMessageResponse:
+        body: Dict[str, Any] = {"text": text}
+        if effort is not None:
+            body["effort"] = effort
+        if model is not None:
+            body["model"] = model
         data = await self._c._request(
             "POST",
             f"/api/v1/agents/executions/{run_id}/append-message/",
-            json={"text": text},
+            json=body,
         )
-        return RunDetail(**data)
+        return AppendMessageResponse(**data)
 
     async def suggest_schema(
         self,
