@@ -1059,7 +1059,6 @@ def test_sync_agent_list_follows_bounded_cursor_pages():
         return {
             "uuid": agent_id,
             "name": f"Agent {agent_id[0]}",
-            "user_prompt": "Do bounded work",
             "created_at": NOW,
             "updated_at": NOW,
         }
@@ -1101,7 +1100,6 @@ def test_async_agent_list_follows_bounded_cursor_pages():
             return {
                 "uuid": agent_id,
                 "name": f"Agent {agent_id[0]}",
-                "user_prompt": "Do bounded work",
                 "created_at": NOW,
                 "updated_at": NOW,
             }

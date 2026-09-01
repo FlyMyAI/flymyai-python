@@ -98,7 +98,10 @@ class Agent(BaseModel):
 
     uuid: str
     name: str
-    user_prompt: str
+    # The bounded list contract (AgentTaskList) deliberately omits user_prompt
+    # (it dominates list bytes); only the detail row carries it. A default keeps
+    # one Agent model valid for both row shapes.
+    user_prompt: str = ""
     available_tools: Any = Field(default_factory=list)
     available_custom_mcp_servers: List[int] = Field(default_factory=list)
     mcp_resource_set_ids: List[str] = Field(default_factory=list)
