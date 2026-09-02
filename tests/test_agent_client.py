@@ -1,4 +1,4 @@
-"""Tests for flymyai.agents — SyncAgentClient, AsyncAgentClient, and helpers."""
+"""Tests for flymyai.agents - SyncAgentClient, AsyncAgentClient, and helpers."""
 
 import asyncio
 import time
@@ -12,6 +12,7 @@ import pytest
 from flymyai.agents import (
     AgentClient,
     AgentStatus,
+    AppendMessageResponse,
     AsyncAgentClient,
     CompilationStatus,
     ExecutionLogType,
@@ -68,6 +69,21 @@ def _run_payload(**overrides) -> dict:
         "agent_result": None,
         "logs": [],
         "user_agent_task_uuid": "aaaaaaaa-0000-0000-0000-000000000001",
+    }
+    base.update(overrides)
+    return base
+
+
+def _append_message_payload(**overrides) -> dict:
+    base = {
+        "id": RUN_ID,
+        "status": "running",
+        "effort": "medium",
+        "model": "claude-sonnet",
+        "run_seq": 1,
+        "error": None,
+        "agent_result": None,
+        "chat_files": [],
     }
     base.update(overrides)
     return base
@@ -318,7 +334,10 @@ class TestSyncAgents:
 
     def test_run_returns_run_detail(self):
         client = self._client(_run_payload())
-        run = client.agents.run("aaaaaaaa-0000-0000-0000-000000000001")
+        run = client.agents.run(
+            "aaaaaaaa-0000-0000-0000-000000000001",
+            idempotency_key="agent-run-sync-1",
+        )
         assert isinstance(run, RunDetail)
         assert run.status == ExecutionStatus.PENDING
 
@@ -346,6 +365,30 @@ class TestSyncRuns:
         assert len(runs) == 2
         assert all(isinstance(r, Run) for r in runs)
 
+    def test_list_follows_paginated_backend_response(self):
+        mock_http = MagicMock()
+        mock_http.request.side_effect = [
+            _make_response({
+                "next": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=next-page",
+                "previous": None,
+                "results": [_run_payload()],
+            }),
+            _make_response({
+                "next": None,
+                "previous": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=previous-page",
+                "results": [_run_payload(id="run-second")],
+            }),
+        ]
+        client = _sync_client(mock_http)
+
+        runs = client.runs.list()
+
+        assert [run.id for run in runs] == [RUN_ID, "run-second"]
+        assert mock_http.request.call_count == 2
+        assert mock_http.request.call_args_list[1].kwargs["params"] == {
+            "cursor": "next-page"
+        }
+
     def test_cancel_calls_correct_endpoint(self):
         mock_http = MagicMock()
         mock_http.request.return_value = httpx.Response(
@@ -359,12 +402,25 @@ class TestSyncRuns:
 
     def test_append_message(self):
         mock_http = MagicMock()
-        mock_http.request.return_value = _make_response(_run_payload())
+        mock_http.request.return_value = _make_response(
+            _append_message_payload(agent_result={"answer": "done"})
+        )
         client = _sync_client(mock_http)
-        result = client.runs.append_message(RUN_ID, text="continue please")
-        assert isinstance(result, RunDetail)
+        result = client.runs.append_message(
+            RUN_ID,
+            text="continue please",
+            effort="high",
+            model="gpt-5.6",
+        )
+        assert isinstance(result, AppendMessageResponse)
+        assert result.output == {"answer": "done"}
+        assert mock_http.request.call_count == 1
         _, call_kwargs = mock_http.request.call_args
-        assert call_kwargs["json"]["text"] == "continue please"
+        assert call_kwargs["json"] == {
+            "text": "continue please",
+            "effort": "high",
+            "model": "gpt-5.6",
+        }
 
     def test_wait_returns_on_completed(self):
         mock_http = MagicMock()
@@ -491,8 +547,15 @@ class TestSyncTools:
         mock_http = MagicMock()
         mock_http.request.return_value = _make_response({"result": "found it"})
         client = _sync_client(mock_http)
-        result = client.tools.call(7, action="search", arguments={"query": "AI"})
+        result = client.tools.call(
+            7,
+            action="search",
+            arguments={"query": "AI"},
+            idempotency_key="search-ai-v1",
+        )
         assert result == {"result": "found it"}
+        _, call_kwargs = mock_http.request.call_args
+        assert call_kwargs["headers"]["Idempotency-Key"] == "search-ai-v1"
 
 
 class TestSyncCompilations:
@@ -526,13 +589,10 @@ class TestSyncCompilations:
 
     def test_run_compilation(self):
         mock_http = MagicMock()
-        mock_http.request.return_value = _make_response(
-            _compilation_payload(status="completed", result={"output": "done"})
-        )
         client = _sync_client(mock_http)
-        comp = client.compilations.run(COMPILATION_ID)
-        assert comp.status == CompilationStatus.COMPLETED
-        assert comp.result == {"output": "done"}
+        with pytest.raises(NotImplementedError, match="caller-owned replay contract"):
+            client.compilations.run(COMPILATION_ID)
+        mock_http.request.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -577,12 +637,39 @@ class TestAsyncAgents:
 
     async def test_run(self):
         client = await self._client(_run_payload())
-        run = await client.agents.run("aaaaaaaa-0000-0000-0000-000000000001")
+        run = await client.agents.run(
+            "aaaaaaaa-0000-0000-0000-000000000001",
+            idempotency_key="agent-run-async-1",
+        )
         assert isinstance(run, RunDetail)
 
 
 @pytest.mark.asyncio
 class TestAsyncRuns:
+    async def test_list_follows_paginated_backend_response(self):
+        mock_http = AsyncMock()
+        mock_http.request.side_effect = [
+            _make_response({
+                "next": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=next-page",
+                "previous": None,
+                "results": [_run_payload()],
+            }),
+            _make_response({
+                "next": None,
+                "previous": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=previous-page",
+                "results": [_run_payload(id="run-second")],
+            }),
+        ]
+        client = _async_client(mock_http)
+
+        runs = await client.runs.list()
+
+        assert [run.id for run in runs] == [RUN_ID, "run-second"]
+        assert mock_http.request.await_count == 2
+        assert mock_http.request.await_args_list[1].kwargs["params"] == {
+            "cursor": "next-page"
+        }
+
     async def test_wait_completed(self):
         mock_http = AsyncMock()
         mock_http.request.side_effect = [
@@ -621,10 +708,11 @@ class TestAsyncRuns:
 
     async def test_append_message(self):
         mock_http = AsyncMock()
-        mock_http.request.return_value = _make_response(_run_payload())
+        mock_http.request.return_value = _make_response(_append_message_payload())
         client = _async_client(mock_http)
         result = await client.runs.append_message(RUN_ID, text="go on")
-        assert isinstance(result, RunDetail)
+        assert isinstance(result, AppendMessageResponse)
+        assert mock_http.request.await_count == 1
 
 
 @pytest.mark.asyncio
@@ -640,8 +728,14 @@ class TestAsyncTools:
         mock_http = AsyncMock()
         mock_http.request.return_value = _make_response({"result": "ok"})
         client = _async_client(mock_http)
-        r = await client.tools.call(7, action="ping")
+        r = await client.tools.call(
+            7,
+            action="ping",
+            idempotency_key="async-ping-v1",
+        )
         assert r == {"result": "ok"}
+        _, call_kwargs = mock_http.request.await_args
+        assert call_kwargs["headers"]["Idempotency-Key"] == "async-ping-v1"
 
 
 @pytest.mark.asyncio
@@ -656,12 +750,10 @@ class TestAsyncCompilations:
 
     async def test_run(self):
         mock_http = AsyncMock()
-        mock_http.request.return_value = _make_response(
-            _compilation_payload(status="completed")
-        )
         client = _async_client(mock_http)
-        comp = await client.compilations.run(COMPILATION_ID)
-        assert comp.status == CompilationStatus.COMPLETED
+        with pytest.raises(NotImplementedError, match="caller-owned replay contract"):
+            await client.compilations.run(COMPILATION_ID)
+        mock_http.request.assert_not_awaited()
 
 
 class TestModels:
@@ -704,3 +796,15 @@ class TestModels:
     def test_compilation_status_enum(self):
         comp = Compilation(**_compilation_payload(status="failed"))
         assert comp.status == CompilationStatus.FAILED
+
+
+def test_idempotency_key_rejects_non_ascii_header_values():
+    from flymyai.agents._resources import _idempotency_headers
+
+    assert _idempotency_headers("run-42")["Idempotency-Key"] == "run-42"
+    with pytest.raises(ValueError, match="printable ASCII"):
+        _idempotency_headers("запуск-42")
+    with pytest.raises(ValueError, match="leading or trailing spaces"):
+        _idempotency_headers(" run-42")
+    with pytest.raises(ValueError, match="leading or trailing spaces"):
+        _idempotency_headers("run-42 ")

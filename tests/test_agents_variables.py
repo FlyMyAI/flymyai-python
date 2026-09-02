@@ -22,7 +22,6 @@ from flymyai import (
     VariablesValidationError,
 )
 
-
 # ── helpers ─────────────────────────────────────────────────────────────────
 
 
@@ -244,7 +243,11 @@ class TestVariablesValidationError:
             ("POST", "/api/v1/agents/tasks/abc-123/run-loop/"): run_loop,
         })
         with pytest.raises(VariablesValidationError) as excinfo:
-            client.agents.run("abc-123", variables={})
+            client.agents.run(
+                "abc-123",
+                idempotency_key="variables-agent-run-1",
+                variables={},
+            )
         err = excinfo.value
         assert err.status_code == 400
         assert len(err.messages) == 2
@@ -269,7 +272,10 @@ class TestVariablesValidationError:
             ): run_instruction,
         })
         with pytest.raises(VariablesValidationError) as excinfo:
-            client.compilations.run_instruction(9)
+            client.compilations.run_instruction(
+                9,
+                idempotency_key="variables-frozen-run-1",
+            )
         assert excinfo.value.messages == [
             "This field is required when input_schema is set."
         ]
@@ -323,7 +329,10 @@ class TestHighLevelHelpers:
             ("GET", "/api/v1/agents/executions/100/"): get_run,
         })
         run = client.compilations.run_instruction_and_wait(
-            1, variables={"x": 1}, poll_interval=0.01
+            1,
+            idempotency_key="variables-frozen-wait-1",
+            variables={"x": 1},
+            poll_interval=0.01,
         )
         assert run.status == ExecutionStatus.COMPLETED
 
