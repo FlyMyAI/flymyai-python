@@ -1268,9 +1268,9 @@ def test_sync_run_methods_require_validate_and_forward_caller_keys():
     agents.run(AGENT_ID, idempotency_key=exact_key)
     assert client._request.call_args.kwargs["headers"] == {"Idempotency-Key": exact_key}
     client.reset_mock()
-    compilations.run_instruction(7, idempotency_key=" frozen-caller-key ")
+    compilations.run_instruction(7, idempotency_key="frozen caller key")
     assert client._request.call_args.kwargs["headers"] == {
-        "Idempotency-Key": " frozen-caller-key "
+        "Idempotency-Key": "frozen caller key"
     }
     client.reset_mock()
     deployments.run(
@@ -1306,7 +1306,15 @@ def test_sync_run_methods_require_validate_and_forward_caller_keys():
             idempotency_key=key,
         ),
     ):
-        for invalid_key in ("", "   ", "x" * 256, "line\nbreak", "nul\x00key"):
+        for invalid_key in (
+            "",
+            "   ",
+            " leading-space",
+            "trailing-space ",
+            "x" * 256,
+            "line\nbreak",
+            "nul\x00key",
+        ):
             client.reset_mock()
             with pytest.raises(ValueError, match="idempotency_key"):
                 operation(invalid_key)
@@ -1359,7 +1367,15 @@ def test_sync_resource_scope_creates_require_validate_and_forward_caller_keys():
             idempotency_key=key,
         ),
     ):
-        for invalid_key in ("", "   ", "x" * 256, "line\nbreak", "zero\u200bwidth"):
+        for invalid_key in (
+            "",
+            "   ",
+            " leading-space",
+            "trailing-space ",
+            "x" * 256,
+            "line\nbreak",
+            "zero\u200bwidth",
+        ):
             client.reset_mock()
             with pytest.raises(ValueError, match="idempotency_key"):
                 operation(invalid_key)
@@ -1371,7 +1387,7 @@ def test_sync_resource_scope_creates_require_validate_and_forward_caller_keys():
         cast(Any, groups.create)(name="Mail agents")
 
 
-def test_operation_key_shared_conformance_fixture_and_astral_boundary():
+def test_operation_key_shared_ascii_conformance_fixture():
     fixture_path = (
         Path(__file__).parent / "fixtures" / "operation-key-conformance-v1.json"
     )
@@ -1394,7 +1410,7 @@ def test_operation_key_shared_conformance_fixture_and_astral_boundary():
     astral_boundary = conformance_value(
         next(
             entry
-            for entry in fixture["accepted"]
+            for entry in fixture["rejected"]
             if entry["name"] == "astral-255-code-points"
         )
     )
@@ -1684,9 +1700,9 @@ def test_async_lists_and_run_keys_match_sync_contracts():
         deployments = AsyncDeployments(run_client)
         tools = AsyncTools(run_client)
 
-        await agents.run(AGENT_ID, idempotency_key=" async-agent-key ")
+        await agents.run(AGENT_ID, idempotency_key="async agent key")
         assert run_client._request.await_args.kwargs["headers"] == {
-            "Idempotency-Key": " async-agent-key "
+            "Idempotency-Key": "async agent key"
         }
         run_client._request.reset_mock()
         await compilations.run_instruction(7, idempotency_key="async-frozen-key")
@@ -1729,6 +1745,8 @@ def test_async_lists_and_run_keys_match_sync_contracts():
             for invalid_key in (
                 "",
                 "   ",
+                " leading-space",
+                "trailing-space ",
                 "x" * 256,
                 "line\nbreak",
                 "nul\x00key",
@@ -1781,10 +1799,15 @@ def test_async_lists_and_run_keys_match_sync_contracts():
                 idempotency_key=key,
             ),
         ):
-            create_client._request.reset_mock()
-            with pytest.raises(ValueError, match="idempotency_key"):
-                await operation("zero\u200bwidth")
-            create_client._request.assert_not_awaited()
+            for invalid_key in (
+                "zero\u200bwidth",
+                " leading-space",
+                "trailing-space ",
+            ):
+                create_client._request.reset_mock()
+                with pytest.raises(ValueError, match="idempotency_key"):
+                    await operation(invalid_key)
+                create_client._request.assert_not_awaited()
 
         with pytest.raises(TypeError, match="idempotency_key"):
             cast(Any, async_resource_sets.create)(name="Mail operations")

@@ -5,24 +5,9 @@
       "value": "logical call !#$%&'()*+,/;<=>?@[]^`{|}~"
     },
     {
-      "name": "accented-unicode",
-      "value": "café-operation"
-    },
-    {
-      "name": "cyrillic-unicode",
-      "value": "запуск-42"
-    },
-    {
       "name": "ascii-255-code-points",
       "repeat": {
         "value": "x",
-        "count": 255
-      }
-    },
-    {
-      "name": "astral-255-code-points",
-      "repeat": {
-        "value": "😀",
         "count": 255
       }
     }
@@ -37,6 +22,14 @@
       "value": "   "
     },
     {
+      "name": "leading-space",
+      "value": " logical-call"
+    },
+    {
+      "name": "trailing-space",
+      "value": "logical-call "
+    },
+    {
       "name": "ascii-256-code-points",
       "repeat": {
         "value": "x",
@@ -46,7 +39,7 @@
     {
       "name": "astral-256-code-points",
       "repeat": {
-        "value": "😀",
+        "value": "\ud83d\ude00",
         "count": 256
       }
     },
@@ -65,6 +58,21 @@
     {
       "name": "non-breaking-space",
       "value": "non\u00a0breaking-space"
+    },
+    {
+      "name": "accented-unicode",
+      "value": "caf\u00e9-operation"
+    },
+    {
+      "name": "cyrillic-unicode",
+      "value": "\u0437\u0430\u043f\u0443\u0441\u043a-42"
+    },
+    {
+      "name": "astral-255-code-points",
+      "repeat": {
+        "value": "\ud83d\ude00",
+        "count": 255
+      }
     }
   ]
 }

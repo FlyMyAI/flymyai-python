@@ -81,6 +81,10 @@ def _idempotency_headers(idempotency_key: str) -> Dict[str, str]:
         raise ValueError("idempotency_key must be a string.")
     if not idempotency_key.strip():
         raise ValueError("idempotency_key must not be blank.")
+    if idempotency_key != idempotency_key.strip(" "):
+        raise ValueError(
+            "idempotency_key must not contain leading or trailing spaces."
+        )
     if len(idempotency_key) > 255:
         raise ValueError("idempotency_key must contain at most 255 characters.")
     if not idempotency_key.isprintable():

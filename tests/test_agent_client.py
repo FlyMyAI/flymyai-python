@@ -812,4 +812,7 @@ def test_idempotency_key_rejects_non_ascii_header_values():
     assert _idempotency_headers("run-42")["Idempotency-Key"] == "run-42"
     with pytest.raises(ValueError, match="printable ASCII"):
         _idempotency_headers("запуск-42")
-
+    with pytest.raises(ValueError, match="leading or trailing spaces"):
+        _idempotency_headers(" run-42")
+    with pytest.raises(ValueError, match="leading or trailing spaces"):
+        _idempotency_headers("run-42 ")
