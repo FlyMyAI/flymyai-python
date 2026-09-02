@@ -368,20 +368,16 @@ class TestSyncRuns:
     def test_list_follows_paginated_backend_response(self):
         mock_http = MagicMock()
         mock_http.request.side_effect = [
-            _make_response(
-                {
-                    "next": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=next-page",
-                    "previous": None,
-                    "results": [_run_payload()],
-                }
-            ),
-            _make_response(
-                {
-                    "next": None,
-                    "previous": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=previous-page",
-                    "results": [_run_payload(id="run-second")],
-                }
-            ),
+            _make_response({
+                "next": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=next-page",
+                "previous": None,
+                "results": [_run_payload()],
+            }),
+            _make_response({
+                "next": None,
+                "previous": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=previous-page",
+                "results": [_run_payload(id="run-second")],
+            }),
         ]
         client = _sync_client(mock_http)
 
@@ -653,20 +649,16 @@ class TestAsyncRuns:
     async def test_list_follows_paginated_backend_response(self):
         mock_http = AsyncMock()
         mock_http.request.side_effect = [
-            _make_response(
-                {
-                    "next": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=next-page",
-                    "previous": None,
-                    "results": [_run_payload()],
-                }
-            ),
-            _make_response(
-                {
-                    "next": None,
-                    "previous": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=previous-page",
-                    "results": [_run_payload(id="run-second")],
-                }
-            ),
+            _make_response({
+                "next": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=next-page",
+                "previous": None,
+                "results": [_run_payload()],
+            }),
+            _make_response({
+                "next": None,
+                "previous": "https://backend.flymy.ai/api/v1/agents/executions/?cursor=previous-page",
+                "results": [_run_payload(id="run-second")],
+            }),
         ]
         client = _async_client(mock_http)
 

@@ -82,9 +82,7 @@ def _idempotency_headers(idempotency_key: str) -> Dict[str, str]:
     if not idempotency_key.strip():
         raise ValueError("idempotency_key must not be blank.")
     if idempotency_key != idempotency_key.strip(" "):
-        raise ValueError(
-            "idempotency_key must not contain leading or trailing spaces."
-        )
+        raise ValueError("idempotency_key must not contain leading or trailing spaces.")
     if len(idempotency_key) > 255:
         raise ValueError("idempotency_key must contain at most 255 characters.")
     if not idempotency_key.isprintable():
@@ -94,7 +92,9 @@ def _idempotency_headers(idempotency_key: str) -> Dict[str, str]:
     if not all(0x20 <= ord(character) <= 0x7E for character in idempotency_key):
         # The key travels as an HTTP header; HTTP clients reject header values
         # outside Latin-1 and servers may mangle anything outside printable ASCII.
-        raise ValueError("idempotency_key must contain only printable ASCII characters.")
+        raise ValueError(
+            "idempotency_key must contain only printable ASCII characters."
+        )
     return {"Idempotency-Key": idempotency_key}
 
 
