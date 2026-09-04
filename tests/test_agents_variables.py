@@ -316,16 +316,49 @@ class TestHighLevelHelpers:
         def run_instruction(_: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json=_run_payload(run_id=100, status="pending"))
 
-        def get_run(_: httpx.Request) -> httpx.Response:
+        def get_status(_: httpx.Request) -> httpx.Response:
             poll_state["i"] += 1
             status = "completed" if poll_state["i"] >= 2 else "running"
-            return httpx.Response(200, json=_run_payload(run_id=100, status=status))
+            return httpx.Response(
+                200,
+                json={
+                    "id": 100,
+                    "status": status,
+                    "run_seq": 0,
+                    "updated_at": _now_iso(),
+                    "is_settled": status == "completed",
+                    "step_count": 0,
+                    "tool_step_count": 0,
+                    "last_step_id": None,
+                    "new_steps": [],
+                    "agent_surface_revision": 1,
+                    "view": "bounded_v1",
+                    "page_size": 100,
+                    "has_more": False,
+                    "next_since": 0,
+                    "poll_complete": status == "completed",
+                    "step_count_has_more": False,
+                    "presentation_cursor_v1": {
+                        "version": "presentation_cursor_v1",
+                        "run_seq": 0,
+                        "as_of_seq": 0,
+                    },
+                    "chat_files_revision": "chat-files-v1:0",
+                },
+            )
+
+        def get_run(_: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                json=_run_payload(run_id=100, status="completed"),
+            )
 
         client = _build_client({
             (
                 "POST",
                 "/api/v1/agents/compilations/1/run-instruction/",
             ): run_instruction,
+            ("GET", "/api/v1/agents/executions/100/status/"): get_status,
             ("GET", "/api/v1/agents/executions/100/"): get_run,
         })
         run = client.compilations.run_instruction_and_wait(

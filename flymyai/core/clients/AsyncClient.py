@@ -28,6 +28,7 @@ from flymyai.core.models.successful_responses import (
     PredictionResponse,
     AsyncPredictionTask,
 )
+from flymyai.core.idempotency import idempotency_headers
 from flymyai.core.stream_iterators.AsyncPredictionStream import AsyncPredictionStream
 from flymyai.multipart import MultipartPayload
 from flymyai.utils.utils import aretryable_callback
@@ -148,7 +149,13 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             except BaseFlyMyAIException as e:
                 raise FlyMyAIPredictException.from_base_exception(e)
 
-    async def _predict(self, client_info, payload: MultipartPayload):
+    async def _predict(
+        self,
+        client_info,
+        payload: MultipartPayload,
+        *,
+        idempotency_key: str,
+    ):
         """
         Executes request and waits for sse data
         :param payload: model input data
@@ -156,18 +163,22 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         """
         return await self._awith_reconnect(
             lambda: self._sse_instant(
-                lambda: self._client.stream(
-                    method="post",
-                    url=client_info.prediction_path,
-                    timeout=_predict_timeout,
-                    **payload.serialize(),
-                    headers=client_info.authorization_headers,
+                lambda: self._stream_iterator(
+                    client_info,
+                    payload,
+                    False,
+                    idempotency_key=idempotency_key,
                 )
             )
         )
 
     async def predict(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
     ) -> PredictionResponse:
         """
         Wrap predict method in sse.
@@ -181,7 +192,11 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         """
         payload = MultipartPayload(input_data=payload)
         history, response = await aretryable_callback(
-            lambda: self._predict(self.amend_client_info(model), payload),
+            lambda: self._predict(
+                self.amend_client_info(model),
+                payload,
+                idempotency_key=idempotency_key,
+            ),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
@@ -189,7 +204,12 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         return PredictionResponse.from_response(response, exc_history=history)
 
     async def predict_async_task(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
     ) -> AsyncPredictionTask:
         payload = MultipartPayload(input_data=payload)
         client_info = self.amend_client_info(model)
@@ -197,7 +217,9 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             _, response = await aretryable_callback(
                 lambda: self._awith_reconnect(
                     lambda: self._client.post(
-                        client_info.prediction_async_path, **payload.serialize()
+                        client_info.prediction_async_path,
+                        headers=idempotency_headers(idempotency_key),
+                        **payload.serialize(),
                     )
                 ),
                 max_retries or self.max_retries,
@@ -235,11 +257,20 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         )
         return res
 
-    async def _stream(self, client_info: APIKeyClientInfo, payload: dict):
+    async def _stream(
+        self,
+        client_info: APIKeyClientInfo,
+        payload: dict,
+        *,
+        idempotency_key: str,
+    ):
         payload = MultipartPayload(payload)
         try:
             stream_iterator = self._stream_iterator(
-                client_info, payload, is_long_stream=True
+                client_info,
+                payload,
+                is_long_stream=True,
+                idempotency_key=idempotency_key,
             )
             decoder = SSEDecoder()
             async with stream_iterator as sse_stream:
@@ -258,7 +289,10 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
                 raise
             await self._reconnect_client()
             stream_iterator = self._stream_iterator(
-                client_info, payload, is_long_stream=True
+                client_info,
+                payload,
+                is_long_stream=True,
+                idempotency_key=idempotency_key,
             )
             decoder = SSEDecoder()
             async with stream_iterator as sse_stream:
@@ -273,9 +307,20 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
                         raise FlyMyAIPredictException.from_base_exception(e)
                     yield response
 
-    def stream(self, payload: dict, model: Optional[str] = None, max_retries=None):
+    def stream(
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
+    ):
         full_client_info = self.amend_client_info(model)
-        stream_iter = self._stream(full_client_info, payload)
+        stream_iter = self._stream(
+            full_client_info,
+            payload,
+            idempotency_key=idempotency_key,
+        )
         stream_wrapper = AsyncPredictionStream(stream_iter, self, full_client_info)
         return stream_wrapper
 
@@ -294,7 +339,14 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         await self._client.aclose()
 
     @classmethod
-    async def arun_predict(cls, apikey: str, model: str, payload: dict):
+    async def arun_predict(
+        cls,
+        apikey: str,
+        model: str,
+        payload: dict,
+        *,
+        idempotency_key: str,
+    ):
         """
         Execute simple prediction out of a box
         :param model: flymyai/bert
@@ -305,4 +357,4 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
                 output_data - dict with prediction output
         """
         async with cls(apikey, model) as client:
-            return await client.predict(payload)
+            return await client.predict(payload, idempotency_key=idempotency_key)

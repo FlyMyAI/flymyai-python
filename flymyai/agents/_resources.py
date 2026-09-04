@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
+import math
 import re
 import time
 from typing import (
@@ -43,9 +46,16 @@ from flymyai.agents._types import (
     RuntimeConnections,
     Run,
     RunDetail,
+    RunLogPage,
+    RunProgressStatus,
+    RunProgressStep,
+    RunResource,
+    RunResourceRange,
+    RunTranscriptPage,
     SchemaSuggestion,
     Tool,
 )
+from flymyai.core.idempotency import idempotency_headers as _idempotency_headers
 
 if TYPE_CHECKING:
     from flymyai.agents._client import AsyncAgentClient, SyncAgentClient
@@ -57,6 +67,13 @@ _MAX_CURSOR_ROWS = 10_000
 _MAX_CURSOR_PAGE_ROWS = 100
 _MAX_CURSOR_CHARS = 1024
 _DEFAULT_CURSOR_PAGE_SIZE = 100
+_RUN_STATUS_MAX_RESPONSE_BYTES = 1024 * 1024
+_RUN_PAGE_MAX_RESPONSE_BYTES = 512 * 1024
+_RUN_RESOURCE_MAX_RANGE_BYTES = 65_536
+_RUN_RESOURCE_MAX_BYTES = 64 * 1024 * 1024
+_RUN_CURSOR_MAX_CHARS = 512
+_RUN_WAIT_MAX_REQUESTS = 1_000
+_SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 _PaginationKey = Tuple[Tuple[str, str], ...]
 _McpResourceSetMemberLike = Union[
     McpResourceSetMemberInput,
@@ -73,29 +90,6 @@ _DEPRECATED_COMPILATION_RUN_MESSAGE = (
     "idempotency_key=...) for an owner run or Deployments.run(..., "
     "idempotency_key=...) for a published deployment."
 )
-
-
-def _idempotency_headers(idempotency_key: str) -> Dict[str, str]:
-    """Validate and forward one caller-owned durable operation key exactly."""
-    if not isinstance(idempotency_key, str):
-        raise ValueError("idempotency_key must be a string.")
-    if not idempotency_key.strip():
-        raise ValueError("idempotency_key must not be blank.")
-    if idempotency_key != idempotency_key.strip(" "):
-        raise ValueError("idempotency_key must not contain leading or trailing spaces.")
-    if len(idempotency_key) > 255:
-        raise ValueError("idempotency_key must contain at most 255 characters.")
-    if not idempotency_key.isprintable():
-        raise ValueError(
-            "idempotency_key must not contain control or non-printable characters."
-        )
-    if not all(0x20 <= ord(character) <= 0x7E for character in idempotency_key):
-        # The key travels as an HTTP header; HTTP clients reject header values
-        # outside Latin-1 and servers may mangle anything outside printable ASCII.
-        raise ValueError(
-            "idempotency_key must contain only printable ASCII characters."
-        )
-    return {"Idempotency-Key": idempotency_key}
 
 
 def _resource_set_member_payloads(
@@ -369,6 +363,319 @@ def _validate_cursor_page_size(page_size: int) -> int:
     ):
         raise ValueError("page_size must be an integer between 1 and 100.")
     return page_size
+
+
+def _validate_max_items(max_items: Optional[int]) -> Optional[int]:
+    if max_items is None:
+        return None
+    if (
+        isinstance(max_items, bool)
+        or not isinstance(max_items, int)
+        or not 1 <= max_items <= _MAX_CURSOR_ROWS
+    ):
+        raise ValueError(
+            f"max_items must be an integer between 1 and {_MAX_CURSOR_ROWS}."
+        )
+    return max_items
+
+
+def _validate_status_since(since: int) -> int:
+    if (
+        isinstance(since, bool)
+        or not isinstance(since, int)
+        or not 0 <= since <= 9_223_372_036_854_775_807
+    ):
+        raise ValueError("since must be an integer between 0 and 2^63 - 1.")
+    return since
+
+
+def _validate_run_page_size(page_size: int, *, maximum: int) -> int:
+    if (
+        isinstance(page_size, bool)
+        or not isinstance(page_size, int)
+        or not 1 <= page_size <= maximum
+    ):
+        raise ValueError(f"page_size must be an integer between 1 and {maximum}.")
+    return page_size
+
+
+def _validate_run_cursor(cursor: Optional[str]) -> Optional[str]:
+    if cursor is None:
+        return None
+    if (
+        not isinstance(cursor, str)
+        or not cursor
+        or len(cursor) > _RUN_CURSOR_MAX_CHARS
+        or not cursor.isprintable()
+    ):
+        raise ValueError(
+            "cursor must be a non-blank printable string of at most 512 characters."
+        )
+    return cursor
+
+
+def _bounded_response_json(response: Any, *, resource_name: str, max_bytes: int) -> Any:
+    if len(response.content) > max_bytes:
+        raise RuntimeError(f"{resource_name} response exceeded {max_bytes} bytes.")
+    try:
+        return response.json()
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"{resource_name} returned malformed JSON.") from exc
+
+
+def _validate_run_resource(resource: RunResource) -> None:
+    if resource.version != "execution_resource_v1":
+        raise RuntimeError("Run resource returned an unexpected version.")
+    if resource.kind not in {"agent_result", "error"}:
+        raise RuntimeError("Run resource returned an unexpected kind.")
+    expected_media_type = (
+        "application/json" if resource.kind == "agent_result" else "text/plain"
+    )
+    if resource.media_type != expected_media_type or resource.encoding != "utf-8":
+        raise RuntimeError("Run resource returned unexpected encoding metadata.")
+    if not 0 <= resource.size_bytes <= _RUN_RESOURCE_MAX_BYTES:
+        raise RuntimeError("Run resource size is outside the public contract.")
+    if _SHA256_PATTERN.fullmatch(resource.sha256) is None:
+        raise RuntimeError("Run resource returned an invalid SHA-256 digest.")
+    if (
+        not resource.ref
+        or len(resource.ref) > _RUN_CURSOR_MAX_CHARS
+        or not resource.ref.isprintable()
+    ):
+        raise RuntimeError("Run resource returned an invalid opaque ref.")
+    if resource.inline.format not in {"json", "text"}:
+        raise RuntimeError("Run resource returned an invalid inline format.")
+    if not 0 <= resource.inline.size_bytes <= 4_096:
+        raise RuntimeError("Run resource returned an oversized inline projection.")
+    if resource.inline.truncated != resource.truncated:
+        raise RuntimeError("Run resource returned inconsistent truncation metadata.")
+    if not resource.truncated and resource.inline.size_bytes != resource.size_bytes:
+        raise RuntimeError("Run resource returned inconsistent inline byte metadata.")
+    if resource.retrieval.accept_ranges != "bytes" or not (
+        1
+        <= resource.retrieval.max_range_bytes
+        <= _RUN_RESOURCE_MAX_RANGE_BYTES
+    ):
+        raise RuntimeError("Run resource returned invalid range metadata.")
+    if (
+        resource.receipt.kind != "chunked_postgres_v1"
+        or resource.receipt.chunk_bytes != _RUN_RESOURCE_MAX_RANGE_BYTES
+    ):
+        raise RuntimeError("Run resource returned invalid receipt metadata.")
+
+
+def _validate_transcript_page(
+    page: RunTranscriptPage,
+    *,
+    cursor: Optional[str],
+    page_size: int,
+) -> None:
+    if page.page_size != page_size or len(page.messages) > page_size:
+        raise RuntimeError("Run transcript returned an unexpected page size.")
+    if page.response_bytes_limit != _RUN_PAGE_MAX_RESPONSE_BYTES:
+        raise RuntimeError("Run transcript returned an unexpected response limit.")
+    next_cursor = _validate_run_cursor(page.next_cursor)
+    if page.has_more != (next_cursor is not None):
+        raise RuntimeError("Run transcript returned inconsistent cursor metadata.")
+    if next_cursor is not None and next_cursor == cursor:
+        raise RuntimeError("Run transcript cursor did not advance.")
+    receipt = page.receipt
+    if (
+        receipt.version != "execution_transcript_receipt_v1"
+        or receipt.source not in {"display_messages", "messages"}
+        or receipt.presentation_seq < 0
+        or receipt.total_messages < 0
+        or receipt.signature_algorithm != "hmac-sha256"
+        or _SHA256_PATTERN.fullmatch(receipt.signature) is None
+    ):
+        raise RuntimeError("Run transcript returned invalid receipt metadata.")
+    seen_ids: Set[str] = set()
+    for message in page.messages:
+        returned_bytes = len(message.content.encode("utf-8"))
+        if message.role not in {"user", "assistant"}:
+            raise RuntimeError("Run transcript returned an invalid message role.")
+        if returned_bytes > 8_192:
+            raise RuntimeError("Run transcript returned oversized message content.")
+        if message.content_size_bytes < returned_bytes:
+            raise RuntimeError("Run transcript returned invalid content size metadata.")
+        if message.content_size_exact and (
+            message.content_truncated
+            != (returned_bytes < message.content_size_bytes)
+        ):
+            raise RuntimeError("Run transcript returned invalid truncation metadata.")
+        if (
+            not message.message_id
+            or len(message.message_id) > 255
+            or not message.message_id.isprintable()
+            or message.message_id in seen_ids
+        ):
+            raise RuntimeError("Run transcript returned an invalid message identity.")
+        seen_ids.add(message.message_id)
+
+
+def _validate_log_page(
+    page: RunLogPage,
+    *,
+    cursor: Optional[str],
+    page_size: int,
+) -> None:
+    if page.page_size != page_size or len(page.logs) > page_size:
+        raise RuntimeError("Run logs returned an unexpected page size.")
+    if page.response_bytes_limit != _RUN_PAGE_MAX_RESPONSE_BYTES:
+        raise RuntimeError("Run logs returned an unexpected response limit.")
+    next_cursor = _validate_run_cursor(page.next_cursor)
+    if page.has_more != (next_cursor is not None):
+        raise RuntimeError("Run logs returned inconsistent cursor metadata.")
+    if next_cursor is not None and next_cursor == cursor:
+        raise RuntimeError("Run log cursor did not advance.")
+    receipt = page.receipt
+    if (
+        receipt.version != "execution_log_receipt_v1"
+        or receipt.snapshot_max_id < 0
+        or receipt.ordering != "id"
+        or receipt.signature_algorithm != "hmac-sha256"
+        or _SHA256_PATTERN.fullmatch(receipt.signature) is None
+    ):
+        raise RuntimeError("Run logs returned invalid receipt metadata.")
+    previous_id = 0
+    for entry in page.logs:
+        if entry.id <= previous_id or entry.id > receipt.snapshot_max_id:
+            raise RuntimeError("Run log IDs must increase inside one snapshot page.")
+        previous_id = entry.id
+        if entry.data_hidden and (
+            entry.data != {}
+            or entry.data_size_exact
+            or not entry.data_has_more
+        ):
+            raise RuntimeError("Run logs returned unsafe hidden-data metadata.")
+        if entry.data_size_exact:
+            if not 0 <= entry.data_size_bytes <= 4_096:
+                raise RuntimeError("Run logs returned oversized exact data.")
+            try:
+                rendered = json.dumps(
+                    entry.data,
+                    ensure_ascii=False,
+                    separators=(",", ":"),
+                ).encode("utf-8")
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError("Run logs returned non-JSON data.") from exc
+            if len(rendered) > 4_096:
+                raise RuntimeError("Run logs returned oversized exact data.")
+
+
+def _validate_wait_options(
+    *, timeout: float, poll_interval: float, max_requests: int
+) -> None:
+    for field_name, value in (("timeout", timeout), ("poll_interval", poll_interval)):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise ValueError(f"{field_name} must be a finite non-negative number.")
+    if (
+        isinstance(max_requests, bool)
+        or not isinstance(max_requests, int)
+        or not 1 <= max_requests <= _RUN_WAIT_MAX_REQUESTS
+    ):
+        raise ValueError(
+            f"max_requests must be an integer between 1 and {_RUN_WAIT_MAX_REQUESTS}."
+        )
+
+
+def _validate_progress_page(
+    result: RunProgressStatus,
+    *,
+    since: int,
+    page_size: int,
+) -> None:
+    """Reject a malformed response before a poller can spin or grow state."""
+    if result.view != "bounded_v1":
+        raise RuntimeError("Run status returned an unexpected view.")
+    if result.page_size != page_size:
+        raise RuntimeError("Run status returned an unexpected page size.")
+    if (
+        result.step_count < 0
+        or result.step_count > 10_000
+        or result.tool_step_count < 0
+        or result.tool_step_count > result.step_count
+    ):
+        raise RuntimeError("Run status returned invalid bounded totals.")
+    if len(result.new_steps) > page_size:
+        raise RuntimeError("Run status returned more steps than requested.")
+    previous_id = since
+    for step in result.new_steps:
+        if step.id <= previous_id:
+            raise RuntimeError("Run status step IDs must increase after since.")
+        if len(step.message.encode("utf-8")) > 512:
+            raise RuntimeError("Run status returned an oversized step message.")
+        if len(step.label.encode("utf-8")) > 256:
+            raise RuntimeError("Run status returned an oversized step label.")
+        message_bytes = len(step.message.encode("utf-8"))
+        label_bytes = len(step.label.encode("utf-8"))
+        if (
+            step.message_size_bytes < message_bytes
+            or step.message_truncated
+            != (message_bytes < step.message_size_bytes)
+            or step.label_size_bytes < label_bytes
+            or step.label_truncated != (label_bytes < step.label_size_bytes)
+        ):
+            raise RuntimeError("Run status returned invalid step size metadata.")
+        previous_id = step.id
+    if result.next_since != previous_id:
+        raise RuntimeError("Run status returned an inconsistent next_since cursor.")
+    if result.has_more and not result.new_steps:
+        raise RuntimeError("Run status cannot advance a non-empty page cursor.")
+    if result.poll_complete != (result.is_settled and not result.has_more):
+        raise RuntimeError("Run status returned an inconsistent terminal page.")
+    if not result.poll_complete and (result.result is not None or result.error is not None):
+        raise RuntimeError("Run status exposed resources before polling completed.")
+    for resource in (result.result, result.error):
+        if resource is not None:
+            _validate_run_resource(resource)
+
+
+def _resource_range_from_response(
+    response: Any,
+    *,
+    resource: RunResource,
+    offset: int,
+    length: int,
+) -> RunResourceRange:
+    if response.status_code != 206:
+        raise RuntimeError("Run resource range did not return HTTP 206.")
+    data = bytes(response.content)
+    if len(data) != length or len(data) > _RUN_RESOURCE_MAX_RANGE_BYTES:
+        raise RuntimeError("Run resource returned an unexpected byte count.")
+    end = offset + len(data) - 1
+    expected_content_range = f"bytes {offset}-{end}/{resource.size_bytes}"
+    headers = response.headers
+    if headers.get("Content-Length") != str(len(data)):
+        raise RuntimeError("Run resource returned an invalid Content-Length.")
+    if headers.get("Content-Range") != expected_content_range:
+        raise RuntimeError("Run resource returned an invalid Content-Range.")
+    if headers.get("X-Content-SHA256") != resource.sha256:
+        raise RuntimeError("Run resource returned a different digest.")
+    if headers.get("ETag") != f'"sha256:{resource.sha256}"':
+        raise RuntimeError("Run resource returned an invalid ETag.")
+    if headers.get("X-Execution-Resource-Ref") != resource.ref:
+        raise RuntimeError("Run resource returned a different opaque ref.")
+    content_type = headers.get("Content-Type", "").partition(";")[0].strip().lower()
+    if content_type != resource.media_type:
+        raise RuntimeError("Run resource returned an invalid media type.")
+    if offset == 0 and len(data) == resource.size_bytes:
+        if hashlib.sha256(data).hexdigest() != resource.sha256:
+            raise RuntimeError("Run resource bytes failed digest verification.")
+    return RunResourceRange(
+        data=data,
+        start=offset,
+        end=end,
+        total_bytes=resource.size_bytes,
+        sha256=resource.sha256,
+        ref=resource.ref,
+        media_type=resource.media_type,
+    )
 
 
 def _compact_cursor_page(
@@ -823,6 +1130,136 @@ class Runs:
         data = self._c._request("GET", f"/api/v1/agents/executions/{run_id}/")
         return RunDetail(**data)
 
+    def status(
+        self,
+        run_id: ResourceID,
+        *,
+        since: int = 0,
+        page_size: int = _DEFAULT_CURSOR_PAGE_SIZE,
+    ) -> RunProgressStatus:
+        """Get one bounded page of execution progress without heavy run fields."""
+        since = _validate_status_since(since)
+        page_size = _validate_cursor_page_size(page_size)
+        response = self._c._raw_request(
+            "GET",
+            f"/api/v1/agents/executions/{run_id}/status/",
+            params={
+                "view": "bounded_v1",
+                "since": since,
+                "page_size": page_size,
+            },
+        )
+        data = _bounded_response_json(
+            response,
+            resource_name="Run status",
+            max_bytes=_RUN_STATUS_MAX_RESPONSE_BYTES,
+        )
+        result = RunProgressStatus(**data)
+        _validate_progress_page(result, since=since, page_size=page_size)
+        return result
+
+    def transcript(
+        self,
+        run_id: ResourceID,
+        *,
+        cursor: Optional[str] = None,
+        page_size: int = 20,
+    ) -> RunTranscriptPage:
+        """Return one bounded transcript page, latest messages first."""
+        cursor = _validate_run_cursor(cursor)
+        page_size = _validate_run_page_size(page_size, maximum=50)
+        params: Dict[str, Union[str, int]] = {"page_size": page_size}
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = self._c._raw_request(
+            "GET",
+            f"/api/v1/agents/executions/{run_id}/transcript/",
+            params=params,
+        )
+        data = _bounded_response_json(
+            response,
+            resource_name="Run transcript",
+            max_bytes=_RUN_PAGE_MAX_RESPONSE_BYTES,
+        )
+        page = RunTranscriptPage(**data)
+        _validate_transcript_page(page, cursor=cursor, page_size=page_size)
+        return page
+
+    def logs(
+        self,
+        run_id: ResourceID,
+        *,
+        cursor: Optional[str] = None,
+        page_size: int = 50,
+    ) -> RunLogPage:
+        """Return one bounded page from a fixed execution-log snapshot."""
+        cursor = _validate_run_cursor(cursor)
+        page_size = _validate_run_page_size(page_size, maximum=100)
+        params: Dict[str, Union[str, int]] = {"page_size": page_size}
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = self._c._raw_request(
+            "GET",
+            f"/api/v1/agents/executions/{run_id}/logs/",
+            params=params,
+        )
+        data = _bounded_response_json(
+            response,
+            resource_name="Run logs",
+            max_bytes=_RUN_PAGE_MAX_RESPONSE_BYTES,
+        )
+        page = RunLogPage(**data)
+        _validate_log_page(page, cursor=cursor, page_size=page_size)
+        return page
+
+    def resource_range(
+        self,
+        run_id: ResourceID,
+        resource: RunResource,
+        *,
+        offset: int = 0,
+        length: Optional[int] = None,
+    ) -> RunResourceRange:
+        """Read and verify exactly one range without following server-provided URLs."""
+        if not isinstance(resource, RunResource):
+            raise ValueError("resource must be a RunResource.")
+        _validate_run_resource(resource)
+        if resource.size_bytes == 0:
+            raise ValueError("An empty resource is complete in its inline projection.")
+        if (
+            isinstance(offset, bool)
+            or not isinstance(offset, int)
+            or not 0 <= offset < resource.size_bytes
+        ):
+            raise ValueError("offset must identify a byte inside the resource.")
+        remaining = resource.size_bytes - offset
+        if length is None:
+            requested_length = min(resource.retrieval.max_range_bytes, remaining)
+        else:
+            if (
+                isinstance(length, bool)
+                or not isinstance(length, int)
+                or not 1 <= length <= resource.retrieval.max_range_bytes
+                or length > remaining
+            ):
+                raise ValueError(
+                    "length must fit the remaining resource and advertised range cap."
+                )
+            requested_length = length
+        end = offset + requested_length - 1
+        response = self._c._raw_request(
+            "GET",
+            f"/api/v1/agents/executions/{run_id}/resource/",
+            params={"ref": resource.ref},
+            headers={"Range": f"bytes={offset}-{end}"},
+        )
+        return _resource_range_from_response(
+            response,
+            resource=resource,
+            offset=offset,
+            length=requested_length,
+        )
+
     def cancel(self, run_id: ResourceID) -> None:
         """Cancel a running execution."""
         self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
@@ -904,17 +1341,51 @@ class Runs:
         poll_interval:
             Seconds between polls.
         """
+        self.wait_status(
+            run_id,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+        # Preserve the established return type. Repeated polls stay bounded;
+        # compatibility pays for one full detail response after settlement.
+        return self.get(run_id)
+
+    def wait_status(
+        self,
+        run_id: ResourceID,
+        *,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+        page_size: int = _DEFAULT_CURSOR_PAGE_SIZE,
+        max_requests: int = _RUN_WAIT_MAX_REQUESTS,
+    ) -> RunProgressStatus:
+        """Wait using bounded status pages and return the terminal projection."""
+        page_size = _validate_cursor_page_size(page_size)
+        _validate_wait_options(
+            timeout=timeout,
+            poll_interval=poll_interval,
+            max_requests=max_requests,
+        )
         deadline = time.monotonic() + timeout
-        while True:
-            result = self.get(run_id)
-            if result.status in _TERMINAL_STATUSES:
+        since = 0
+        for _request_number in range(1, max_requests + 1):
+            result = self.status(run_id, since=since, page_size=page_size)
+            if result.poll_complete:
                 return result
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     f"Run {run_id} did not complete within {timeout}s "
                     f"(last status: {result.status})"
                 )
+            if result.has_more:
+                since = result.next_since
+                continue
+            if result.next_since > since:
+                since = result.next_since
             time.sleep(poll_interval)
+        raise RuntimeError(
+            f"Run {run_id} status polling exceeded {max_requests} requests."
+        )
 
     def stream_events(
         self,
@@ -953,11 +1424,14 @@ class Tools:
         self,
         *,
         page_size: int = _DEFAULT_CURSOR_PAGE_SIZE,
+        max_items: Optional[int] = None,
         mcp_tool: Optional[str] = None,
         alias: Optional[str] = None,
     ) -> List[Tool]:
-        """List configured connection instances through bounded cursor pages."""
+        """List configured connections, optionally stopping at ``max_items``."""
         page_size = _validate_cursor_page_size(page_size)
+        max_items = _validate_max_items(max_items)
+        request_page_size = min(page_size, max_items or page_size)
         base_params: Dict[str, str] = {}
         if mcp_tool is not None:
             base_params["mcp_tool"] = _validate_slug(
@@ -969,7 +1443,7 @@ class Tools:
             base_params["alias"] = _validate_alias(alias)
         params: Dict[str, Union[str, int]] = {
             **base_params,
-            "page_size": page_size,
+            "page_size": request_page_size,
         }
         results: List[Any] = []
         visited: Set[str] = set()
@@ -986,9 +1460,15 @@ class Tools:
                 resource_name="Configured tools",
             )
             results.extend(page)
+            if max_items is not None and len(results) >= max_items:
+                return [Tool(**item) for item in results[:max_items]]
+            request_page_size = min(
+                page_size,
+                (max_items - len(results)) if max_items is not None else page_size,
+            )
             next_params = _next_compact_cursor_params(
                 next_cursor,
-                page_size=page_size,
+                page_size=request_page_size,
                 visited=visited,
                 page_count=page_count,
                 row_count=len(results),
@@ -2098,6 +2578,132 @@ class AsyncRuns:
         data = await self._c._request("GET", f"/api/v1/agents/executions/{run_id}/")
         return RunDetail(**data)
 
+    async def status(
+        self,
+        run_id: ResourceID,
+        *,
+        since: int = 0,
+        page_size: int = _DEFAULT_CURSOR_PAGE_SIZE,
+    ) -> RunProgressStatus:
+        since = _validate_status_since(since)
+        page_size = _validate_cursor_page_size(page_size)
+        response = await self._c._raw_request(
+            "GET",
+            f"/api/v1/agents/executions/{run_id}/status/",
+            params={
+                "view": "bounded_v1",
+                "since": since,
+                "page_size": page_size,
+            },
+        )
+        data = _bounded_response_json(
+            response,
+            resource_name="Run status",
+            max_bytes=_RUN_STATUS_MAX_RESPONSE_BYTES,
+        )
+        result = RunProgressStatus(**data)
+        _validate_progress_page(result, since=since, page_size=page_size)
+        return result
+
+    async def transcript(
+        self,
+        run_id: ResourceID,
+        *,
+        cursor: Optional[str] = None,
+        page_size: int = 20,
+    ) -> RunTranscriptPage:
+        cursor = _validate_run_cursor(cursor)
+        page_size = _validate_run_page_size(page_size, maximum=50)
+        params: Dict[str, Union[str, int]] = {"page_size": page_size}
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = await self._c._raw_request(
+            "GET",
+            f"/api/v1/agents/executions/{run_id}/transcript/",
+            params=params,
+        )
+        data = _bounded_response_json(
+            response,
+            resource_name="Run transcript",
+            max_bytes=_RUN_PAGE_MAX_RESPONSE_BYTES,
+        )
+        page = RunTranscriptPage(**data)
+        _validate_transcript_page(page, cursor=cursor, page_size=page_size)
+        return page
+
+    async def logs(
+        self,
+        run_id: ResourceID,
+        *,
+        cursor: Optional[str] = None,
+        page_size: int = 50,
+    ) -> RunLogPage:
+        cursor = _validate_run_cursor(cursor)
+        page_size = _validate_run_page_size(page_size, maximum=100)
+        params: Dict[str, Union[str, int]] = {"page_size": page_size}
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = await self._c._raw_request(
+            "GET",
+            f"/api/v1/agents/executions/{run_id}/logs/",
+            params=params,
+        )
+        data = _bounded_response_json(
+            response,
+            resource_name="Run logs",
+            max_bytes=_RUN_PAGE_MAX_RESPONSE_BYTES,
+        )
+        page = RunLogPage(**data)
+        _validate_log_page(page, cursor=cursor, page_size=page_size)
+        return page
+
+    async def resource_range(
+        self,
+        run_id: ResourceID,
+        resource: RunResource,
+        *,
+        offset: int = 0,
+        length: Optional[int] = None,
+    ) -> RunResourceRange:
+        if not isinstance(resource, RunResource):
+            raise ValueError("resource must be a RunResource.")
+        _validate_run_resource(resource)
+        if resource.size_bytes == 0:
+            raise ValueError("An empty resource is complete in its inline projection.")
+        if (
+            isinstance(offset, bool)
+            or not isinstance(offset, int)
+            or not 0 <= offset < resource.size_bytes
+        ):
+            raise ValueError("offset must identify a byte inside the resource.")
+        remaining = resource.size_bytes - offset
+        if length is None:
+            requested_length = min(resource.retrieval.max_range_bytes, remaining)
+        else:
+            if (
+                isinstance(length, bool)
+                or not isinstance(length, int)
+                or not 1 <= length <= resource.retrieval.max_range_bytes
+                or length > remaining
+            ):
+                raise ValueError(
+                    "length must fit the remaining resource and advertised range cap."
+                )
+            requested_length = length
+        end = offset + requested_length - 1
+        response = await self._c._raw_request(
+            "GET",
+            f"/api/v1/agents/executions/{run_id}/resource/",
+            params={"ref": resource.ref},
+            headers={"Range": f"bytes={offset}-{end}"},
+        )
+        return _resource_range_from_response(
+            response,
+            resource=resource,
+            offset=offset,
+            length=requested_length,
+        )
+
     async def cancel(self, run_id: ResourceID) -> None:
         await self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
 
@@ -2152,17 +2758,48 @@ class AsyncRuns:
         timeout: float = 300,
         poll_interval: float = 2.0,
     ) -> RunDetail:
+        await self.wait_status(
+            run_id,
+            timeout=timeout,
+            poll_interval=poll_interval,
+        )
+        return await self.get(run_id)
+
+    async def wait_status(
+        self,
+        run_id: ResourceID,
+        *,
+        timeout: float = 300,
+        poll_interval: float = 2.0,
+        page_size: int = _DEFAULT_CURSOR_PAGE_SIZE,
+        max_requests: int = _RUN_WAIT_MAX_REQUESTS,
+    ) -> RunProgressStatus:
+        page_size = _validate_cursor_page_size(page_size)
+        _validate_wait_options(
+            timeout=timeout,
+            poll_interval=poll_interval,
+            max_requests=max_requests,
+        )
         deadline = time.monotonic() + timeout
-        while True:
-            result = await self.get(run_id)
-            if result.status in _TERMINAL_STATUSES:
+        since = 0
+        for _request_number in range(1, max_requests + 1):
+            result = await self.status(run_id, since=since, page_size=page_size)
+            if result.poll_complete:
                 return result
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     f"Run {run_id} did not complete within {timeout}s "
                     f"(last status: {result.status})"
                 )
+            if result.has_more:
+                since = result.next_since
+                continue
+            if result.next_since > since:
+                since = result.next_since
             await asyncio.sleep(poll_interval)
+        raise RuntimeError(
+            f"Run {run_id} status polling exceeded {max_requests} requests."
+        )
 
     async def stream_events(
         self,
@@ -2196,10 +2833,13 @@ class AsyncTools:
         self,
         *,
         page_size: int = _DEFAULT_CURSOR_PAGE_SIZE,
+        max_items: Optional[int] = None,
         mcp_tool: Optional[str] = None,
         alias: Optional[str] = None,
     ) -> List[Tool]:
         page_size = _validate_cursor_page_size(page_size)
+        max_items = _validate_max_items(max_items)
+        request_page_size = min(page_size, max_items or page_size)
         base_params: Dict[str, str] = {}
         if mcp_tool is not None:
             base_params["mcp_tool"] = _validate_slug(
@@ -2211,7 +2851,7 @@ class AsyncTools:
             base_params["alias"] = _validate_alias(alias)
         params: Dict[str, Union[str, int]] = {
             **base_params,
-            "page_size": page_size,
+            "page_size": request_page_size,
         }
         results: List[Any] = []
         visited: Set[str] = set()
@@ -2228,9 +2868,15 @@ class AsyncTools:
                 resource_name="Configured tools",
             )
             results.extend(page)
+            if max_items is not None and len(results) >= max_items:
+                return [Tool(**item) for item in results[:max_items]]
+            request_page_size = min(
+                page_size,
+                (max_items - len(results)) if max_items is not None else page_size,
+            )
             next_params = _next_compact_cursor_params(
                 next_cursor,
-                page_size=page_size,
+                page_size=request_page_size,
                 visited=visited,
                 page_count=page_count,
                 row_count=len(results),

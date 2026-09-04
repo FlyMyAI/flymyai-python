@@ -454,6 +454,10 @@ repeats external writes.
 ## Neural Network Inference
 
 Run any model on the platform with `flymyai.async_run` (async) or `flymyai.run` (sync).
+Prediction and streaming calls require the same caller-owned `idempotency_key`
+contract as agent effect calls. The SDK forwards the exact key across its bounded
+transport retries and never invents a replacement operation. Reuse a key only
+for the identical logical request.
 
 #### Image generation - Nano Banana 🍌
 
@@ -467,6 +471,7 @@ async def main():
         apikey="fly-secret-key",
         model="flymyai/nano-banana",
         payload={"prompt": "a cute cat astronaut floating in a neon nebula, studio lighting"},
+        idempotency_key="nano-banana-cat-astronaut-v1",
     )
     with open("nano_banana.jpg", "wb") as f:
         f.write(base64.b64decode(response.output_data["image"][0]))
@@ -485,6 +490,7 @@ async def main():
         apikey="fly-secret-key",
         model="flymyai/veo31-fast-generate",
         payload={"prompt": "a red sports car driving along a coastal road at sunset, cinematic"},
+        idempotency_key="veo-coastal-car-v1",
     )
     print(response.output_data["video"][0])  # public URL to the generated .mp4
 
@@ -508,8 +514,9 @@ async def main():
             apikey="fly-secret-key",
             model="flymyai/nano-banana",
             payload={"prompt": p},
+            idempotency_key=f"parallel-image-{i}-v1",
         )
-        for p in PROMPTS
+        for i, p in enumerate(PROMPTS)
     ])
     for i, r in enumerate(results):
         with open(f"img_{i}.jpg", "wb") as f:

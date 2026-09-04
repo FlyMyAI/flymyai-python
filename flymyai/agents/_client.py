@@ -23,6 +23,7 @@ from flymyai.agents._resources import (
     Tools,
     Versions,
 )
+from flymyai.agents._types import ConnectionReconnectBlocker
 
 _DEFAULT_BASE_URL = "https://backend.flymy.ai"
 # Agents live on a different host from model inference (api.flymy.ai),
@@ -101,6 +102,23 @@ class McpResourceSetStaleRevisionError(FlyMyAIAgentError):
         self.current_revision = current_revision
 
 
+class ConnectionReconnectRequiredError(FlyMyAIAgentError):
+    """Raised when exact owner connections block an operation before dispatch."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any,
+        connections: list[ConnectionReconnectBlocker],
+        connections_truncated: bool,
+    ) -> None:
+        super().__init__(message, status_code=status_code, response_body=response_body)
+        self.connections = tuple(connections)
+        self.connections_truncated = connections_truncated
+
+
 def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
     """Return a :class:`VariablesValidationError` if ``body`` looks like one."""
     if not isinstance(body, dict):
@@ -133,6 +151,46 @@ def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
     )
 
 
+def _parse_connection_reconnect_error(
+    body: Any,
+) -> Optional[ConnectionReconnectRequiredError]:
+    if (
+        not isinstance(body, dict)
+        or body.get("code") != "connection_reconnect_required"
+    ):
+        return None
+    raw_connections = body.get("connections")
+    if not isinstance(raw_connections, list):
+        return None
+    connections: list[ConnectionReconnectBlocker] = []
+    truncated = body.get("connections_truncated") is True
+    for raw_connection in raw_connections:
+        if len(connections) >= 5:
+            truncated = True
+            break
+        try:
+            connections.append(
+                ConnectionReconnectBlocker.model_validate(raw_connection)
+            )
+        except (TypeError, ValueError):
+            truncated = True
+    if not connections:
+        return None
+    detail = body.get("detail")
+    message = (
+        detail
+        if isinstance(detail, str) and detail
+        else "Reconnect the affected connection before continuing."
+    )
+    return ConnectionReconnectRequiredError(
+        message,
+        status_code=409,
+        response_body=body,
+        connections=connections,
+        connections_truncated=truncated,
+    )
+
+
 def _raise_for_status(resp: httpx.Response) -> None:
     if resp.is_success:
         return
@@ -145,6 +203,11 @@ def _raise_for_status(resp: httpx.Response) -> None:
         err = _parse_variables_errors(body)
         if err is not None:
             raise err
+
+    if resp.status_code == 409:
+        reconnect_error = _parse_connection_reconnect_error(body)
+        if reconnect_error is not None:
+            raise reconnect_error
 
     if (
         resp.status_code == 409
@@ -223,11 +286,16 @@ class SyncAgentClient:
         self.agent_groups = AgentGroups(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        resp = self._http.request(method, path, **kwargs)
-        _raise_for_status(resp)
+        resp = self._raw_request(method, path, **kwargs)
         if resp.status_code == 204:
             return None
         return resp.json()
+
+    def _raw_request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Return a checked response for bounded binary or sized JSON readers."""
+        resp = self._http.request(method, path, **kwargs)
+        _raise_for_status(resp)
+        return resp
 
     def __enter__(self) -> SyncAgentClient:
         return self
@@ -289,11 +357,18 @@ class AsyncAgentClient:
         self.agent_groups = AsyncAgentGroups(self)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
-        resp = await self._http.request(method, path, **kwargs)
-        _raise_for_status(resp)
+        resp = await self._raw_request(method, path, **kwargs)
         if resp.status_code == 204:
             return None
         return resp.json()
+
+    async def _raw_request(
+        self, method: str, path: str, **kwargs: Any
+    ) -> httpx.Response:
+        """Async checked response for bounded binary or sized JSON readers."""
+        resp = await self._http.request(method, path, **kwargs)
+        _raise_for_status(resp)
+        return resp
 
     async def __aenter__(self) -> AsyncAgentClient:
         return self

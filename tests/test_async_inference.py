@@ -1,5 +1,7 @@
 import os
 import pathlib
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
@@ -11,6 +13,9 @@ from flymyai.core.exceptions import (
 from flymyai.core.models.successful_responses import (
     AsyncPredictionResponseList,
     AsyncPredictionTask,
+)
+from flymyai.core.response_factory.plain_inference_response_factory import (
+    SSEInferenceResponseFactory,
 )
 from .FixtureFactory import FixtureFactory
 from flymyai import client as sync_client, async_client
@@ -63,7 +68,10 @@ def test_sync_client_async_inference(
     address_fixture, fake_payload_fixture, client_auth_fixture
 ):
     client = sync_client(**client_auth_fixture)
-    prediction_task = client.predict_async_task(payload=fake_payload_fixture)
+    prediction_task = client.predict_async_task(
+        payload=fake_payload_fixture,
+        idempotency_key=f"sdk-sync-success-{uuid4()}",
+    )
     assert prediction_task.prediction_id is not None
     with pytest.raises(RetryTimeoutExceededException):
         res = prediction_task.result(0)
@@ -83,7 +91,10 @@ async def test_async_client_async_inference(
     address_fixture, fake_payload_fixture, client_auth_fixture
 ):
     client = async_client(**client_auth_fixture)
-    prediction_task = await client.predict_async_task(payload=fake_payload_fixture)
+    prediction_task = await client.predict_async_task(
+        payload=fake_payload_fixture,
+        idempotency_key=f"sdk-async-success-{uuid4()}",
+    )
     assert prediction_task.prediction_id is not None
 
     with pytest.raises(RetryTimeoutExceededException):
@@ -103,7 +114,10 @@ def test_sync_client_async_inference_with_guaranteed_error(
     address_fixture, broken_payload_fixture, client_auth_fixture
 ):
     client = sync_client(**client_auth_fixture)
-    prediction_task = client.predict_async_task(payload=broken_payload_fixture)
+    prediction_task = client.predict_async_task(
+        payload=broken_payload_fixture,
+        idempotency_key=f"sdk-sync-failure-{uuid4()}",
+    )
     assert prediction_task.prediction_id is not None
     with pytest.raises(FlyMyAIExceptionGroup):
         res = prediction_task.result()
@@ -115,8 +129,68 @@ async def test_async_client_async_inference_with_guaranteed_error(
     address_fixture, broken_payload_fixture, client_auth_fixture
 ):
     client = async_client(**client_auth_fixture)
-    prediction_task = await client.predict_async_task(payload=broken_payload_fixture)
+    prediction_task = await client.predict_async_task(
+        payload=broken_payload_fixture,
+        idempotency_key=f"sdk-async-failure-{uuid4()}",
+    )
     assert prediction_task.prediction_id is not None
     with pytest.raises(FlyMyAIExceptionGroup):
         res = await prediction_task.result()
         assert res is None  # should not achieve this point
+
+
+def test_sync_async_prediction_forwards_exact_operation_key(monkeypatch):
+    client = sync_client(apikey="test-key", model="owner/model")
+    client._client.close()
+    transport = MagicMock()
+    transport.post.return_value = MagicMock()
+    client._client = transport
+    monkeypatch.setattr(
+        SSEInferenceResponseFactory,
+        "construct",
+        lambda self: MagicMock(),
+    )
+    monkeypatch.setattr(
+        client,
+        "_async_prediction_task_construct",
+        lambda response, client_info: "task",
+    )
+
+    result = client.predict_async_task(
+        payload={"prompt": "one intentional operation"},
+        idempotency_key="sdk exact key 1",
+    )
+
+    assert result == "task"
+    assert transport.post.call_args.kwargs["headers"] == {
+        "Idempotency-Key": "sdk exact key 1"
+    }
+
+
+@pytest.mark.asyncio
+async def test_async_async_prediction_forwards_exact_operation_key(monkeypatch):
+    client = async_client(apikey="test-key", model="owner/model")
+    await client._client.aclose()
+    transport = MagicMock()
+    transport.post = AsyncMock(return_value=MagicMock())
+    client._client = transport
+    monkeypatch.setattr(
+        SSEInferenceResponseFactory,
+        "construct",
+        lambda self: MagicMock(),
+    )
+    monkeypatch.setattr(
+        client,
+        "_async_prediction_task_construct",
+        lambda response, client_info: "task",
+    )
+
+    result = await client.predict_async_task(
+        payload={"prompt": "one intentional operation"},
+        idempotency_key="sdk exact key 2",
+    )
+
+    assert result == "task"
+    assert transport.post.call_args.kwargs["headers"] == {
+        "Idempotency-Key": "sdk exact key 2"
+    }
