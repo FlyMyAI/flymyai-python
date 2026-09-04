@@ -159,7 +159,7 @@ def test_sync_unknown_error_handle_predict(mock_SyncStreamIteratorWith_200_Detai
     exc = None
     with pytest.raises(FlyMyAIExceptionGroup):
         try:
-            result = client.predict({})
+            result = client.predict({}, idempotency_key="unknown-sync-200")
         except FlyMyAIExceptionGroup as e:
             exc = e
             raise e
@@ -174,7 +174,7 @@ def test_sync_broker_unknown_predict(mock_SyncStreamIteratorWith_5000):
     exc = None
     with pytest.raises(FlyMyAIExceptionGroup):
         try:
-            result = client.predict({})
+            result = client.predict({}, idempotency_key="unknown-sync-5000")
         except FlyMyAIExceptionGroup as e:
             exc = e
             raise e
@@ -191,7 +191,7 @@ def test_sync_broker_disconnected_error_handle_predict(
     exc = None
     with pytest.raises(FlyMyAIExceptionGroup):
         try:
-            result = client.predict({})
+            result = client.predict({}, idempotency_key="unknown-sync-5320")
         except FlyMyAIExceptionGroup as e:
             exc = e
             raise e
@@ -209,7 +209,7 @@ async def test_async_unknown_error_handle_predict(
     exc = None
     with pytest.raises(FlyMyAIExceptionGroup):
         try:
-            result = await client.predict({})
+            result = await client.predict({}, idempotency_key="unknown-async-200")
         except FlyMyAIExceptionGroup as e:
             exc = e
             raise e
@@ -225,7 +225,7 @@ async def test_async_broker_unknown_predict(mock_AsyncStreamIteratorWith_5000):
     exc = None
     with pytest.raises(FlyMyAIExceptionGroup):
         try:
-            result = await client.predict({})
+            result = await client.predict({}, idempotency_key="unknown-async-5000")
         except FlyMyAIExceptionGroup as e:
             exc = e
             raise e
@@ -243,7 +243,7 @@ async def test_async_broker_disconnected_error_handle_predict(
     exc = None
     with pytest.raises(FlyMyAIExceptionGroup):
         try:
-            result = await client.predict({})
+            result = await client.predict({}, idempotency_key="unknown-async-5320")
         except FlyMyAIExceptionGroup as e:
             exc = e
             raise e

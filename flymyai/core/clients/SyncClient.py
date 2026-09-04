@@ -25,6 +25,7 @@ from flymyai.core.models.successful_responses import (
     OpenAPISchemaResponse,
     AsyncPredictionTask,
 )
+from flymyai.core.idempotency import idempotency_headers
 from flymyai.core.response_factory.plain_inference_response_factory import (
     SSEInferenceResponseFactory,
 )
@@ -81,7 +82,13 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             ).construct()
             return response
 
-    def _predict(self, payload: MultipartPayload, client_info: APIKeyClientInfo):
+    def _predict(
+        self,
+        payload: MultipartPayload,
+        client_info: APIKeyClientInfo,
+        *,
+        idempotency_key: str,
+    ):
         """
         Wrap predict method in sse
         """
@@ -89,13 +96,25 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         try:
             return self._with_reconnect(
                 lambda: self._sse_instant(
-                    lambda: self._stream_iterator(client_info, payload, False)
+                    lambda: self._stream_iterator(
+                        client_info,
+                        payload,
+                        False,
+                        idempotency_key=idempotency_key,
+                    )
                 )
             )
         except BaseFlyMyAIException as e:
             raise FlyMyAIPredictException.from_base_exception(e)
 
-    def predict(self, payload: dict, model: Optional[str] = None, max_retries=None):
+    def predict(
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
+    ):
         """
         Wrap predict method in sse.
         Retries until max_retries or self.max_retries is reached
@@ -109,7 +128,11 @@ class BaseSyncClient(BaseClient[httpx.Client]):
 
         payload = MultipartPayload(payload)
         history, response = retryable_callback(
-            lambda: self._predict(payload, self.amend_client_info(model)),
+            lambda: self._predict(
+                payload,
+                self.amend_client_info(model),
+                idempotency_key=idempotency_key,
+            ),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
@@ -117,7 +140,12 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         return PredictionResponse.from_response(response, exc_history=history)
 
     def predict_async_task(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
     ):
         payload = MultipartPayload(input_data=payload)
         client_info = self.amend_client_info(model)
@@ -125,7 +153,9 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             _, response = retryable_callback(
                 lambda: self._with_reconnect(
                     lambda: self._client.post(
-                        client_info.prediction_async_path, **payload.serialize()
+                        client_info.prediction_async_path,
+                        headers=idempotency_headers(idempotency_key),
+                        **payload.serialize(),
                     )
                 ),
                 max_retries or self.max_retries,
@@ -164,11 +194,20 @@ class BaseSyncClient(BaseClient[httpx.Client]):
 
         return res
 
-    def _stream(self, client_info: APIKeyClientInfo, payload: dict):
+    def _stream(
+        self,
+        client_info: APIKeyClientInfo,
+        payload: dict,
+        *,
+        idempotency_key: str,
+    ):
         payload = MultipartPayload(payload)
         try:
             response_iterator = self._stream_iterator(
-                client_info, payload, is_long_stream=True
+                client_info,
+                payload,
+                is_long_stream=True,
+                idempotency_key=idempotency_key,
             )
             decoder = SSEDecoder()
             with response_iterator as sse_stream:
@@ -187,7 +226,10 @@ class BaseSyncClient(BaseClient[httpx.Client]):
                 raise
             self._reconnect_client()
             response_iterator = self._stream_iterator(
-                client_info, payload, is_long_stream=True
+                client_info,
+                payload,
+                is_long_stream=True,
+                idempotency_key=idempotency_key,
             )
             decoder = SSEDecoder()
             with response_iterator as sse_stream:
@@ -202,9 +244,19 @@ class BaseSyncClient(BaseClient[httpx.Client]):
                         raise FlyMyAIPredictException.from_base_exception(e)
                     yield response
 
-    def stream(self, payload: dict, model: Optional[str] = None):
+    def stream(
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        *,
+        idempotency_key: str,
+    ):
         full_client_info = self.amend_client_info(model)
-        stream_iter = self._stream(full_client_info, payload)
+        stream_iter = self._stream(
+            full_client_info,
+            payload,
+            idempotency_key=idempotency_key,
+        )
         stream_wrapper = PredictionStream(stream_iter, self, full_client_info)
         return stream_wrapper
 
@@ -265,7 +317,14 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         )
 
     @classmethod
-    def run_predict(cls, apikey: str, model: str, payload: dict):
+    def run_predict(
+        cls,
+        apikey: str,
+        model: str,
+        payload: dict,
+        *,
+        idempotency_key: str,
+    ):
         """
         :param apikey: fly-...
         :param model:  flymyai/bert
@@ -275,4 +334,4 @@ class BaseSyncClient(BaseClient[httpx.Client]):
                 output_data - dict with prediction output;
         """
         with cls(apikey, model) as client:
-            return client.predict(payload)
+            return client.predict(payload, idempotency_key=idempotency_key)

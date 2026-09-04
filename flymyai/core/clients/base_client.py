@@ -111,30 +111,60 @@ class BaseClient(Generic[_PossibleClients]):
 
     @overload
     async def predict(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
     ) -> PredictionResponse: ...
 
     @overload
     def predict(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
     ) -> PredictionResponse: ...
 
     def predict(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
     ) -> PredictionResponse: ...
 
     @overload
     async def predict_async_task(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
     ) -> AsyncPredictionTask: ...
 
     @overload
     def predict_async_task(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
     ) -> AsyncPredictionTask: ...
 
     def predict_async_task(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        *,
+        idempotency_key: str,
     ) -> AsyncPredictionTask: ...
 
     @classmethod
@@ -191,6 +221,8 @@ class BaseClient(Generic[_PossibleClients]):
         self,
         payload: dict,
         model: Optional[str] = None,
+        *,
+        idempotency_key: str,
     ) -> AsyncIterator[PredictionPartial]: ...
 
     @overload
@@ -198,17 +230,28 @@ class BaseClient(Generic[_PossibleClients]):
         self,
         payload: dict,
         model: Optional[str] = None,
+        *,
+        idempotency_key: str,
     ) -> Iterator[PredictionPartial]: ...
 
     def stream(
         self,
         payload: dict,
         model: Optional[str] = None,
+        *,
+        idempotency_key: str,
     ): ...
 
     def _stream_iterator(
-        self, client_info, payload: MultipartPayload, is_long_stream: bool
+        self,
+        client_info,
+        payload: MultipartPayload,
+        is_long_stream: bool,
+        *,
+        idempotency_key: str,
     ) -> Union[Iterator[httpx.Response], AsyncIterator[httpx.Response]]:
+        from flymyai.core.idempotency import idempotency_headers
+
         return self._client.stream(
             method="post",
             url=(
@@ -218,7 +261,10 @@ class BaseClient(Generic[_PossibleClients]):
             ),
             **payload.serialize(),
             timeout=_predict_timeout,
-            headers=client_info.authorization_headers,
+            headers={
+                **client_info.authorization_headers,
+                **idempotency_headers(idempotency_key),
+            },
             follow_redirects=True,
         )
 

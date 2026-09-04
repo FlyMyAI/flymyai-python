@@ -46,6 +46,7 @@ def test_flymyai_client(address_fixture, fake_payload_fixture, client_auth_fixtu
     response = flymyai_sync_run(
         **client_auth_fixture,
         payload=fake_payload_fixture,
+        idempotency_key="sdk-live-sync-run-v1",
     )
     assert response
 
@@ -63,7 +64,9 @@ async def test_flymyai_async_run(
     address_fixture, client_auth_fixture, fake_payload_fixture
 ):
     response = await flymyai_async_run(
-        **client_auth_fixture, payload=fake_payload_fixture
+        **client_auth_fixture,
+        payload=fake_payload_fixture,
+        idempotency_key="sdk-live-async-run-v1",
     )
     assert response
 
@@ -71,8 +74,14 @@ async def test_flymyai_async_run(
 @pytest.mark.asyncio
 async def test_doc_case(address_fixture, client_auth_fixture, fake_payload_fixture):
     tasks = [
-        asyncio.create_task(flymyai_async_run(**client_auth_fixture, payload=prompt))
-        for prompt in [fake_payload_fixture] * 3
+        asyncio.create_task(
+            flymyai_async_run(
+                **client_auth_fixture,
+                payload=prompt,
+                idempotency_key=f"sdk-live-parallel-{index}-v1",
+            )
+        )
+        for index, prompt in enumerate([fake_payload_fixture] * 3)
     ]
     results = await asyncio.gather(*tasks)
     assert len(results) == 3

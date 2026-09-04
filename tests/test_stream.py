@@ -40,7 +40,9 @@ def output_field():
 
 
 def test_stream(stream_auth, stream_payload, dsn, output_field):
-    stream_iterator = sync_client(**stream_auth).stream(stream_payload)
+    stream_iterator = sync_client(**stream_auth).stream(
+        stream_payload, idempotency_key="stream-sync"
+    )
     stream_iterator.follow_cancelling = True
     stream_iterator.set_on_event(print)
     try:
@@ -60,7 +62,9 @@ def test_stream(stream_auth, stream_payload, dsn, output_field):
 
 @pytest.mark.asyncio
 async def test_async_stream(stream_auth, stream_payload, dsn, output_field):
-    stream_iterator = async_client(**stream_auth).stream(stream_payload)
+    stream_iterator = async_client(**stream_auth).stream(
+        stream_payload, idempotency_key="stream-async"
+    )
     stream_iterator.follow_cancelling = True
     stream_iterator.set_on_event(print)
     try:
@@ -79,7 +83,9 @@ async def test_async_stream(stream_auth, stream_payload, dsn, output_field):
 
 
 def test_stream_cancel(stream_auth, stream_payload, dsn, output_field):
-    stream_iterator = sync_client(**stream_auth).stream(stream_payload)
+    stream_iterator = sync_client(**stream_auth).stream(
+        stream_payload, idempotency_key="stream-sync-cancel"
+    )
     stream_iterator.follow_cancelling = False
     cancelling_obtained = threading.Event()
 
@@ -108,7 +114,9 @@ def test_stream_cancel(stream_auth, stream_payload, dsn, output_field):
 
 def test_cancel_with_client(stream_auth, stream_payload, dsn, output_field):
     client = sync_client(**stream_auth)
-    stream_iterator = client.stream(stream_payload)
+    stream_iterator = client.stream(
+        stream_payload, idempotency_key="stream-sync-client-cancel"
+    )
     stream_iterator.follow_cancelling = True
     cancelling_obtained = threading.Event()
 
@@ -140,7 +148,9 @@ def test_cancel_with_client(stream_auth, stream_payload, dsn, output_field):
 @pytest.mark.asyncio
 async def test_async_stream_cancel(stream_auth, stream_payload, dsn, output_field):
     client = async_client(**stream_auth)
-    stream_iterator = client.stream(stream_payload)
+    stream_iterator = client.stream(
+        stream_payload, idempotency_key="stream-async-cancel"
+    )
     stream_iterator.follow_cancelling = False
     cancelling_obtained = asyncio.Event()
 
@@ -171,7 +181,9 @@ async def test_async_stream_cancel_with_client(
     stream_auth, stream_payload, dsn, output_field
 ):
     client = async_client(**stream_auth)
-    stream_iterator = client.stream(stream_payload)
+    stream_iterator = client.stream(
+        stream_payload, idempotency_key="stream-async-client-cancel"
+    )
     stream_iterator.follow_cancelling = False
     cancelling_obtained = asyncio.Event()
 

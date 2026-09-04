@@ -1,6 +1,7 @@
 """Tests for flymyai.agents - SyncAgentClient, AsyncAgentClient, and helpers."""
 
 import asyncio
+import hashlib
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -15,9 +16,16 @@ from flymyai.agents import (
     AppendMessageResponse,
     AsyncAgentClient,
     CompilationStatus,
+    ConnectionIncidentStatus,
+    ConnectionReadinessStatus,
+    ConnectionReconnectRequiredError,
     ExecutionLogType,
     ExecutionStatus,
     FlyMyAIAgentError,
+    RunLogPage,
+    RunResource,
+    RunResourceRange,
+    RunTranscriptPage,
     SyncAgentClient,
 )
 from flymyai.agents._types import (
@@ -74,6 +82,56 @@ def _run_payload(**overrides) -> dict:
     return base
 
 
+def _status_payload(*, since: int = 0, steps=None, **overrides) -> dict:
+    steps = list(steps or [])
+    status = overrides.pop("status", "running")
+    is_settled = overrides.pop(
+        "is_settled",
+        status in {"completed", "failed", "cancelled", "archived"},
+    )
+    base = {
+        "id": RUN_ID,
+        "status": status,
+        "run_seq": 0,
+        "updated_at": NOW,
+        "is_settled": is_settled,
+        "step_count": len(steps),
+        "tool_step_count": sum(
+            step.get("type") == "tool_called" for step in steps
+        ),
+        "last_step_id": steps[-1]["id"] if steps else None,
+        "new_steps": steps,
+        "agent_surface_revision": 1,
+        "view": "bounded_v1",
+        "page_size": 100,
+        "has_more": False,
+        "next_since": steps[-1]["id"] if steps else since,
+        "poll_complete": is_settled,
+        "step_count_has_more": False,
+        "presentation_cursor_v1": {
+            "version": "presentation_cursor_v1",
+            "run_seq": 0,
+            "as_of_seq": 0,
+        },
+        "chat_files_revision": "chat-files-v1:0",
+    }
+    base.update(overrides)
+    return base
+
+
+def _progress_step(step_id: int, *, message: str = "working") -> dict:
+    return {
+        "id": step_id,
+        "type": "tool_called",
+        "message": message,
+        "message_size_bytes": len(message.encode("utf-8")),
+        "message_truncated": False,
+        "label": "Tool call",
+        "label_size_bytes": 9,
+        "label_truncated": False,
+    }
+
+
 def _append_message_payload(**overrides) -> dict:
     base = {
         "id": RUN_ID,
@@ -97,6 +155,102 @@ def _log_payload(**overrides) -> dict:
         "type": "tool_called",
         "message": "Called search_web",
         "data": {},
+    }
+    base.update(overrides)
+    return base
+
+
+def _resource_payload(data: bytes = b'{"answer":42}', **overrides) -> dict:
+    digest = hashlib.sha256(data).hexdigest()
+    ref = (
+        f"execution-resource:v1:{RUN_ID}:0:agent_result:sha256:{digest}:"
+        f"hmac-sha256:{'b' * 64}"
+    )
+    base = {
+        "version": "execution_resource_v1",
+        "ref": ref,
+        "kind": "agent_result",
+        "media_type": "application/json",
+        "encoding": "utf-8",
+        "size_bytes": len(data),
+        "sha256": digest,
+        "inline": {
+            "format": "json",
+            "value": {"answer": 42},
+            "size_bytes": len(data),
+            "truncated": False,
+        },
+        "truncated": False,
+        "retrieval": {
+            "href": "https://untrusted.invalid/never-follow",
+            "accept_ranges": "bytes",
+            "max_range_bytes": 65_536,
+        },
+        "receipt": {"kind": "chunked_postgres_v1", "chunk_bytes": 65_536},
+    }
+    base.update(overrides)
+    return base
+
+
+def _transcript_page_payload(**overrides) -> dict:
+    content = "latest answer"
+    base = {
+        "messages": [
+            {
+                "role": "assistant",
+                "content": content,
+                "message_id": "message-latest",
+                "content_size_bytes": len(content.encode("utf-8")),
+                "content_size_exact": True,
+                "content_truncated": False,
+            }
+        ],
+        "has_more": True,
+        "next_cursor": "execution-transcript:v1:next",
+        "page_size": 20,
+        "response_bytes_limit": 512 * 1024,
+        "receipt": {
+            "version": "execution_transcript_receipt_v1",
+            "presentation_seq": 3,
+            "source": "display_messages",
+            "total_messages": 21,
+            "signature_algorithm": "hmac-sha256",
+            "signature": "a" * 64,
+        },
+    }
+    base.update(overrides)
+    return base
+
+
+def _log_page_payload(**overrides) -> dict:
+    base = {
+        "logs": [
+            {
+                "id": 2,
+                "created_at": NOW,
+                "updated_at": NOW,
+                "type": "tool_called",
+                "message": "called search",
+                "label": "Search",
+                "data": {"query": "bounded"},
+                "data_size_bytes": 19,
+                "data_size_exact": True,
+                "data_has_more": False,
+                "data_hidden": False,
+                "agent_script_compilation": None,
+            }
+        ],
+        "has_more": False,
+        "next_cursor": None,
+        "page_size": 50,
+        "response_bytes_limit": 512 * 1024,
+        "receipt": {
+            "version": "execution_log_receipt_v1",
+            "snapshot_max_id": 2,
+            "ordering": "id",
+            "signature_algorithm": "hmac-sha256",
+            "signature": "c" * 64,
+        },
     }
     base.update(overrides)
     return base
@@ -147,6 +301,22 @@ def _make_response(payload: Any, *, status_code: int = 200) -> httpx.Response:
         headers={"content-type": "application/json"},
         content=raw,
         request=httpx.Request("GET", "https://backend.flymy.ai/"),
+    )
+
+
+def _make_binary_response(data: bytes, resource: dict) -> httpx.Response:
+    return httpx.Response(
+        status_code=206,
+        headers={
+            "content-type": f"{resource['media_type']}; charset=utf-8",
+            "content-length": str(len(data)),
+            "content-range": f"bytes 0-{len(data) - 1}/{len(data)}",
+            "x-content-sha256": resource["sha256"],
+            "etag": f'"sha256:{resource["sha256"]}"',
+            "x-execution-resource-ref": resource["ref"],
+        },
+        content=data,
+        request=httpx.Request("GET", "https://backend.flymy.ai/resource/"),
     )
 
 
@@ -241,6 +411,39 @@ class TestRaiseForStatus:
         err = exc_info.value
         assert err.status_code == 404
         assert "Not found" in str(err)
+
+    def test_connection_reconnect_409_raises_typed_secret_free_error(self):
+        from flymyai.agents._client import _raise_for_status
+
+        body = {
+            "code": "connection_reconnect_required",
+            "detail": "Reconnect the affected connection before continuing.",
+            "connections": [{
+                "incident_id": "11111111-1111-4111-8111-111111111111",
+                "connection_id": "22222222-2222-4222-8222-222222222222",
+                "toolkit": "telegram",
+                "alias": "support",
+                "status": "verification_pending",
+                "reason_code": "provider_authentication_failed",
+                "access_token": "must-not-leak",
+            }],
+            "connections_truncated": False,
+        }
+
+        with pytest.raises(ConnectionReconnectRequiredError) as exc_info:
+            _raise_for_status(_make_response(body, status_code=409))
+
+        error = exc_info.value
+        assert error.status_code == 409
+        assert error.connections_truncated is False
+        assert len(error.connections) == 1
+        assert (
+            error.connections[0].connection_id == "22222222-2222-4222-8222-222222222222"
+        )
+        assert error.connections[0].status == (
+            ConnectionIncidentStatus.VERIFICATION_PENDING
+        )
+        assert "access_token" not in error.connections[0].model_dump()
 
     def test_5xx_raises_with_text_body(self):
         from flymyai.agents._client import _raise_for_status
@@ -425,7 +628,8 @@ class TestSyncRuns:
     def test_wait_returns_on_completed(self):
         mock_http = MagicMock()
         mock_http.request.side_effect = [
-            _make_response(_run_payload(status="running")),
+            _make_response(_status_payload(status="running")),
+            _make_response(_status_payload(status="completed")),
             _make_response(
                 _run_payload(status="completed", agent_result={"answer": "42"})
             ),
@@ -435,14 +639,150 @@ class TestSyncRuns:
             result = client.runs.wait(42, poll_interval=0.01)
         assert result.status == ExecutionStatus.COMPLETED
         assert result.output == {"answer": "42"}
+        assert mock_http.request.call_count == 3
+        assert mock_http.request.call_args_list[0].args[1].endswith("/status/")
+        assert mock_http.request.call_args_list[1].args[1].endswith("/status/")
+        assert mock_http.request.call_args_list[2].args[1].endswith(
+            f"/{42}/"
+        )
 
     def test_wait_raises_on_timeout(self):
         mock_http = MagicMock()
-        mock_http.request.return_value = _make_response(_run_payload(status="running"))
+        mock_http.request.return_value = _make_response(
+            _status_payload(status="running")
+        )
         client = _sync_client(mock_http)
         with patch("time.sleep"), patch("time.monotonic", side_effect=[0, 0, 1000]):
             with pytest.raises(TimeoutError, match="did not complete"):
                 client.runs.wait(42, timeout=1.0, poll_interval=0.01)
+
+    def test_status_uses_bounded_cursor_contract(self):
+        step = _progress_step(11)
+        mock_http = MagicMock()
+        mock_http.request.return_value = _make_response(
+            _status_payload(since=10, steps=[step], page_size=7)
+        )
+        client = _sync_client(mock_http)
+
+        status = client.runs.status(RUN_ID, since=10, page_size=7)
+
+        assert status.next_since == 11
+        assert status.new_steps[0].message == "working"
+        assert mock_http.request.call_args.kwargs["params"] == {
+            "view": "bounded_v1",
+            "since": 10,
+            "page_size": 7,
+        }
+
+    def test_wait_status_drains_terminal_pages_without_sleeping(self):
+        mock_http = MagicMock()
+        mock_http.request.side_effect = [
+            _make_response(
+                _status_payload(
+                    steps=[_progress_step(1)],
+                    status="completed",
+                    page_size=1,
+                    has_more=True,
+                    poll_complete=False,
+                )
+            ),
+            _make_response(
+                _status_payload(
+                    since=1,
+                    steps=[_progress_step(2)],
+                    status="completed",
+                    page_size=1,
+                )
+            ),
+        ]
+        client = _sync_client(mock_http)
+
+        with patch("time.sleep") as sleep:
+            status = client.runs.wait_status(RUN_ID, page_size=1)
+
+        assert status.poll_complete is True
+        sleep.assert_not_called()
+        assert mock_http.request.call_args_list[1].kwargs["params"]["since"] == 1
+
+    def test_wait_status_stops_at_explicit_request_ceiling(self):
+        mock_http = MagicMock()
+        mock_http.request.return_value = _make_response(
+            _status_payload(status="running")
+        )
+        client = _sync_client(mock_http)
+
+        with patch("time.sleep"):
+            with pytest.raises(RuntimeError, match="exceeded 2 requests"):
+                client.runs.wait_status(
+                    RUN_ID,
+                    poll_interval=0,
+                    max_requests=2,
+                )
+
+        assert mock_http.request.call_count == 2
+
+    def test_transcript_and_logs_are_single_bounded_pages(self):
+        mock_http = MagicMock()
+        mock_http.request.side_effect = [
+            _make_response(_transcript_page_payload()),
+            _make_response(_log_page_payload()),
+        ]
+        client = _sync_client(mock_http)
+
+        transcript = client.runs.transcript(RUN_ID)
+        logs = client.runs.logs(RUN_ID)
+
+        assert isinstance(transcript, RunTranscriptPage)
+        assert transcript.messages[0].message_id == "message-latest"
+        assert isinstance(logs, RunLogPage)
+        assert logs.logs[0].id == 2
+        assert mock_http.request.call_args_list[0].args[1].endswith("/transcript/")
+        assert mock_http.request.call_args_list[0].kwargs["params"] == {
+            "page_size": 20
+        }
+        assert mock_http.request.call_args_list[1].args[1].endswith("/logs/")
+        assert mock_http.request.call_args_list[1].kwargs["params"] == {
+            "page_size": 50
+        }
+
+    def test_resource_range_uses_same_run_path_and_verifies_headers(self):
+        data = b'{"answer":42}'
+        payload = _resource_payload(data)
+        resource = RunResource(**payload)
+        mock_http = MagicMock()
+        mock_http.request.return_value = _make_binary_response(data, payload)
+        client = _sync_client(mock_http)
+
+        result = client.runs.resource_range(RUN_ID, resource)
+
+        assert isinstance(result, RunResourceRange)
+        assert result.data == data
+        request = mock_http.request.call_args
+        assert request.args[1] == f"/api/v1/agents/executions/{RUN_ID}/resource/"
+        assert request.kwargs["params"] == {"ref": resource.ref}
+        assert request.kwargs["headers"] == {"Range": "bytes=0-12"}
+        assert "untrusted.invalid" not in request.args[1]
+
+    def test_bounded_page_validation_rejects_cursor_stall(self):
+        cursor = "execution-transcript:v1:same"
+        mock_http = MagicMock()
+        mock_http.request.return_value = _make_response(
+            _transcript_page_payload(next_cursor=cursor)
+        )
+        client = _sync_client(mock_http)
+
+        with pytest.raises(RuntimeError, match="cursor did not advance"):
+            client.runs.transcript(RUN_ID, cursor=cursor)
+
+    def test_status_rejects_response_over_one_mib(self):
+        mock_http = MagicMock()
+        mock_http.request.return_value = _make_response(
+            _status_payload(ignored_padding="x" * (1024 * 1024))
+        )
+        client = _sync_client(mock_http)
+
+        with pytest.raises(RuntimeError, match="exceeded 1048576 bytes"):
+            client.runs.status(RUN_ID)
 
     def test_stream_events_yields_new_logs(self):
         log1 = _log_payload(id=1)
@@ -481,6 +821,35 @@ class TestSyncTools:
         assert len(tools) == 1
         assert isinstance(tools[0], Tool)
         assert tools[0].name == "web_search"
+
+    def test_list_max_items_limits_requests_and_next_page_size(self):
+        mock_http = MagicMock()
+        mock_http.request.side_effect = [
+            _make_response({
+                "next_cursor": "next-page",
+                "previous_cursor": None,
+                "results": [_tool_payload(id=1), _tool_payload(id=2)],
+            }),
+            _make_response({
+                "next_cursor": "unused-page",
+                "previous_cursor": "previous-page",
+                "results": [_tool_payload(id=3)],
+            }),
+        ]
+        client = _sync_client(mock_http)
+
+        tools = client.tools.list(page_size=2, max_items=3)
+
+        assert [tool.id for tool in tools] == [1, 2, 3]
+        assert mock_http.request.call_count == 2
+        assert mock_http.request.call_args_list[0].kwargs["params"]["page_size"] == 2
+        assert mock_http.request.call_args_list[1].kwargs["params"]["page_size"] == 1
+
+    @pytest.mark.parametrize("max_items", [True, 0, 10_001])
+    def test_list_rejects_invalid_max_items(self, max_items):
+        client = _sync_client(MagicMock())
+        with pytest.raises(ValueError, match="max_items"):
+            client.tools.list(max_items=max_items)
 
     def test_available_tools(self):
         available = {
@@ -673,7 +1042,8 @@ class TestAsyncRuns:
     async def test_wait_completed(self):
         mock_http = AsyncMock()
         mock_http.request.side_effect = [
-            _make_response(_run_payload(status="running")),
+            _make_response(_status_payload(status="running")),
+            _make_response(_status_payload(status="completed")),
             _make_response(_run_payload(status="completed")),
         ]
         client = _async_client(mock_http)
@@ -683,13 +1053,86 @@ class TestAsyncRuns:
 
     async def test_wait_timeout(self):
         mock_http = AsyncMock()
-        mock_http.request.return_value = _make_response(_run_payload(status="running"))
+        mock_http.request.return_value = _make_response(
+            _status_payload(status="running")
+        )
         client = _async_client(mock_http)
         with patch("asyncio.sleep", new_callable=AsyncMock), patch(
             "time.monotonic", side_effect=[0, 0, 1000]
         ):
             with pytest.raises(TimeoutError):
                 await client.runs.wait(42, timeout=1.0, poll_interval=0.01)
+
+    async def test_wait_status_drains_terminal_pages(self):
+        mock_http = AsyncMock()
+        mock_http.request.side_effect = [
+            _make_response(
+                _status_payload(
+                    steps=[_progress_step(1)],
+                    status="completed",
+                    page_size=1,
+                    has_more=True,
+                    poll_complete=False,
+                )
+            ),
+            _make_response(
+                _status_payload(
+                    since=1,
+                    steps=[_progress_step(2)],
+                    status="completed",
+                    page_size=1,
+                )
+            ),
+        ]
+        client = _async_client(mock_http)
+
+        with patch("asyncio.sleep", new_callable=AsyncMock) as sleep:
+            status = await client.runs.wait_status(RUN_ID, page_size=1)
+
+        assert status.poll_complete is True
+        sleep.assert_not_awaited()
+        assert mock_http.request.await_args_list[1].kwargs["params"]["since"] == 1
+
+    async def test_bounded_page_and_range_methods_match_sync_contract(self):
+        data = b'{"answer":42}'
+        resource_payload = _resource_payload(data)
+        mock_http = AsyncMock()
+        mock_http.request.side_effect = [
+            _make_response(_transcript_page_payload()),
+            _make_response(_log_page_payload()),
+            _make_binary_response(data, resource_payload),
+        ]
+        client = _async_client(mock_http)
+
+        transcript = await client.runs.transcript(RUN_ID)
+        logs = await client.runs.logs(RUN_ID)
+        resource = RunResource(**resource_payload)
+        resource_range = await client.runs.resource_range(RUN_ID, resource)
+
+        assert isinstance(transcript, RunTranscriptPage)
+        assert isinstance(logs, RunLogPage)
+        assert isinstance(resource_range, RunResourceRange)
+        assert resource_range.data == data
+        assert mock_http.request.await_args_list[2].args[1] == (
+            f"/api/v1/agents/executions/{RUN_ID}/resource/"
+        )
+
+    async def test_wait_status_stops_at_explicit_request_ceiling(self):
+        mock_http = AsyncMock()
+        mock_http.request.return_value = _make_response(
+            _status_payload(status="running")
+        )
+        client = _async_client(mock_http)
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            with pytest.raises(RuntimeError, match="exceeded 2 requests"):
+                await client.runs.wait_status(
+                    RUN_ID,
+                    poll_interval=0,
+                    max_requests=2,
+                )
+
+        assert mock_http.request.await_count == 2
 
     async def test_stream_events(self):
         log1 = _log_payload(id=1)
@@ -723,6 +1166,21 @@ class TestAsyncTools:
         client = _async_client(mock_http)
         tools = await client.tools.list()
         assert len(tools) == 1
+
+    async def test_list_max_items_stops_at_bound(self):
+        mock_http = AsyncMock()
+        mock_http.request.return_value = _make_response({
+            "next_cursor": "must-not-follow",
+            "previous_cursor": None,
+            "results": [_tool_payload(id=1)],
+        })
+        client = _async_client(mock_http)
+
+        tools = await client.tools.list(max_items=1)
+
+        assert [tool.id for tool in tools] == [1]
+        assert mock_http.request.await_count == 1
+        assert mock_http.request.await_args.kwargs["params"]["page_size"] == 1
 
     async def test_call(self):
         mock_http = AsyncMock()
@@ -784,6 +1242,48 @@ class TestModels:
     def test_tool_name_property(self):
         tool = Tool(**_tool_payload())
         assert tool.name == "web_search"
+
+    def test_tool_projects_readiness_and_owner_incident_audit(self):
+        tool = Tool(
+            **_tool_payload(
+                public_id="22222222-2222-4222-8222-222222222222",
+                connection_status="reconnect_required",
+                connection_status_reason="Reconnect this account.",
+                connection_status_reason_code="provider_authentication_failed",
+                connect_url=(
+                    "https://app.flymy.ai/mcp-configs#telegram?connection_id="
+                    "22222222-2222-4222-8222-222222222222"
+                ),
+                active_incident={
+                    "id": "11111111-1111-4111-8111-111111111111",
+                    "connection_id": "22222222-2222-4222-8222-222222222222",
+                    "toolkit": "telegram",
+                    "alias": "support",
+                    "status": "open",
+                    "reason_code": "provider_authentication_failed",
+                    "credential_revision": "sha256:old",
+                    "current_credential_revision": "sha256:old",
+                    "detected_at": NOW,
+                    "last_observed_at": NOW,
+                    "notification_count": 1,
+                    "schedule_reconcile_revision": 2,
+                    "schedule_reconciled_revision": 2,
+                    "affected_agent_count": 1,
+                    "affected_agent_ids": ["aaaaaaaa-0000-0000-0000-000000000001"],
+                    "affected_schedule_count": 1,
+                    "affected_compilation_ids": [42],
+                    "mapping_mode": "flymyai_managed_owner",
+                    "affected_owner_mappings": [],
+                    "affected_deployment_ids": [],
+                    "schedule_blocks": [],
+                },
+            )
+        )
+
+        assert tool.connection_status == ConnectionReadinessStatus.RECONNECT_REQUIRED
+        assert tool.active_incident is not None
+        assert tool.active_incident.status == ConnectionIncidentStatus.OPEN
+        assert tool.active_incident.affected_compilation_ids == [42]
 
     def test_execution_log_type_enum(self):
         log = ExecutionLog(**_log_payload(type="tool_called"))

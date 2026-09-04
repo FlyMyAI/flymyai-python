@@ -78,6 +78,21 @@ class IntegrationConnectionStatus(str, Enum):
     DISABLED = "disabled"
 
 
+class ConnectionReadinessStatus(str, Enum):
+    """Public readiness state for one exact owner connection."""
+
+    CONNECTED = "connected"
+    SETUP_REQUIRED = "setup_required"
+    RECONNECT_REQUIRED = "reconnect_required"
+    VERIFICATION_PENDING = "verification_pending"
+    TEMPORARILY_UNAVAILABLE = "temporarily_unavailable"
+
+
+class ConnectionIncidentStatus(str, Enum):
+    OPEN = "open"
+    VERIFICATION_PENDING = "verification_pending"
+
+
 class ExecutionLogType(str, Enum):
     DECLARED_FUNCTIONS = "declared_functions"
     TOOL_CALLED = "tool_called"
@@ -179,6 +194,159 @@ class RunDetail(Run):
     user_agent_task_uuid: Optional[str] = None
 
 
+class RunResourceInline(BaseModel):
+    """At most 4 KiB of an execution result or error."""
+
+    format: str
+    value: Any = None
+    size_bytes: int
+    truncated: bool
+
+
+class RunResourceRetrieval(BaseModel):
+    """Retrieval metadata; clients must still build a same-origin URL."""
+
+    href: str
+    accept_ranges: str
+    max_range_bytes: int
+
+
+class RunResourceReceipt(BaseModel):
+    kind: str
+    chunk_bytes: int
+
+
+class RunResource(BaseModel):
+    """Digest-bound projection of a potentially large terminal value."""
+
+    version: str
+    ref: str
+    kind: str
+    media_type: str
+    encoding: str
+    size_bytes: int
+    sha256: str
+    inline: RunResourceInline
+    truncated: bool
+    retrieval: RunResourceRetrieval
+    receipt: RunResourceReceipt
+
+
+class RunTranscriptMessage(BaseModel):
+    role: str
+    content: str
+    message_id: str
+    content_size_bytes: int
+    content_size_exact: bool
+    content_truncated: bool
+
+
+class RunTranscriptReceipt(BaseModel):
+    version: str
+    presentation_seq: int
+    source: str
+    total_messages: int
+    signature_algorithm: str
+    signature: str
+
+
+class RunTranscriptPage(BaseModel):
+    """One bounded newest-to-older transcript page."""
+
+    messages: List[RunTranscriptMessage] = Field(default_factory=list)
+    has_more: bool
+    next_cursor: Optional[str] = None
+    page_size: int
+    response_bytes_limit: int
+    receipt: RunTranscriptReceipt
+
+
+class RunLogEntry(BaseModel):
+    """One bounded execution log projection, distinct from legacy logs."""
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    type: Union[ExecutionLogType, str]
+    message: str
+    label: str
+    data: Any = Field(default_factory=dict)
+    data_size_bytes: int
+    data_size_exact: bool
+    data_has_more: bool
+    data_hidden: bool
+    agent_script_compilation: Optional[int] = None
+
+
+class RunLogReceipt(BaseModel):
+    version: str
+    snapshot_max_id: int
+    ordering: str
+    signature_algorithm: str
+    signature: str
+
+
+class RunLogPage(BaseModel):
+    """One bounded page from a fixed execution-log snapshot."""
+
+    logs: List[RunLogEntry] = Field(default_factory=list)
+    has_more: bool
+    next_cursor: Optional[str] = None
+    page_size: int
+    response_bytes_limit: int
+    receipt: RunLogReceipt
+
+
+class RunResourceRange(BaseModel):
+    """One verified range from a digest-bound terminal resource."""
+
+    data: bytes
+    start: int
+    end: int
+    total_bytes: int
+    sha256: str
+    ref: str
+    media_type: str
+
+
+class RunProgressStep(BaseModel):
+    """One bounded execution progress item returned by the polling endpoint."""
+
+    id: int
+    type: Union[ExecutionLogType, str]
+    message: str
+    message_size_bytes: int = 0
+    message_truncated: bool = False
+    label: str = ""
+    label_size_bytes: int = 0
+    label_truncated: bool = False
+
+
+class RunProgressStatus(BaseModel):
+    """Bounded, cursor-based execution status suitable for repeated polling."""
+
+    id: ResourceID
+    status: str
+    run_seq: int = 0
+    updated_at: datetime
+    is_settled: bool = False
+    step_count: int = 0
+    tool_step_count: int = 0
+    last_step_id: Optional[int] = None
+    new_steps: List[RunProgressStep] = Field(default_factory=list)
+    agent_surface_revision: int = 0
+    view: str
+    page_size: int
+    has_more: bool
+    next_since: int
+    poll_complete: bool
+    step_count_has_more: bool = False
+    presentation_cursor_v1: Dict[str, Any] = Field(default_factory=dict)
+    chat_files_revision: Optional[str] = None
+    result: Optional[RunResource] = None
+    error: Optional[RunResource] = None
+
+
 class AppendMessageResponse(BaseModel):
     """Bounded acknowledgement returned after appending to a run."""
 
@@ -213,6 +381,67 @@ class ConfigurationStep(BaseModel):
     execution_command: Optional[str] = None
 
 
+class ConnectionReconnectBlocker(BaseModel):
+    """Bounded, secret-free connection blocker returned before dispatch."""
+
+    incident_id: str
+    connection_id: str
+    toolkit: str
+    alias: str
+    status: ConnectionIncidentStatus
+    reason_code: str
+
+
+class ConnectionIncidentOwnerMapping(BaseModel):
+    id: str
+    slot: str
+    agent_id: str
+    agent_version_id: str
+
+
+class ConnectionIncidentScheduleBlock(BaseModel):
+    id: str
+    compilation_id: int
+    blocked_at: datetime
+    released_at: Optional[datetime] = None
+    release_reason: Optional[str] = None
+
+
+class ConnectionIncident(BaseModel):
+    """Owner-visible audit projection for one unresolved connection outage."""
+
+    id: str
+    connection_id: str
+    toolkit: str
+    alias: str
+    status: ConnectionIncidentStatus
+    reason_code: str
+    credential_revision: str
+    current_credential_revision: str
+    detected_at: datetime
+    last_observed_at: datetime
+    verification_pending_at: Optional[datetime] = None
+    notification_count: int
+    next_notification_at: Optional[datetime] = None
+    schedule_reconcile_revision: int
+    schedule_reconciled_revision: int
+    affected_agent_count: int
+    affected_agent_ids: List[str] = Field(default_factory=list)
+    affected_agent_ids_truncated: bool = False
+    affected_schedule_count: int
+    affected_compilation_ids: List[int] = Field(default_factory=list)
+    affected_compilation_ids_truncated: bool = False
+    mapping_mode: str
+    affected_owner_mappings: List[ConnectionIncidentOwnerMapping] = Field(
+        default_factory=list
+    )
+    affected_owner_mappings_truncated: bool = False
+    affected_deployment_ids: List[str] = Field(default_factory=list)
+    affected_deployment_ids_truncated: bool = False
+    schedule_blocks: List[ConnectionIncidentScheduleBlock] = Field(default_factory=list)
+    schedule_blocks_truncated: bool = False
+
+
 class Tool(BaseModel):
     """A configured MCP tool belonging to the user."""
 
@@ -227,6 +456,13 @@ class Tool(BaseModel):
     required_configuration_steps: List[ConfigurationStep] = Field(default_factory=list)
     finished_configuration_steps: List[Dict[str, Any]] = Field(default_factory=list)
     next_configuration_step: Optional[Dict[str, Any]] = None
+    connection_status: Optional[ConnectionReadinessStatus] = None
+    connection_status_reason: Optional[str] = None
+    connection_status_checked_at: Optional[datetime] = None
+    connection_status_valid_until: Optional[datetime] = None
+    connection_status_reason_code: Optional[str] = None
+    connect_url: Optional[str] = None
+    active_incident: Optional[ConnectionIncident] = None
     redirect_url: str = ""
     response: str = ""
     created_at: datetime
