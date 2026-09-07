@@ -213,6 +213,33 @@ class ConfigurationStep(BaseModel):
     execution_command: Optional[str] = None
 
 
+class BrowserUseProfileStatus(str, Enum):
+    UNBOUND = "unbound"
+    BOUND = "bound"
+    UNKNOWN = "unknown"
+
+
+class BrowserUseProfile(BaseModel):
+    """Non-secret saved browser metadata; cookie presence is not login proof."""
+
+    profile_id: str
+    name: str
+    cookie_domains: List[str] = Field(default_factory=list)
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+    last_used_at: Optional[datetime] = None
+    note: str = ""
+
+
+class BrowserUseProfileBinding(BaseModel):
+    connection_id: str
+    status: BrowserUseProfileStatus
+    profile: Optional[BrowserUseProfile] = None
+    code: Optional[str] = None
+    detail: Optional[str] = None
+    recovery_intent_id: Optional[str] = None
+
+
 class Tool(BaseModel):
     """A configured MCP tool belonging to the user."""
 

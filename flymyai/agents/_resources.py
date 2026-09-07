@@ -29,6 +29,7 @@ from flymyai.agents._types import (
     AgentVersion,
     AppendMessageResponse,
     AvailableTool,
+    BrowserUseProfileBinding,
     Compilation,
     CompilationStatus,
     McpAccessMode,
@@ -943,6 +944,37 @@ class Runs:
             time.sleep(poll_interval)
 
 
+def _browser_profile_path(tool_id: int) -> str:
+    if type(tool_id) is not int or tool_id <= 0:
+        raise ValueError("tool_id must be a positive integer.")
+    return f"/api/v1/agents/tools/{tool_id}/browser-profile/"
+
+
+def _browser_profile_reconcile_path(tool_id: int) -> str:
+    if type(tool_id) is not int or tool_id <= 0:
+        raise ValueError("tool_id must be a positive integer.")
+    return f"/api/v1/agents/tools/{tool_id}/browser-profile-reconcile/"
+
+
+def _browser_profile_name(name: str) -> str:
+    if not isinstance(name, str) or not name.strip() or len(name.strip()) > 100:
+        raise ValueError("name must contain 1 to 100 characters.")
+    return name.strip()
+
+
+def _tool_call_payload(
+    action: str,
+    arguments: Optional[Dict[str, Any]],
+    execution_id: Optional[str],
+) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {"action": action, "arguments": arguments or {}}
+    if execution_id is not None:
+        if not isinstance(execution_id, str) or not execution_id.strip():
+            raise ValueError("execution_id must be a non-empty public execution ID.")
+        payload["execution_id"] = execution_id
+    return payload
+
+
 class Tools:
     """Manage MCP tools. Maps to ``/api/v1/agents/tools/``."""
 
@@ -1026,6 +1058,39 @@ class Tools:
         data = self._c._request("GET", f"/api/v1/agents/tools/{tool_id}/")
         return Tool(**data)
 
+    def get_browser_profile(self, tool_id: int) -> BrowserUseProfileBinding:
+        """Inspect this exact connection's non-secret saved browser metadata."""
+        data = self._c._request("GET", _browser_profile_path(tool_id), timeout=70.0)
+        return BrowserUseProfileBinding(**data)
+
+    def create_browser_profile(
+        self,
+        tool_id: int,
+        *,
+        name: str,
+    ) -> BrowserUseProfileBinding:
+        """Create and bind the initial profile once for this connection.
+
+        If the result is unknown, inspect or reconcile the same connection. Do
+        not create another connection to repeat the provider-side allocation.
+        """
+        data = self._c._request(
+            "POST",
+            _browser_profile_path(tool_id),
+            json={"name": _browser_profile_name(name)},
+            timeout=70.0,
+        )
+        return BrowserUseProfileBinding(**data)
+
+    def reconcile_browser_profile(self, tool_id: int) -> BrowserUseProfileBinding:
+        """Bind only the exact profile retained by an unknown initial create."""
+        data = self._c._request(
+            "POST",
+            _browser_profile_reconcile_path(tool_id),
+            timeout=70.0,
+        )
+        return BrowserUseProfileBinding(**data)
+
     def update(self, tool_id: int, **kwargs: Any) -> Tool:
         """Partial update (PATCH).  Pass ``user_config={...}`` to merge config."""
         if "alias" in kwargs:
@@ -1054,12 +1119,13 @@ class Tools:
         action: str,
         idempotency_key: str,
         arguments: Optional[Dict[str, Any]] = None,
+        execution_id: Optional[str] = None,
     ) -> Any:
-        """Invoke a tool action with one caller-owned durable identity."""
+        """Invoke a tool action in an optional explicit owner chat context."""
         data = self._c._request(
             "POST",
             f"/api/v1/agents/tools/{tool_id}/call/",
-            json={"action": action, "arguments": arguments or {}},
+            json=_tool_call_payload(action, arguments, execution_id),
             headers=_idempotency_headers(idempotency_key),
         )
         return data
@@ -2262,6 +2328,42 @@ class AsyncTools:
         data = await self._c._request("GET", f"/api/v1/agents/tools/{tool_id}/")
         return Tool(**data)
 
+    async def get_browser_profile(self, tool_id: int) -> BrowserUseProfileBinding:
+        """Inspect this exact connection's non-secret saved browser metadata."""
+        data = await self._c._request(
+            "GET",
+            _browser_profile_path(tool_id),
+            timeout=70.0,
+        )
+        return BrowserUseProfileBinding(**data)
+
+    async def create_browser_profile(
+        self,
+        tool_id: int,
+        *,
+        name: str,
+    ) -> BrowserUseProfileBinding:
+        """Create and bind the initial profile once for this connection."""
+        data = await self._c._request(
+            "POST",
+            _browser_profile_path(tool_id),
+            json={"name": _browser_profile_name(name)},
+            timeout=70.0,
+        )
+        return BrowserUseProfileBinding(**data)
+
+    async def reconcile_browser_profile(
+        self,
+        tool_id: int,
+    ) -> BrowserUseProfileBinding:
+        """Bind only the exact profile retained by an unknown initial create."""
+        data = await self._c._request(
+            "POST",
+            _browser_profile_reconcile_path(tool_id),
+            timeout=70.0,
+        )
+        return BrowserUseProfileBinding(**data)
+
     async def update(self, tool_id: int, **kwargs: Any) -> Tool:
         if "alias" in kwargs:
             kwargs["alias"] = _validate_alias(kwargs["alias"])
@@ -2288,11 +2390,12 @@ class AsyncTools:
         action: str,
         idempotency_key: str,
         arguments: Optional[Dict[str, Any]] = None,
+        execution_id: Optional[str] = None,
     ) -> Any:
         data = await self._c._request(
             "POST",
             f"/api/v1/agents/tools/{tool_id}/call/",
-            json={"action": action, "arguments": arguments or {}},
+            json=_tool_call_payload(action, arguments, execution_id),
             headers=_idempotency_headers(idempotency_key),
         )
         return data
