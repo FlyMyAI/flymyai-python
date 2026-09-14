@@ -78,14 +78,20 @@ async def main():
             idempotency_key="news-brief-tesla-2026-05-21-v1",
             variables={"topic": "Tesla", "date": "2026-05-21"},
         )
-        async for event in client.runs.stream_events(run.id):
+        since, run_seq = 0, run.run_seq
+        async for event in client.runs.stream_events(run.id, run_seq=run_seq):
             print(f"[{event.type}] {event.message}")
-        result = await client.runs.wait(run.id)
+            since, run_seq = event.id, event.observed_run_seq
+        result = await client.runs.wait(run.id, since=since, run_seq=run_seq)
+        # output is complete only when result.result is inline and not truncated.
         print(result.output)
 
         # 4. Chat: append a follow-up message and continue the same run
-        await client.runs.append_message(run.id, text="Make it punchier.")
-        await client.runs.wait(run.id)
+        resumed = await client.runs.append_message(run.id, text="Make it punchier.")
+        await client.runs.wait(
+            run.id, since=result.next_since, run_seq=resumed.run_seq,
+            presentation_cursor=result.presentation_cursor_v1,
+        )
 
         # 5. Freeze into a reusable instruction, re-run with fresh variables - your API
         compilation = await client.agents.compile_from_run(run.id)
@@ -100,6 +106,79 @@ asyncio.run(main())
 ```
 
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction). A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
+
+### Bounded run observation
+
+`runs.wait()` and the instruction/deployment `*_and_wait()` helpers now return
+`RunStatus`, not `RunDetail`. They poll `status/?view=bounded_v1` with 20 steps
+per request and drain every `has_more` page before accepting `poll_complete`.
+`stream_events()` yields compact `RunStep` values, not full `ExecutionLog`
+objects. Labels and messages can be truncated; these events omit full log
+`data` and timestamps. No history or seen-ID set accumulates in either iterator.
+
+For manual observation, use `runs.status(id, since=last.next_since)` and retain
+`run_seq` plus `presentation_cursor_v1`. Pass those scalars to `wait()` or
+`stream_events()` when reconnecting. Log IDs continue across resumed runs;
+`observed_run_seq` identifies the generation observed, not the generation in
+which an older log was written. Only `poll_complete` ends observation. A goal
+with status `verified` is progress; it does not mean the run is complete.
+
+Result and error bodies are `RunResource` references. `status.output` returns
+only a complete inline result and raises `ValueError` for a truncated result.
+Read larger results or errors explicitly, with each range at most 65,536 bytes:
+
+```python
+import codecs
+import hashlib
+
+settled = client.runs.wait(run.id, run_seq=run.run_seq)
+resource = settled.result  # settled.error uses the same range API
+if resource is not None:
+    offset = 0
+    digest = hashlib.sha256()
+    decoder = codecs.getincrementaldecoder("utf-8")()
+    while offset < resource.size_bytes:
+        chunk = client.runs.read_resource(run.id, resource, offset=offset, limit=65536)
+        offset += len(chunk)
+        digest.update(chunk)
+        print(decoder.decode(chunk, final=offset == resource.size_bytes), end="")
+    if digest.hexdigest() != resource.sha256:
+        raise ValueError("Resource digest mismatch")
+```
+
+This example retains one range and decoder state. It does not assemble the
+whole JSON document; callers needing that must choose their own storage and
+size limits. Individual ranges can split UTF-8 characters or JSON tokens.
+Ranges require the current owner's authorization; a stale resource reference
+returns HTTP 409. Re-read status to obtain the current generation's reference.
+The SDK validates range/ref/digest headers and hashes a complete single-range
+resource. Multi-range consumers should hash their complete stream as above.
+
+`runs.transcript(id, cursor=...)` and `runs.logs(id, cursor=...)` explicitly read
+one history page (20 entries by default). The next cursor selects older history;
+transcript messages within a page are chronological. A stale transcript cursor
+returns HTTP 409; start again without the cursor. Preserve or discard each page
+explicitly instead of accumulating account or run history in memory.
+
+`runs.get(id)` remains the explicit legacy full-detail API, including full
+messages/logs where the server supplies them. It can be large. Observation never
+falls back to it: an old server's missing route raises `FlyMyAIAgentError`, and
+an ignored bounded view or oversized response raises
+`flymyai.agents.RunObservationUnsupportedError`. Malformed bounded pages fail
+validation. Bounded GETs refuse redirects/compressed bodies and accept at most
+512 KiB per page body or 64 KiB per resource range. Parsing and transport retain
+additional bounded copies. Observation makes no automatic writes.
+
+### Cancellation is a request
+
+`runs.cancel(id)` sends one request. A successful return (HTTP 204) does not
+confirm cancellation, and a transport exception leaves its outcome uncertain.
+Continue the same observation with `wait()` or `stream_events()`. The server
+may confirm `completed`, `failed`, `cancelled`, or `archived`; completion can win
+the race with Stop. Retry cancellation only as an explicit caller decision.
+Closing an iterator, an async task cancellation, or `TimeoutError` stops only
+local observation and never cancels the server run. Event-stream timeouts now
+raise `TimeoutError` instead of silently looking like normal completion.
 
 ## Personal connection first
 
@@ -567,3 +646,87 @@ suggestion = await client.runs.suggest_schema(
     outputs_prompt="A short summary",
 )
 ```
+
+## Bounded Files V2 workspaces and artifacts
+
+`client.files` uses the same canonical owner library/task workspaces as the
+browser. The owner personal run default needs no workspace field. To share
+files, first obtain the real `ws_` reference; names and guessed IDs do not
+confer authority:
+
+```python
+# agent.id is the exact UUID returned by the owner Agents API.
+personal = client.files.list(agent_uuid=agent.id, limit=20)
+print(personal.workspace, personal.revision)
+
+# One discovery page, with no implicit selection or automatic next-page walk.
+choices = client.files.workspaces(limit=20)
+for workspace in choices.workspaces:
+    print(workspace.workspace, workspace.name)
+# Request the next page explicitly with cursor=choices.next_cursor, if present.
+
+# Subjects are also one page of owner IDs, without group membership hydration.
+subjects = client.files.subjects("group", limit=20)
+for subject in subjects.subjects:
+    print(subject.id, subject.name)
+
+# Choose the exact subject UUID and workspace from those responses.
+grants = client.workspace_grants.list(selected_workspace, limit=20)
+client.workspace_grants.grant(
+    selected_workspace,
+    subject_kind="group",
+    subject_id=selected_group_id,
+    role="write",
+    expected_revision=grants.revision,
+    idempotency_key=grant_operation_key,  # caller-owned, reserved before dispatch
+)
+# Pass workspace=selected_workspace to compilations.run_instruction() for an owner run.
+```
+
+`files.list()` without selectors bootstraps the owner's library. With
+`agent_uuid`, it bootstraps that exact owner's agent workspace. With
+`workspace`, it lists that exact selected workspace. Selectors are mutually
+exclusive. All return `FilePage(workspace, revision, files, total, next_cursor)`.
+`files.workspaces()` lists existing persistent workspaces; it does not create a
+workspace per account agent. Pages default to 20 and accept at most 50 items.
+Keep or discard each page explicitly; Files cursors are at most 128 characters
+and grant no authority and a refresh
+can reflect a newer workspace revision. This is not a snapshot tree.
+
+Read a large `af_` artifact without sending it to a legacy integer download:
+
+```python
+meta = client.files.stat(artifact_ref, workspace=selected_workspace)  # server-issued af_ ref
+print(meta.ref, meta.size, meta.sha256)
+if meta.size:
+    window = client.files.read(meta, workspace=selected_workspace, offset=0, limit=min(meta.size, 65536))
+    print(window.ref, window.offset, window.total_bytes)
+    # window.content is bytes. This window can split UTF-8 or JSON tokens.
+    # Request another explicit offset with the SAME meta to keep the version.
+```
+
+`files.read(ref, offset=..., limit=...)` may instead make one bounded metadata
+request first. It then reads exactly one version-pinned byte range. Pass
+`workspace=page.workspace` to stat/read to select the exact binding when an
+artifact is shared across workspaces. Omitting it never picks a first binding;
+ambiguous bindings remain an explicit server error. It never
+downloads the whole artifact or advances a cursor automatically. Zero-byte files
+need only `stat`. Each range is 1..65536 bytes; metadata/pages are capped at
+64 KiB/512 KiB of response body. Sync and async clients expose the same methods
+and models; use `await` for each async method. Files models and
+`FilesContractUnsupportedError` are exported from `flymyai.agents`.
+
+`execution-resource:v1:...` result/error references remain separate: obtain them
+from `client.runs.status()`/`wait()` and use `client.runs.read_resource()` with
+its returned `RunResource`. Never pass these refs or `af_` refs into legacy
+integer file APIs. Legacy full-detail/history methods remain explicit opt-ins.
+
+The Files page/workspace/subject/meta routes and bounded content headers require
+the matching backend source integration. Missing routes raise
+`FlyMyAIAgentError`; unsupported/oversized/malformed Files responses raise
+`FilesContractUnsupportedError`. No trailing-slash tree fallback is attempted.
+Authorization, missing versions, 409 conflicts and 416 ranges remain explicit.
+A read does not acquire a publication lease. Grant writes preserve server CAS;
+a lost response is uncertain, and retries must be explicit identical replays
+with the original idempotency key and expected revision. No provider effects
+or automatic write retries are introduced by Files reads.

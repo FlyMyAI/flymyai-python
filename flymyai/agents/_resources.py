@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import asyncio
+from dataclasses import dataclass
+import hashlib
 import re
 import time
 from typing import (
     TYPE_CHECKING,
     Any,
+    AsyncIterator,
     Dict,
     List,
+    Iterator,
     Mapping,
     Optional,
     Sequence,
@@ -15,7 +19,7 @@ from typing import (
     Tuple,
     Union,
 )
-from urllib.parse import parse_qsl, urlsplit
+from urllib.parse import parse_qsl, quote, urlsplit
 from uuid import UUID
 
 from flymyai.agents._types import (
@@ -31,6 +35,8 @@ from flymyai.agents._types import (
     AvailableTool,
     BrowserUseProfileBinding,
     Compilation,
+    CodingAvailability,
+    CodingContinuation,
     CompilationStatus,
     McpAccessMode,
     McpResourceSet,
@@ -44,20 +50,34 @@ from flymyai.agents._types import (
     RuntimeConnections,
     Run,
     RunDetail,
+    RunLogPage,
+    RunPresentationCursor,
+    RunResource,
+    RunStatus,
+    RunStep,
+    RunTranscriptPage,
     SchemaSuggestion,
     Tool,
+    WorkspaceGrantMutation,
+    WorkspaceGrantPage,
+    WorkspaceGrantRole,
+    WorkspaceGrantSubjectKind,
 )
 
 if TYPE_CHECKING:
     from flymyai.agents._client import AsyncAgentClient, SyncAgentClient
 
 
-_TERMINAL_STATUSES = frozenset({"completed", "failed", "cancelled"})
+_RUN_PAGE_BYTES = 512 * 1024
+_RUN_RANGE_BYTES = 65536
 _MAX_CURSOR_PAGES = 100
 _MAX_CURSOR_ROWS = 10_000
 _MAX_CURSOR_PAGE_ROWS = 100
 _MAX_CURSOR_CHARS = 1024
 _DEFAULT_CURSOR_PAGE_SIZE = 100
+_BOUNDED_EXECUTION_LIST_PAGE_ROWS = 24
+_WORKSPACE_GRANT_PAGE_SIZE_DEFAULT = 100
+_WORKSPACE_GRANT_PAGE_SIZE_MAX = 200
 _PaginationKey = Tuple[Tuple[str, str], ...]
 _McpResourceSetMemberLike = Union[
     McpResourceSetMemberInput,
@@ -67,13 +87,113 @@ _McpResourceSetStatusLike = Union[McpResourceSetStatus, str]
 _McpResourceSetManagementModeLike = Union[McpResourceSetManagementMode, str]
 _McpResourceSetAuthorityTypeLike = Union[McpResourceSetAuthorityType, str]
 _McpAccessModeLike = Union[McpAccessMode, str]
+_WorkspaceGrantSubjectKindLike = Union[WorkspaceGrantSubjectKind, str]
+_WorkspaceGrantRoleLike = Union[WorkspaceGrantRole, str]
 _SLUG_PATTERN = re.compile(r"^[A-Za-z0-9_-]+$")
+_WORKSPACE_REF_PATTERN = re.compile(
+    r"^ws_([0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26})$"
+)
+_WORKSPACE_GRANT_REF_PATTERN = re.compile(
+    r"^gr_([0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26})$"
+)
 _DEPRECATED_COMPILATION_RUN_MESSAGE = (
     "Compilations.run() is disabled because the legacy endpoint has no "
     "caller-owned replay contract. Use Compilations.run_instruction(..., "
     "idempotency_key=...) for an owner run or Deployments.run(..., "
     "idempotency_key=...) for a published deployment."
 )
+
+
+def _run_path(run_id: ResourceID, action: str) -> str:
+    return f"/api/v1/agents/executions/{quote(str(run_id), safe='')}/{action}/"
+
+
+def _run_status(data: Any, run_id: ResourceID, since: int) -> RunStatus:
+    from flymyai.agents._client import RunObservationUnsupportedError
+
+    if not isinstance(data, dict) or data.get("view") != "bounded_v1":
+        raise RunObservationUnsupportedError(
+            "Server does not support bounded_v1 status. Legacy detail is explicit via runs.get()."
+        )
+    page = RunStatus(**data)
+    if str(page.id) != str(run_id) or page.presentation_cursor_v1.run_seq != page.run_seq:
+        raise ValueError("Status execution/generation identity mismatch.")
+    previous = since
+    for step in page.new_steps:
+        if step.id <= previous:
+            raise ValueError("Status steps did not advance the requested cursor.")
+        previous = step.id
+        step.observed_run_seq = page.run_seq
+    if page.next_since != previous or (page.has_more and previous == since):
+        raise ValueError("Status continuation did not advance.")
+    terminal = page.status in {"completed", "failed", "cancelled", "archived"}
+    if page.is_settled != terminal or page.poll_complete != (terminal and not page.has_more):
+        raise ValueError("Inconsistent terminal status page.")
+    return page
+
+
+def _run_page_params(cursor: Optional[str], page_size: int, maximum: int) -> Dict[str, Any]:
+    if type(page_size) is not int or not 1 <= page_size <= maximum:
+        raise ValueError(f"page_size must be between 1 and {maximum}.")
+    if cursor is not None and (not cursor or len(cursor) > 512):
+        raise ValueError("Invalid execution page cursor.")
+    return {"page_size": page_size, **({"cursor": cursor} if cursor else {})}
+
+
+def _resource_range(
+    run_id: ResourceID, resource: RunResource, offset: int, limit: int
+) -> Tuple[Dict[str, str], Dict[str, str], int]:
+    if type(offset) is not int or type(limit) is not int or not (
+        0 <= offset < resource.size_bytes and 1 <= limit <= _RUN_RANGE_BYTES
+    ):
+        raise ValueError("Request a non-empty resource range of at most 65536 bytes.")
+    parts = resource.ref.split(":")
+    if (
+        len(parts) != 9 or parts[:2] != ["execution-resource", "v1"]
+        or parts[2] != str(run_id) or parts[4] != resource.kind
+        or parts[5:7] != ["sha256", resource.sha256]
+    ):
+        raise ValueError("Resource reference identity mismatch.")
+    length = min(limit, resource.size_bytes - offset, resource.retrieval.max_range_bytes)
+    return {"ref": resource.ref}, {"Range": f"bytes={offset}-{offset + length - 1}"}, length
+
+
+def _resource_bytes(response: Any, resource: RunResource, offset: int, length: int) -> bytes:
+    if (
+        response.status_code != 206
+        or response.headers.get("Content-Range")
+        != f"bytes {offset}-{offset + length - 1}/{resource.size_bytes}"
+        or response.headers.get("X-Execution-Resource-Ref") != resource.ref
+        or response.headers.get("X-Content-SHA256") != resource.sha256
+        or len(response.content) != length
+    ):
+        raise ValueError("Server did not return the requested digest-bound byte range.")
+    if offset == 0 and length == resource.size_bytes:
+        if hashlib.sha256(response.content).hexdigest() != resource.sha256:
+            raise ValueError("Complete resource digest mismatch.")
+    return response.content
+
+
+@dataclass
+class _RunPollCursor:
+    since: int = 0
+    run_seq: Optional[int] = None
+    presentation: Optional[RunPresentationCursor] = None
+
+    def accept(self, page: RunStatus) -> bool:
+        if self.run_seq is not None and page.run_seq < self.run_seq:
+            return False
+        if self.presentation is not None and (
+            page.run_seq < self.presentation.run_seq or (
+                page.run_seq == self.presentation.run_seq
+                and page.presentation_cursor_v1.as_of_seq < self.presentation.as_of_seq
+            )
+        ):
+            return False
+        self.since = page.next_since
+        self.run_seq = page.run_seq
+        self.presentation = page.presentation_cursor_v1
+        return True
 
 
 def _idempotency_headers(idempotency_key: str) -> Dict[str, str]:
@@ -185,6 +305,74 @@ def _validate_public_uuid(value: str, *, field_name: str) -> str:
     except (ValueError, AttributeError) as exc:
         raise ValueError(f"{field_name} must be a valid UUID string.") from exc
     return value
+
+
+def _validate_workspace_ref(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("workspace must be a ws_<26-char-ulid> string.")
+    match = _WORKSPACE_REF_PATTERN.fullmatch(value)
+    if match is None:
+        raise ValueError("workspace must be a ws_<26-char-ulid> string.")
+    return f"ws_{match.group(1).upper()}"
+
+
+def _validate_workspace_grant_ref(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("grant_id must be a gr_<26-char-ulid> string.")
+    match = _WORKSPACE_GRANT_REF_PATTERN.fullmatch(value)
+    if match is None:
+        raise ValueError("grant_id must be a gr_<26-char-ulid> string.")
+    return f"gr_{match.group(1).upper()}"
+
+
+def _workspace_grant_subject_payload(
+    *,
+    kind: _WorkspaceGrantSubjectKindLike,
+    subject_id: str,
+) -> Dict[str, str]:
+    try:
+        subject_kind = WorkspaceGrantSubjectKind(_string_enum_value(kind))
+    except ValueError as exc:
+        raise ValueError("subject_kind must be 'task' or 'group'.") from exc
+    stable_id = _validate_public_uuid(subject_id, field_name="subject_id")
+    id_field = (
+        "task_id"
+        if subject_kind is WorkspaceGrantSubjectKind.TASK
+        else "group_id"
+    )
+    return {"kind": subject_kind.value, id_field: stable_id}
+
+
+def _workspace_grant_role_value(value: _WorkspaceGrantRoleLike) -> str:
+    try:
+        return WorkspaceGrantRole(_string_enum_value(value)).value
+    except ValueError as exc:
+        raise ValueError("role must be 'read' or 'write'.") from exc
+
+
+def _validate_workspace_grant_page_size(limit: int) -> int:
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or not 1 <= limit <= _WORKSPACE_GRANT_PAGE_SIZE_MAX
+    ):
+        raise ValueError(
+            "limit must be an integer between 1 and "
+            f"{_WORKSPACE_GRANT_PAGE_SIZE_MAX}."
+        )
+    return limit
+
+
+def _validate_workspace_revision(revision: int) -> int:
+    if (
+        isinstance(revision, bool)
+        or not isinstance(revision, int)
+        or revision < 0
+    ):
+        raise ValueError(
+            "expected_revision must be an integer greater than or equal to 0."
+        )
+    return revision
 
 
 def _mcp_access_mode_value(value: _McpAccessModeLike) -> str:
@@ -362,6 +550,45 @@ def _validate_runtime_resource_selection(
         _runtime_connections_payload(connections)
 
 
+def _owner_workspace_payload_value(
+    workspace: Optional[str],
+    *,
+    external_user_id: Optional[str],
+) -> Optional[str]:
+    if workspace is None:
+        return None
+    if external_user_id is not None:
+        raise ValueError("workspace is available only for owner instruction runs.")
+    return _validate_workspace_ref(workspace)
+
+
+def _coding_payload_fields(
+    coding: Optional[bool], workspace: Optional[str], *,
+    external_user_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    if coding is not None and type(coding) is not bool:
+        raise ValueError("coding must be a boolean when supplied.")
+    if coding is True and external_user_id is not None:
+        raise ValueError("coding admission is available only for owner runs.")
+    workspace_ref = _owner_workspace_payload_value(
+        workspace, external_user_id=external_user_id,
+    )
+    if coding is False and workspace_ref is not None:
+        raise ValueError("workspace requires coding admission.")
+    return {
+        **({"coding": coding} if coding is not None else {}),
+        **({"workspace": workspace_ref} if workspace_ref is not None else {}),
+    }
+
+
+def _coding_continuation_payload(text: str) -> Dict[str, str]:
+    if not isinstance(text, str) or not text.strip() or len(text) > 65536:
+        raise ValueError("Coding continuation requires nonblank text of at most 65536 UTF-8 bytes.")
+    if len(text.encode("utf-8")) > 65536:
+        raise ValueError("Coding continuation exceeds 65536 UTF-8 bytes.")
+    return {"text": text}
+
+
 def _validate_cursor_page_size(page_size: int) -> int:
     if (
         isinstance(page_size, bool)
@@ -460,6 +687,21 @@ def _list_results(data: Any) -> List[Any]:
         results = data.get("results", [])
         return results if isinstance(results, list) else []
     return data if isinstance(data, list) else []
+
+
+def _bounded_execution_list_results(data: Any) -> List[Any]:
+    """Accept one bounded execution page, including a rolling legacy array."""
+    if not isinstance(data, (dict, list)):
+        raise RuntimeError("Agent runs returned a malformed list response.")
+    if isinstance(data, dict) and not isinstance(data.get("results"), list):
+        raise RuntimeError("Agent runs response has no results list.")
+    results = _list_results(data)
+    if len(results) > _BOUNDED_EXECUTION_LIST_PAGE_ROWS:
+        raise RuntimeError(
+            "Agent runs page exceeded the bounded_v1 limit of "
+            f"{_BOUNDED_EXECUTION_LIST_PAGE_ROWS} rows."
+        )
+    return results
 
 
 def _next_list_params(data: Any) -> Optional[Dict[str, str]]:
@@ -652,12 +894,22 @@ class Agents:
 
     # -- run -------------------------------------------------------------------
 
+    def coding_availability(self, agent_id: str) -> CodingAvailability:
+        """Read configured admission and its refusal reason without starting a run."""
+        response = self._c._bounded_get(
+            f"/api/v1/agents/tasks/{quote(agent_id, safe='')}/coding-availability/",
+            max_bytes=4096,
+        )
+        return CodingAvailability(**response.json())
+
     def run(
         self,
         agent_id: str,
         *,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        coding: Optional[bool] = None,
+        workspace: Optional[str] = None,
     ) -> RunDetail:
         """Create an execution and start the agent loop.
 
@@ -677,6 +929,7 @@ class Agents:
             Newly created run (status will be ``pending``/``running``).
         """
         body: Dict[str, Any] = {"variables": variables or {}}
+        body.update(_coding_payload_fields(coding, workspace))
         data = self._c._request(
             "POST",
             f"/api/v1/agents/tasks/{agent_id}/run-loop/",
@@ -784,6 +1037,8 @@ class Runs:
         agent_id: str,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        coding: Optional[bool] = None,
+        workspace: Optional[str] = None,
     ) -> RunDetail:
         """Create a new run for the given agent.
 
@@ -793,11 +1048,14 @@ class Runs:
             agent_id,
             idempotency_key=idempotency_key,
             variables=variables,
+            coding=coding,
+            workspace=workspace,
         )
 
     def list(self) -> List[Run]:
-        """List all executions for the current user (newest first)."""
-        params: Optional[Dict[str, str]] = None
+        """List executions through bounded_v1 pages (newest first)."""
+        base_params = {"view": "bounded_v1"}
+        params: Dict[str, str] = dict(base_params)
         results: List[Any] = []
         visited: Set[_PaginationKey] = set()
         page_count = 0
@@ -808,10 +1066,10 @@ class Runs:
                 "/api/v1/agents/executions/",
                 params=params,
             )
-            results.extend(_list_results(data))
+            results.extend(_bounded_execution_list_results(data))
             params = _guarded_next_list_params(
                 data,
-                base_params={},
+                base_params=base_params,
                 visited=visited,
                 page_count=page_count,
                 resource_name="Agent runs",
@@ -820,13 +1078,31 @@ class Runs:
                 return [Run(**item) for item in results]
 
     def get(self, run_id: ResourceID) -> RunDetail:
-        """Get a single execution with logs."""
+        """Explicit legacy detail/history read; potentially unbounded. No polling uses it."""
         data = self._c._request("GET", f"/api/v1/agents/executions/{run_id}/")
         return RunDetail(**data)
 
     def cancel(self, run_id: ResourceID) -> None:
-        """Cancel a running execution."""
+        """Request cancellation once. Only status()/wait() can confirm the outcome."""
         self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
+
+    def continue_coding(
+        self, run_id: ResourceID, *, text: str, idempotency_key: str,
+    ) -> CodingContinuation:
+        """Continue a completed personal coding run with its remaining authority/budget.
+
+        Observe the returned id. Reuse this key/body after transport uncertainty;
+        this operation never falls back to legacy append or resets fleet budgets.
+        """
+        data = self._c._request(
+            "POST", _run_path(run_id, "continue-coding"),
+            json=_coding_continuation_payload(text),
+            headers=_idempotency_headers(idempotency_key),
+        )
+        result = CodingContinuation(**data)
+        if str(result.previous_execution) != str(run_id) or str(result.id) == str(run_id):
+            raise ValueError("Coding continuation returned a different source identity.")
+        return result
 
     def append_message(
         self,
@@ -887,61 +1163,184 @@ class Runs:
         )
         return SchemaSuggestion(**data)
 
-    def wait(
-        self,
-        run_id: ResourceID,
-        *,
-        timeout: float = 300,
-        poll_interval: float = 2.0,
-    ) -> RunDetail:
-        """Poll until the run reaches a terminal status.
+    def status(
+        self, run_id: ResourceID, *, since: int = 0, page_size: int = 20,
+    ) -> RunStatus:
+        """Read one bounded status page. since is the preceding next_since."""
+        if type(since) is not int or not 0 <= since <= 9_223_372_036_854_775_807:
+            raise ValueError("since must be a non-negative int64.")
+        params = _run_page_params(None, page_size, 100)
+        params.update({"view": "bounded_v1", "since": since})
+        response = self._c._bounded_get(
+            _run_path(run_id, "status"), max_bytes=_RUN_PAGE_BYTES, params=params,
+        )
+        return _run_status(response.json(), run_id, since)
 
-        Parameters
-        ----------
-        run_id:
-            Execution ID.
-        timeout:
-            Max seconds to wait before raising ``TimeoutError``.
-        poll_interval:
-            Seconds between polls.
+    def transcript(
+        self, run_id: ResourceID, *, cursor: Optional[str] = None, page_size: int = 20,
+    ) -> RunTranscriptPage:
+        """Read one recent/older message page; a stale generation returns HTTP 409."""
+        response = self._c._bounded_get(
+            _run_path(run_id, "transcript"), max_bytes=_RUN_PAGE_BYTES,
+            params=_run_page_params(cursor, page_size, 50),
+        )
+        return RunTranscriptPage(**response.json())
+
+    def logs(
+        self, run_id: ResourceID, *, cursor: Optional[str] = None, page_size: int = 20,
+    ) -> RunLogPage:
+        """Explicit bounded log history, including projected data and truncation flags."""
+        response = self._c._bounded_get(
+            _run_path(run_id, "logs"), max_bytes=_RUN_PAGE_BYTES,
+            params=_run_page_params(cursor, page_size, 100),
+        )
+        return RunLogPage(**response.json())
+
+    def read_resource(
+        self, run_id: ResourceID, resource: RunResource, *, offset: int = 0,
+        limit: int = 65536,
+    ) -> bytes:
+        """Read one explicit range. HTTP 409 requires a fresh status, not write replay.
+
+        Bytes may split a UTF-8 character or JSON token. Decode only complete data,
+        or use an incremental decoder; never parse a truncated prefix as a result.
         """
+        params, headers, length = _resource_range(run_id, resource, offset, limit)
+        response = self._c._bounded_get(
+            _run_path(run_id, "resource"), max_bytes=_RUN_RANGE_BYTES,
+            params=params, headers=headers,
+        )
+        return _resource_bytes(response, resource, offset, length)
+
+    def wait(
+        self, run_id: ResourceID, *, timeout: float = 300, poll_interval: float = 2.0,
+        since: int = 0, run_seq: Optional[int] = None,
+        presentation_cursor: Optional[RunPresentationCursor] = None,
+    ) -> RunStatus:
+        """Drain bounded status pages until poll_complete, including after cancel().
+
+        Returns RunStatus with resource references. get() explicitly opts into
+        legacy full detail. A timeout/transport failure says nothing about server
+        cancellation; reconnect with the last next_since/run_seq you observed.
+        """
+        cursor = _RunPollCursor(since, run_seq, presentation_cursor)
         deadline = time.monotonic() + timeout
         while True:
-            result = self.get(run_id)
-            if result.status in _TERMINAL_STATUSES:
-                return result
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"Run {run_id} did not complete within {timeout}s "
-                    f"(last status: {result.status})"
-                )
-            time.sleep(poll_interval)
+            result = self.status(run_id, since=cursor.since)
+            if cursor.accept(result):
+                if result.poll_complete:
+                    return result
+                if result.has_more and time.monotonic() < deadline:
+                    continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Run {run_id} observation timed out (last status: {result.status}).")
+            time.sleep(min(poll_interval, remaining))
 
     def stream_events(
-        self,
-        run_id: ResourceID,
-        *,
-        timeout: float = 300,
-        poll_interval: float = 1.0,
-    ):
-        """Yield new :class:`ExecutionLog` entries as they appear.
+        self, run_id: ResourceID, *, timeout: float = 300, poll_interval: float = 1.0,
+        since: int = 0, run_seq: Optional[int] = None,
+        presentation_cursor: Optional[RunPresentationCursor] = None,
+    ) -> Iterator[RunStep]:
+        """Yield compact RunStep events without retaining history or full log data.
 
-        Polls the execution detail endpoint and yields logs that haven't been
-        seen yet.  Stops when the run reaches a terminal status.
+        Pass the last delivered step.id as since on reconnect. Logs are append-only
+        across resumed run_seq values. Closing the iterator only stops observation.
+        Timeout raises explicitly and never means that the server run is terminal.
         """
-        seen_ids: set = set()
+        cursor = _RunPollCursor(since, run_seq, presentation_cursor)
         deadline = time.monotonic() + timeout
         while True:
-            detail = self.get(run_id)
-            for log in detail.logs:
-                if log.id not in seen_ids:
-                    seen_ids.add(log.id)
-                    yield log
-            if detail.status in _TERMINAL_STATUSES:
-                return
-            if time.monotonic() >= deadline:
-                return
-            time.sleep(poll_interval)
+            page = self.status(run_id, since=cursor.since)
+            if cursor.accept(page):
+                for step in page.new_steps:
+                    yield step
+                if page.poll_complete:
+                    return
+                if page.has_more and time.monotonic() < deadline:
+                    continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Run {run_id} event observation timed out.")
+            time.sleep(min(poll_interval, remaining))
+
+
+class WorkspaceGrants:
+    """Owner control plane for stable shared-workspace grants."""
+
+    def __init__(self, client: SyncAgentClient) -> None:
+        self._c = client
+
+    def list(
+        self,
+        workspace: str,
+        *,
+        cursor: Optional[str] = None,
+        limit: int = _WORKSPACE_GRANT_PAGE_SIZE_DEFAULT,
+    ) -> WorkspaceGrantPage:
+        """Return one keyset page of active grants for an exact workspace."""
+        workspace_ref = _validate_workspace_ref(workspace)
+        params: Dict[str, Union[str, int]] = {
+            "limit": _validate_workspace_grant_page_size(limit)
+        }
+        if cursor is not None:
+            params["cursor"] = _validate_workspace_grant_ref(cursor)
+        data = self._c._request(
+            "GET",
+            f"/api/v1/agents/files/workspaces/{workspace_ref}/grants",
+            params=params,
+        )
+        return WorkspaceGrantPage(**data)
+
+    def grant(
+        self,
+        workspace: str,
+        *,
+        subject_kind: _WorkspaceGrantSubjectKindLike,
+        subject_id: str,
+        role: _WorkspaceGrantRoleLike,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> WorkspaceGrantMutation:
+        """CAS-upsert access for one exact owner task or group identity."""
+        workspace_ref = _validate_workspace_ref(workspace)
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/files/workspaces/{workspace_ref}/grants",
+            json={
+                "subject": _workspace_grant_subject_payload(
+                    kind=subject_kind,
+                    subject_id=subject_id,
+                ),
+                "role": _workspace_grant_role_value(role),
+                "expected_revision": _validate_workspace_revision(
+                    expected_revision
+                ),
+            },
+            headers=_idempotency_headers(idempotency_key),
+        )
+        return WorkspaceGrantMutation(**data)
+
+    def revoke(
+        self,
+        grant_id: str,
+        *,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> WorkspaceGrantMutation:
+        """CAS-revoke one exact stable grant without resolving display names."""
+        grant_ref = _validate_workspace_grant_ref(grant_id)
+        data = self._c._request(
+            "DELETE",
+            f"/api/v1/agents/files/workspace-grants/{grant_ref}",
+            params={
+                "expected_revision": _validate_workspace_revision(
+                    expected_revision
+                )
+            },
+            headers=_idempotency_headers(idempotency_key),
+        )
+        return WorkspaceGrantMutation(**data)
 
 
 def _browser_profile_path(tool_id: int) -> str:
@@ -1572,6 +1971,8 @@ class Compilations:
         connections: Optional[RuntimeConnections] = None,
         resource_set_id: Optional[str] = None,
         resource_set_revision: Optional[int] = None,
+        workspace: Optional[str] = None,
+        coding: Optional[bool] = None,
     ) -> RunDetail:
         """Run a frozen agent from its Markdown instruction.
 
@@ -1585,6 +1986,8 @@ class Compilations:
         selects one named mapping owned by the resolved external principal.
         Supply either ``connections`` or ``resource_set_id``, never both.
         Omitting both uses the customer's saved deployment bindings.
+        ``workspace`` selects one exact ``ws_`` workspace for an owner run and
+        cannot be combined with embedded customer identity.
         ``idempotency_key`` is required and sent unchanged as the
         ``Idempotency-Key`` HTTP header.
         Raises :class:`VariablesValidationError` on HTTP 400.
@@ -1597,6 +2000,9 @@ class Compilations:
             connections=connections,
             resource_set_id=resource_set_id,
             resource_set_revision=resource_set_revision,
+        )
+        coding_fields = _coding_payload_fields(
+            coding, workspace, external_user_id=external_user_id,
         )
         body: Dict[str, Any] = {}
         if variables:
@@ -1611,6 +2017,7 @@ class Compilations:
             body["resource_set_id"] = resource_set_id
         if resource_set_revision is not None:
             body["resource_set_revision"] = resource_set_revision
+        body.update(coding_fields)
         request_kwargs: Dict[str, Any] = {"json": body or None}
         request_kwargs["headers"] = _idempotency_headers(idempotency_key)
         data = self._c._request(
@@ -1631,9 +2038,11 @@ class Compilations:
         connections: Optional[RuntimeConnections] = None,
         resource_set_id: Optional[str] = None,
         resource_set_revision: Optional[int] = None,
+        workspace: Optional[str] = None,
+        coding: Optional[bool] = None,
         timeout: float = 300,
         poll_interval: float = 2.0,
-    ) -> RunDetail:
+    ) -> RunStatus:
         """Run an instruction and block until the resulting run finishes.
 
         Embedded context has the same contract as :meth:`run_instruction`.
@@ -1647,9 +2056,11 @@ class Compilations:
             connections=connections,
             resource_set_id=resource_set_id,
             resource_set_revision=resource_set_revision,
+            workspace=workspace,
+            coding=coding,
             idempotency_key=idempotency_key,
         )
-        return self._c.runs.wait(run.id, timeout=timeout, poll_interval=poll_interval)
+        return self._c.runs.wait(run.id, timeout=timeout, poll_interval=poll_interval, run_seq=run.run_seq)
 
     def wait(
         self,
@@ -1924,7 +2335,7 @@ class Deployments:
         resource_set_revision: Optional[int] = None,
         timeout: float = 300,
         poll_interval: float = 2.0,
-    ) -> RunDetail:
+    ) -> RunStatus:
         """Run a deployment and block until its execution finishes."""
         run = self.run(
             deployment_id,
@@ -1939,6 +2350,7 @@ class Deployments:
             run.id,
             timeout=timeout,
             poll_interval=poll_interval,
+            run_seq=run.run_seq,
         )
 
 
@@ -2049,14 +2461,25 @@ class AsyncAgents:
     async def delete(self, agent_id: str) -> None:
         await self._c._request("DELETE", f"/api/v1/agents/tasks/{agent_id}/")
 
+    async def coding_availability(self, agent_id: str) -> CodingAvailability:
+        """Read configured admission and its refusal reason without starting a run."""
+        response = await self._c._bounded_get(
+            f"/api/v1/agents/tasks/{quote(agent_id, safe='')}/coding-availability/",
+            max_bytes=4096,
+        )
+        return CodingAvailability(**response.json())
+
     async def run(
         self,
         agent_id: str,
         *,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        coding: Optional[bool] = None,
+        workspace: Optional[str] = None,
     ) -> RunDetail:
         body: Dict[str, Any] = {"variables": variables or {}}
+        body.update(_coding_payload_fields(coding, workspace))
         data = await self._c._request(
             "POST",
             f"/api/v1/agents/tasks/{agent_id}/run-loop/",
@@ -2129,16 +2552,21 @@ class AsyncRuns:
         agent_id: str,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        coding: Optional[bool] = None,
+        workspace: Optional[str] = None,
     ) -> RunDetail:
         """Create a new run for the given agent (async)."""
         return await self._c.agents.run(
             agent_id,
             idempotency_key=idempotency_key,
             variables=variables,
+            coding=coding,
+            workspace=workspace,
         )
 
     async def list(self) -> List[Run]:
-        params: Optional[Dict[str, str]] = None
+        base_params = {"view": "bounded_v1"}
+        params: Dict[str, str] = dict(base_params)
         results: List[Any] = []
         visited: Set[_PaginationKey] = set()
         page_count = 0
@@ -2149,10 +2577,10 @@ class AsyncRuns:
                 "/api/v1/agents/executions/",
                 params=params,
             )
-            results.extend(_list_results(data))
+            results.extend(_bounded_execution_list_results(data))
             params = _guarded_next_list_params(
                 data,
-                base_params={},
+                base_params=base_params,
                 visited=visited,
                 page_count=page_count,
                 resource_name="Agent runs",
@@ -2161,11 +2589,31 @@ class AsyncRuns:
                 return [Run(**item) for item in results]
 
     async def get(self, run_id: ResourceID) -> RunDetail:
+        """Explicit legacy full detail; potentially unbounded."""
         data = await self._c._request("GET", f"/api/v1/agents/executions/{run_id}/")
         return RunDetail(**data)
 
     async def cancel(self, run_id: ResourceID) -> None:
+        """Request once, then use status()/wait() to confirm the terminal outcome."""
         await self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
+
+    async def continue_coding(
+        self, run_id: ResourceID, *, text: str, idempotency_key: str,
+    ) -> CodingContinuation:
+        """Continue a completed personal coding run with its remaining authority/budget.
+
+        Observe the returned id. Reuse this key/body after transport uncertainty;
+        this operation never falls back to legacy append or resets fleet budgets.
+        """
+        data = await self._c._request(
+            "POST", _run_path(run_id, "continue-coding"),
+            json=_coding_continuation_payload(text),
+            headers=_idempotency_headers(idempotency_key),
+        )
+        result = CodingContinuation(**data)
+        if str(result.previous_execution) != str(run_id) or str(result.id) == str(run_id):
+            raise ValueError("Coding continuation returned a different source identity.")
+        return result
 
     async def append_message(
         self,
@@ -2211,45 +2659,181 @@ class AsyncRuns:
         )
         return SchemaSuggestion(**data)
 
+    async def status(
+        self, run_id: ResourceID, *, since: int = 0, page_size: int = 20,
+    ) -> RunStatus:
+        """Read one bounded status page. since is the preceding next_since."""
+        if type(since) is not int or not 0 <= since <= 9_223_372_036_854_775_807:
+            raise ValueError("since must be a non-negative int64.")
+        params = _run_page_params(None, page_size, 100)
+        params.update({"view": "bounded_v1", "since": since})
+        response = await self._c._bounded_get(
+            _run_path(run_id, "status"), max_bytes=_RUN_PAGE_BYTES, params=params,
+        )
+        return _run_status(response.json(), run_id, since)
+
+    async def transcript(
+        self, run_id: ResourceID, *, cursor: Optional[str] = None, page_size: int = 20,
+    ) -> RunTranscriptPage:
+        """Read one recent/older message page; a stale generation returns HTTP 409."""
+        response = await self._c._bounded_get(
+            _run_path(run_id, "transcript"), max_bytes=_RUN_PAGE_BYTES,
+            params=_run_page_params(cursor, page_size, 50),
+        )
+        return RunTranscriptPage(**response.json())
+
+    async def logs(
+        self, run_id: ResourceID, *, cursor: Optional[str] = None, page_size: int = 20,
+    ) -> RunLogPage:
+        """Explicit bounded log history, including projected data and truncation flags."""
+        response = await self._c._bounded_get(
+            _run_path(run_id, "logs"), max_bytes=_RUN_PAGE_BYTES,
+            params=_run_page_params(cursor, page_size, 100),
+        )
+        return RunLogPage(**response.json())
+
+    async def read_resource(
+        self, run_id: ResourceID, resource: RunResource, *, offset: int = 0,
+        limit: int = 65536,
+    ) -> bytes:
+        """Read one explicit range. HTTP 409 requires a fresh status, not write replay.
+
+        Bytes may split a UTF-8 character or JSON token. Decode only complete data,
+        or use an incremental decoder; never parse a truncated prefix as a result.
+        """
+        params, headers, length = _resource_range(run_id, resource, offset, limit)
+        response = await self._c._bounded_get(
+            _run_path(run_id, "resource"), max_bytes=_RUN_RANGE_BYTES,
+            params=params, headers=headers,
+        )
+        return _resource_bytes(response, resource, offset, length)
+
     async def wait(
-        self,
-        run_id: ResourceID,
-        *,
-        timeout: float = 300,
-        poll_interval: float = 2.0,
-    ) -> RunDetail:
+        self, run_id: ResourceID, *, timeout: float = 300, poll_interval: float = 2.0,
+        since: int = 0, run_seq: Optional[int] = None,
+        presentation_cursor: Optional[RunPresentationCursor] = None,
+    ) -> RunStatus:
+        """Drain bounded status pages until poll_complete, including after cancel().
+
+        Returns RunStatus with resource references. get() explicitly opts into
+        legacy full detail. A timeout/transport failure says nothing about server
+        cancellation; reconnect with the last next_since/run_seq you observed.
+        """
+        cursor = _RunPollCursor(since, run_seq, presentation_cursor)
         deadline = time.monotonic() + timeout
         while True:
-            result = await self.get(run_id)
-            if result.status in _TERMINAL_STATUSES:
-                return result
-            if time.monotonic() >= deadline:
-                raise TimeoutError(
-                    f"Run {run_id} did not complete within {timeout}s "
-                    f"(last status: {result.status})"
-                )
-            await asyncio.sleep(poll_interval)
+            result = await self.status(run_id, since=cursor.since)
+            if cursor.accept(result):
+                if result.poll_complete:
+                    return result
+                if result.has_more and time.monotonic() < deadline:
+                    continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Run {run_id} observation timed out (last status: {result.status}).")
+            await asyncio.sleep(min(poll_interval, remaining))
 
     async def stream_events(
-        self,
-        run_id: ResourceID,
-        *,
-        timeout: float = 300,
-        poll_interval: float = 1.0,
-    ):
-        seen_ids: set = set()
+        self, run_id: ResourceID, *, timeout: float = 300, poll_interval: float = 1.0,
+        since: int = 0, run_seq: Optional[int] = None,
+        presentation_cursor: Optional[RunPresentationCursor] = None,
+    ) -> AsyncIterator[RunStep]:
+        """Yield compact RunStep events without retaining history or full log data.
+
+        Pass the last delivered step.id as since on reconnect. Logs are append-only
+        across resumed run_seq values. Closing the iterator only stops observation.
+        Timeout raises explicitly and never means that the server run is terminal.
+        """
+        cursor = _RunPollCursor(since, run_seq, presentation_cursor)
         deadline = time.monotonic() + timeout
         while True:
-            detail = await self.get(run_id)
-            for log in detail.logs:
-                if log.id not in seen_ids:
-                    seen_ids.add(log.id)
-                    yield log
-            if detail.status in _TERMINAL_STATUSES:
-                return
-            if time.monotonic() >= deadline:
-                return
-            await asyncio.sleep(poll_interval)
+            page = await self.status(run_id, since=cursor.since)
+            if cursor.accept(page):
+                for step in page.new_steps:
+                    yield step
+                if page.poll_complete:
+                    return
+                if page.has_more and time.monotonic() < deadline:
+                    continue
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError(f"Run {run_id} event observation timed out.")
+            await asyncio.sleep(min(poll_interval, remaining))
+
+
+class AsyncWorkspaceGrants:
+    """Async owner control plane for stable shared-workspace grants."""
+
+    def __init__(self, client: AsyncAgentClient) -> None:
+        self._c = client
+
+    async def list(
+        self,
+        workspace: str,
+        *,
+        cursor: Optional[str] = None,
+        limit: int = _WORKSPACE_GRANT_PAGE_SIZE_DEFAULT,
+    ) -> WorkspaceGrantPage:
+        workspace_ref = _validate_workspace_ref(workspace)
+        params: Dict[str, Union[str, int]] = {
+            "limit": _validate_workspace_grant_page_size(limit)
+        }
+        if cursor is not None:
+            params["cursor"] = _validate_workspace_grant_ref(cursor)
+        data = await self._c._request(
+            "GET",
+            f"/api/v1/agents/files/workspaces/{workspace_ref}/grants",
+            params=params,
+        )
+        return WorkspaceGrantPage(**data)
+
+    async def grant(
+        self,
+        workspace: str,
+        *,
+        subject_kind: _WorkspaceGrantSubjectKindLike,
+        subject_id: str,
+        role: _WorkspaceGrantRoleLike,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> WorkspaceGrantMutation:
+        workspace_ref = _validate_workspace_ref(workspace)
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/files/workspaces/{workspace_ref}/grants",
+            json={
+                "subject": _workspace_grant_subject_payload(
+                    kind=subject_kind,
+                    subject_id=subject_id,
+                ),
+                "role": _workspace_grant_role_value(role),
+                "expected_revision": _validate_workspace_revision(
+                    expected_revision
+                ),
+            },
+            headers=_idempotency_headers(idempotency_key),
+        )
+        return WorkspaceGrantMutation(**data)
+
+    async def revoke(
+        self,
+        grant_id: str,
+        *,
+        expected_revision: int,
+        idempotency_key: str,
+    ) -> WorkspaceGrantMutation:
+        grant_ref = _validate_workspace_grant_ref(grant_id)
+        data = await self._c._request(
+            "DELETE",
+            f"/api/v1/agents/files/workspace-grants/{grant_ref}",
+            params={
+                "expected_revision": _validate_workspace_revision(
+                    expected_revision
+                )
+            },
+            headers=_idempotency_headers(idempotency_key),
+        )
+        return WorkspaceGrantMutation(**data)
 
 
 class AsyncTools:
@@ -2806,6 +3390,8 @@ class AsyncCompilations:
         connections: Optional[RuntimeConnections] = None,
         resource_set_id: Optional[str] = None,
         resource_set_revision: Optional[int] = None,
+        workspace: Optional[str] = None,
+        coding: Optional[bool] = None,
     ) -> RunDetail:
         """Run a frozen agent from its Markdown instruction.
 
@@ -2827,6 +3413,9 @@ class AsyncCompilations:
             resource_set_id=resource_set_id,
             resource_set_revision=resource_set_revision,
         )
+        coding_fields = _coding_payload_fields(
+            coding, workspace, external_user_id=external_user_id,
+        )
         body: Dict[str, Any] = {}
         if variables:
             body["variables"] = variables
@@ -2840,6 +3429,7 @@ class AsyncCompilations:
             body["resource_set_id"] = resource_set_id
         if resource_set_revision is not None:
             body["resource_set_revision"] = resource_set_revision
+        body.update(coding_fields)
         request_kwargs: Dict[str, Any] = {"json": body or None}
         request_kwargs["headers"] = _idempotency_headers(idempotency_key)
         data = await self._c._request(
@@ -2860,9 +3450,11 @@ class AsyncCompilations:
         connections: Optional[RuntimeConnections] = None,
         resource_set_id: Optional[str] = None,
         resource_set_revision: Optional[int] = None,
+        workspace: Optional[str] = None,
+        coding: Optional[bool] = None,
         timeout: float = 300,
         poll_interval: float = 2.0,
-    ) -> RunDetail:
+    ) -> RunStatus:
         """Run an instruction and await the resulting run.
 
         Embedded context has the same contract as :meth:`run_instruction`.
@@ -2875,10 +3467,12 @@ class AsyncCompilations:
             connections=connections,
             resource_set_id=resource_set_id,
             resource_set_revision=resource_set_revision,
+            workspace=workspace,
+            coding=coding,
             idempotency_key=idempotency_key,
         )
         return await self._c.runs.wait(
-            run.id, timeout=timeout, poll_interval=poll_interval
+            run.id, timeout=timeout, poll_interval=poll_interval, run_seq=run.run_seq
         )
 
     async def wait(
@@ -3151,7 +3745,7 @@ class AsyncDeployments:
         resource_set_revision: Optional[int] = None,
         timeout: float = 300,
         poll_interval: float = 2.0,
-    ) -> RunDetail:
+    ) -> RunStatus:
         """Run a deployment and await its execution."""
         run = await self.run(
             deployment_id,
@@ -3166,4 +3760,5 @@ class AsyncDeployments:
             run.id,
             timeout=timeout,
             poll_interval=poll_interval,
+            run_seq=run.run_seq,
         )

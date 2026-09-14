@@ -26,6 +26,13 @@ from flymyai.agents import (
     SchemaSuggestion,
     SuggestSchemaError,
     VariablesValidationError,
+    WorkspaceGrantStaleRevisionError,
+    WorkspaceGrant,
+    WorkspaceGrantMutation,
+    WorkspaceGrantPage,
+    WorkspaceGrantRole,
+    WorkspaceGrantSubject,
+    WorkspaceGrantSubjectKind,
 )
 
 __all__ = [
@@ -51,6 +58,7 @@ __all__ = [
     "McpResourceSetAuthorityType",
     "McpResourceSetStaleRevisionError",
     "VariablesValidationError",
+    "WorkspaceGrantStaleRevisionError",
     "SuggestSchemaError",
     "SchemaSuggestion",
     "AgentGroup",
@@ -61,6 +69,12 @@ __all__ = [
     "McpResourceSetSummary",
     "McpResourceType",
     "RuntimeConnections",
+    "WorkspaceGrant",
+    "WorkspaceGrantMutation",
+    "WorkspaceGrantPage",
+    "WorkspaceGrantRole",
+    "WorkspaceGrantSubject",
+    "WorkspaceGrantSubjectKind",
 ]
 
 

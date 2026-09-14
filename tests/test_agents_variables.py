@@ -311,22 +311,32 @@ class TestHighLevelHelpers:
         assert poll_state["i"] >= 2
 
     def test_run_instruction_and_wait_runs_then_waits(self):
+        from tests.test_agent_client import _PollingBody, _poll_status_payload
+
         poll_state = {"i": 0}
 
         def run_instruction(_: httpx.Request) -> httpx.Response:
             return httpx.Response(200, json=_run_payload(run_id=100, status="pending"))
 
-        def get_run(_: httpx.Request) -> httpx.Response:
+        def get_run(request: httpx.Request) -> httpx.Response:
             poll_state["i"] += 1
+            assert poll_state["i"] <= 2
+            assert dict(request.url.params) == {"view": "bounded_v1", "since": "0", "page_size": "20"}
             status = "completed" if poll_state["i"] >= 2 else "running"
-            return httpx.Response(200, json=_run_payload(run_id=100, status=status))
+            page = _poll_status_payload(status, run_seq=0)
+            page["id"] = "100"
+            return httpx.Response(
+                200,
+                headers={"Content-Type": "application/json"},
+                stream=_PollingBody(json.dumps(page).encode()),
+            )
 
         client = _build_client({
             (
                 "POST",
                 "/api/v1/agents/compilations/1/run-instruction/",
             ): run_instruction,
-            ("GET", "/api/v1/agents/executions/100/"): get_run,
+            ("GET", "/api/v1/agents/executions/100/status/"): get_run,
         })
         run = client.compilations.run_instruction_and_wait(
             1,
@@ -335,6 +345,8 @@ class TestHighLevelHelpers:
             poll_interval=0.01,
         )
         assert run.status == ExecutionStatus.COMPLETED
+        assert poll_state["i"] == 2
+        client.close()
 
 
 # ── Agents.create with input/output descriptions ────────────────────────────

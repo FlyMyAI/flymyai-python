@@ -174,6 +174,7 @@ def test_run_instruction_and_wait_forwards_context_to_initial_request():
         "run-123",
         timeout=15,
         poll_interval=0.1,
+        run_seq=0,
     )
 
 
@@ -209,6 +210,7 @@ def test_async_run_instruction_and_wait_forwards_context():
         "run-123",
         timeout=15,
         poll_interval=0.1,
+        run_seq=0,
     )
 
 
@@ -495,6 +497,7 @@ def test_deployment_run_and_wait_forwards_only_deployment_context():
         "run-123",
         timeout=15,
         poll_interval=0.1,
+        run_seq=0,
     )
 
 
@@ -555,6 +558,7 @@ def test_async_deployment_run_and_wait_uses_run_resource():
             "run-123",
             timeout=15,
             poll_interval=0.1,
+            run_seq=0,
         )
 
     asyncio.run(scenario())

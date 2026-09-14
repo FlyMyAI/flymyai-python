@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
+from flymyai.agents._files import AsyncFiles, Files
 from flymyai.agents._resources import (
     AgentGroups,
     Agents,
@@ -15,6 +16,7 @@ from flymyai.agents._resources import (
     AsyncRuns,
     AsyncTools,
     AsyncVersions,
+    AsyncWorkspaceGrants,
     Compilations,
     Deployments,
     McpResourceSets,
@@ -22,6 +24,7 @@ from flymyai.agents._resources import (
     Runs,
     Tools,
     Versions,
+    WorkspaceGrants,
 )
 
 _DEFAULT_BASE_URL = "https://backend.flymy.ai"
@@ -53,6 +56,10 @@ class FlyMyAIAgentError(Exception):
             f"{type(self).__name__}(status_code={self.status_code}, "
             f"message={str(self)!r})"
         )
+
+
+class RunObservationUnsupportedError(RuntimeError):
+    """The server cannot supply bounded observation. No detail fallback is made."""
 
 
 class VariablesValidationError(FlyMyAIAgentError):
@@ -99,6 +106,23 @@ class McpResourceSetStaleRevisionError(FlyMyAIAgentError):
     ) -> None:
         super().__init__(message, status_code=status_code, response_body=response_body)
         self.current_revision = current_revision
+
+
+class WorkspaceGrantStaleRevisionError(FlyMyAIAgentError):
+    """Raised when an owner workspace grant mutation loses its revision CAS."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any,
+        expected_revision: Optional[int],
+        actual_revision: Optional[int],
+    ) -> None:
+        super().__init__(message, status_code=status_code, response_body=response_body)
+        self.expected_revision = expected_revision
+        self.actual_revision = actual_revision
 
 
 def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
@@ -158,6 +182,27 @@ def _raise_for_status(resp: httpx.Response) -> None:
             response_body=body,
             current_revision=(
                 current_revision if isinstance(current_revision, int) else None
+            ),
+        )
+
+    if (
+        resp.status_code == 409
+        and isinstance(body, dict)
+        and body.get("code") == "FILE_STALE_VERSION"
+    ):
+        data = body.get("data")
+        revision_data = data if isinstance(data, dict) else {}
+        expected_revision = revision_data.get("expected_revision")
+        actual_revision = revision_data.get("actual_revision")
+        raise WorkspaceGrantStaleRevisionError(
+            str(body.get("message", "The workspace revision changed.")),
+            status_code=409,
+            response_body=body,
+            expected_revision=(
+                expected_revision if type(expected_revision) is int else None
+            ),
+            actual_revision=(
+                actual_revision if type(actual_revision) is int else None
             ),
         )
 
@@ -221,6 +266,8 @@ class SyncAgentClient:
         self.deployments = Deployments(self)
         self.mcp_resource_sets = McpResourceSets(self)
         self.agent_groups = AgentGroups(self)
+        self.workspace_grants = WorkspaceGrants(self)
+        self.files = Files(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._http.request(method, path, **kwargs)
@@ -228,6 +275,30 @@ class SyncAgentClient:
         if resp.status_code == 204:
             return None
         return resp.json()
+
+    def _bounded_get(
+        self, path: str, *, max_bytes: int, **kwargs: Any
+    ) -> httpx.Response:
+        """Read one finite page/range, including on an older or misrouted server."""
+        headers = {**kwargs.pop("headers", {}), "Accept-Encoding": "identity"}
+        with self._http.stream("GET", path, headers=headers, follow_redirects=False, **kwargs) as stream:
+            if stream.headers.get("Content-Encoding", "identity").lower() != "identity":
+                raise RunObservationUnsupportedError("Bounded reads require identity content encoding.")
+            content = bytearray()
+            for chunk in stream.iter_raw(chunk_size=16384):
+                if len(content) + len(chunk) > max_bytes:
+                    raise RunObservationUnsupportedError(
+                        "Server exceeded the bounded response limit; no detail fallback."
+                    )
+                content.extend(chunk)
+            response = httpx.Response(
+                stream.status_code,
+                headers=stream.headers,
+                content=bytes(content),
+                request=stream.request,
+            )
+        _raise_for_status(response)
+        return response
 
     def __enter__(self) -> SyncAgentClient:
         return self
@@ -287,6 +358,8 @@ class AsyncAgentClient:
         self.deployments = AsyncDeployments(self)
         self.mcp_resource_sets = AsyncMcpResourceSets(self)
         self.agent_groups = AsyncAgentGroups(self)
+        self.workspace_grants = AsyncWorkspaceGrants(self)
+        self.files = AsyncFiles(self)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = await self._http.request(method, path, **kwargs)
@@ -294,6 +367,30 @@ class AsyncAgentClient:
         if resp.status_code == 204:
             return None
         return resp.json()
+
+    async def _bounded_get(
+        self, path: str, *, max_bytes: int, **kwargs: Any
+    ) -> httpx.Response:
+        """Async bounded read; closing/cancelling observation sends no run effect."""
+        headers = {**kwargs.pop("headers", {}), "Accept-Encoding": "identity"}
+        async with self._http.stream("GET", path, headers=headers, follow_redirects=False, **kwargs) as stream:
+            if stream.headers.get("Content-Encoding", "identity").lower() != "identity":
+                raise RunObservationUnsupportedError("Bounded reads require identity content encoding.")
+            content = bytearray()
+            async for chunk in stream.aiter_raw(chunk_size=16384):
+                if len(content) + len(chunk) > max_bytes:
+                    raise RunObservationUnsupportedError(
+                        "Server exceeded the bounded response limit; no detail fallback."
+                    )
+                content.extend(chunk)
+            response = httpx.Response(
+                stream.status_code,
+                headers=stream.headers,
+                content=bytes(content),
+                request=stream.request,
+            )
+        _raise_for_status(response)
+        return response
 
     async def __aenter__(self) -> AsyncAgentClient:
         return self

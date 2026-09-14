@@ -1,6 +1,7 @@
 """Tests for flymyai.agents - SyncAgentClient, AsyncAgentClient, and helpers."""
 
 import asyncio
+import hashlib
 import time
 from datetime import datetime, timezone
 from typing import Any
@@ -28,6 +29,8 @@ from flymyai.agents._types import (
     ExecutionLog,
     Run,
     RunDetail,
+    RunStatus,
+    RunStep,
     Tool,
 )
 
@@ -148,6 +151,110 @@ def _make_response(payload: Any, *, status_code: int = 200) -> httpx.Response:
         content=raw,
         request=httpx.Request("GET", "https://backend.flymy.ai/"),
     )
+
+
+def _poll_status_payload(status="running", *, since=0, steps=(), run_seq=1, output=None):
+    """Small canonical status pages for the existing wait/stream objectives."""
+    assert len(steps) <= 2
+    next_since = steps[-1]["id"] if steps else since
+    settled = status == "completed"
+    payload = {
+        "view": "bounded_v1", "id": RUN_ID, "status": status, "run_seq": run_seq,
+        "updated_at": NOW, "is_settled": settled, "step_count": next_since,
+        "tool_step_count": next_since, "last_step_id": next_since or None,
+        "new_steps": [{
+            "id": step["id"], "type": step["type"], "message": step["message"],
+            "message_size_bytes": len(step["message"].encode("utf-8")), "message_truncated": False,
+            "label": step["message"], "label_size_bytes": len(step["message"].encode("utf-8")),
+            "label_truncated": False,
+        } for step in steps],
+        "agent_surface_revision": 0, "page_size": 20, "has_more": False,
+        "next_since": next_since, "poll_complete": settled, "step_count_has_more": False,
+        "presentation_cursor_v1": {
+            "version": "presentation_cursor_v1", "run_seq": run_seq, "as_of_seq": next_since,
+        },
+    }
+    if output is not None:
+        raw = _make_response(output).content
+        digest = hashlib.sha256(raw).hexdigest()
+        payload["result"] = {
+            "version": "execution_resource_v1",
+            "ref": f"execution-resource:v1:{RUN_ID}:{run_seq}:agent_result:sha256:{digest}:hmac-sha256:" + "a" * 64,
+            "kind": "agent_result", "media_type": "application/json", "encoding": "utf-8",
+            "size_bytes": len(raw), "sha256": digest, "truncated": False,
+            "inline": {"format": "json", "value": output, "size_bytes": len(raw), "truncated": False},
+            "retrieval": {"href": f"/api/v1/agents/executions/{RUN_ID}/resource/",
+                          "accept_ranges": "bytes", "max_range_bytes": 65536},
+            "receipt": {"kind": "chunked_postgres_v1", "chunk_bytes": 65536},
+        }
+    return payload
+
+
+class _PollingBody(httpx.SyncByteStream, httpx.AsyncByteStream):
+    def __init__(self, content):
+        self.content = content
+        self.closed = False
+
+    def __iter__(self):
+        yield self.content
+
+    async def __aiter__(self):
+        yield self.content
+
+    def close(self):
+        self.closed = True
+
+    async def aclose(self):
+        self.close()
+
+
+class _PollingTransport(httpx.MockTransport):
+    def __init__(self, pages):
+        assert 1 <= len(pages) <= 3
+        self.pages = pages
+        self.requests = []
+        self.bodies = []
+        super().__init__(self._reply)
+
+    def _reply(self, request):
+        index = len(self.requests)
+        assert index < len(self.pages), "Unexpected polling request or history fallback"
+        since, payload = self.pages[index]
+        assert request.method == "GET"
+        assert request.url.scheme == "https" and request.url.host == "sdk.invalid"
+        assert request.url.path == f"/api/v1/agents/executions/{RUN_ID}/status/"
+        assert sorted(request.url.params.multi_items()) == [
+            ("page_size", "20"), ("since", str(since)), ("view", "bounded_v1"),
+        ]
+        assert request.content == b""
+        assert request.headers["X-API-KEY"] == "fly-test"
+        assert request.headers["Accept-Encoding"] == "identity"
+        assert request.headers.get("Idempotency-Key") is None
+        self.requests.append(request)
+        raw = _make_response(payload).content
+        assert len(raw) <= 4096
+        body = _PollingBody(raw)
+        self.bodies.append(body)
+        return httpx.Response(200, headers={"Content-Type": "application/json"},
+                              stream=body, request=request)
+
+    def assert_done(self):
+        assert len(self.requests) == len(self.pages)
+        assert all(body.closed for body in self.bodies)
+
+
+def _polling_client(monkeypatch, transport, *, async_mode=False):
+    """Preserve real SDK/httpx construction, substituting only its transport."""
+    http_name = "AsyncClient" if async_mode else "Client"
+    original = getattr(httpx, http_name)
+
+    def with_transport(*args, **kwargs):
+        kwargs["transport"] = transport
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(httpx, http_name, with_transport)
+    client_type = AsyncAgentClient if async_mode else SyncAgentClient
+    return client_type(api_key="fly-test", base_url="https://sdk.invalid", timeout=1)
 
 
 def _sync_client(mock_http: MagicMock) -> SyncAgentClient:
@@ -386,7 +493,8 @@ class TestSyncRuns:
         assert [run.id for run in runs] == [RUN_ID, "run-second"]
         assert mock_http.request.call_count == 2
         assert mock_http.request.call_args_list[1].kwargs["params"] == {
-            "cursor": "next-page"
+            "cursor": "next-page",
+            "view": "bounded_v1",
         }
 
     def test_cancel_calls_correct_endpoint(self):
@@ -422,54 +530,59 @@ class TestSyncRuns:
             "model": "gpt-5.6",
         }
 
-    def test_wait_returns_on_completed(self):
-        mock_http = MagicMock()
-        mock_http.request.side_effect = [
-            _make_response(_run_payload(status="running")),
-            _make_response(
-                _run_payload(status="completed", agent_result={"answer": "42"})
-            ),
-        ]
-        client = _sync_client(mock_http)
-        with patch("time.sleep"):  # don't actually sleep
-            result = client.runs.wait(42, poll_interval=0.01)
+    def test_wait_returns_on_completed(self, monkeypatch):
+        transport = _PollingTransport([
+            (0, _poll_status_payload()),
+            (0, _poll_status_payload("completed", output={"answer": "42"})),
+        ])
+        with _polling_client(monkeypatch, transport) as client:
+            result = client.runs.wait(RUN_ID, timeout=5, poll_interval=0, run_seq=1)
+        assert isinstance(result, RunStatus)
         assert result.status == ExecutionStatus.COMPLETED
+        assert result.poll_complete and result.is_terminal
         assert result.output == {"answer": "42"}
+        transport.assert_done()
 
-    def test_wait_raises_on_timeout(self):
-        mock_http = MagicMock()
-        mock_http.request.return_value = _make_response(_run_payload(status="running"))
-        client = _sync_client(mock_http)
-        with patch("time.sleep"), patch("time.monotonic", side_effect=[0, 0, 1000]):
-            with pytest.raises(TimeoutError, match="did not complete"):
-                client.runs.wait(42, timeout=1.0, poll_interval=0.01)
+    def test_wait_raises_on_timeout(self, monkeypatch):
+        transport = _PollingTransport([(0, _poll_status_payload())])
+        with _polling_client(monkeypatch, transport) as client:
+            with pytest.raises(TimeoutError, match="observation timed out"):
+                client.runs.wait(RUN_ID, timeout=0, poll_interval=0)
+        transport.assert_done()
 
-    def test_stream_events_yields_new_logs(self):
+    def test_stream_events_yields_new_logs(self, monkeypatch):
         log1 = _log_payload(id=1)
         log2 = _log_payload(id=2, message="second")
-        mock_http = MagicMock()
-        mock_http.request.side_effect = [
-            _make_response(_run_payload(status="running", logs=[log1])),
-            _make_response(_run_payload(status="completed", logs=[log1, log2])),
-        ]
-        client = _sync_client(mock_http)
-        with patch("time.sleep"):
-            events = list(client.runs.stream_events(42, poll_interval=0.01))
-        assert len(events) == 2
+        transport = _PollingTransport([
+            (0, _poll_status_payload(steps=[log1])),
+            (1, _poll_status_payload("completed", since=1, steps=[log2], run_seq=2)),
+        ])
+        events = []
+        with _polling_client(monkeypatch, transport) as client:
+            for event in client.runs.stream_events(RUN_ID, timeout=5, poll_interval=0, run_seq=1):
+                assert len(events) < 2
+                events.append(event)
+        assert all(isinstance(event, RunStep) for event in events)
+        assert [(event.id, event.observed_run_seq) for event in events] == [(1, 1), (2, 2)]
         assert events[0].message == "Called search_web"
         assert events[1].message == "second"
+        transport.assert_done()
 
-    def test_stream_events_no_duplicates(self):
+    def test_stream_events_no_duplicates(self, monkeypatch):
         log1 = _log_payload(id=1)
-        mock_http = MagicMock()
-        mock_http.request.side_effect = [
-            _make_response(_run_payload(status="running", logs=[log1])),
-            _make_response(_run_payload(status="completed", logs=[log1])),
-        ]
-        client = _sync_client(mock_http)
-        with patch("time.sleep"):
-            events = list(client.runs.stream_events(42, poll_interval=0.01))
-        assert len(events) == 1
+        transport = _PollingTransport([
+            (0, _poll_status_payload(steps=[log1])),
+            (1, _poll_status_payload(since=1, run_seq=2)),
+            (1, _poll_status_payload("completed", since=1, run_seq=2)),
+        ])
+        events = []
+        with _polling_client(monkeypatch, transport) as client:
+            for event in client.runs.stream_events(RUN_ID, timeout=5, poll_interval=0, run_seq=1):
+                assert len(events) < 1
+                events.append(event)
+        assert [event.id for event in events] == [1]
+        assert events[0].observed_run_seq == 1
+        transport.assert_done()
 
 
 class TestSyncTools:
@@ -667,44 +780,45 @@ class TestAsyncRuns:
         assert [run.id for run in runs] == [RUN_ID, "run-second"]
         assert mock_http.request.await_count == 2
         assert mock_http.request.await_args_list[1].kwargs["params"] == {
-            "cursor": "next-page"
+            "cursor": "next-page",
+            "view": "bounded_v1",
         }
 
-    async def test_wait_completed(self):
-        mock_http = AsyncMock()
-        mock_http.request.side_effect = [
-            _make_response(_run_payload(status="running")),
-            _make_response(_run_payload(status="completed")),
-        ]
-        client = _async_client(mock_http)
-        with patch("asyncio.sleep", new_callable=AsyncMock):
-            result = await client.runs.wait(42, poll_interval=0.01)
+    async def test_wait_completed(self, monkeypatch):
+        transport = _PollingTransport([
+            (0, _poll_status_payload()),
+            (0, _poll_status_payload("completed")),
+        ])
+        async with _polling_client(monkeypatch, transport, async_mode=True) as client:
+            result = await client.runs.wait(RUN_ID, timeout=5, poll_interval=0, run_seq=1)
+        assert isinstance(result, RunStatus)
         assert result.status == ExecutionStatus.COMPLETED
+        assert result.poll_complete and result.is_terminal
+        transport.assert_done()
 
-    async def test_wait_timeout(self):
-        mock_http = AsyncMock()
-        mock_http.request.return_value = _make_response(_run_payload(status="running"))
-        client = _async_client(mock_http)
-        with patch("asyncio.sleep", new_callable=AsyncMock), patch(
-            "time.monotonic", side_effect=[0, 0, 1000]
-        ):
-            with pytest.raises(TimeoutError):
-                await client.runs.wait(42, timeout=1.0, poll_interval=0.01)
+    async def test_wait_timeout(self, monkeypatch):
+        transport = _PollingTransport([(0, _poll_status_payload())])
+        async with _polling_client(monkeypatch, transport, async_mode=True) as client:
+            with pytest.raises(TimeoutError, match="observation timed out"):
+                await client.runs.wait(RUN_ID, timeout=0, poll_interval=0)
+        transport.assert_done()
 
-    async def test_stream_events(self):
+    async def test_stream_events(self, monkeypatch):
         log1 = _log_payload(id=1)
         log2 = _log_payload(id=2)
-        mock_http = AsyncMock()
-        mock_http.request.side_effect = [
-            _make_response(_run_payload(status="running", logs=[log1])),
-            _make_response(_run_payload(status="completed", logs=[log1, log2])),
-        ]
-        client = _async_client(mock_http)
+        transport = _PollingTransport([
+            (0, _poll_status_payload(steps=[log1])),
+            (1, _poll_status_payload("completed", since=1, steps=[log2], run_seq=2)),
+        ])
         events = []
-        with patch("asyncio.sleep", new_callable=AsyncMock):
-            async for event in client.runs.stream_events(42, poll_interval=0.01):
+        async with _polling_client(monkeypatch, transport, async_mode=True) as client:
+            async for event in client.runs.stream_events(RUN_ID, timeout=5, poll_interval=0, run_seq=1):
+                assert len(events) < 2
                 events.append(event)
-        assert len(events) == 2
+        assert all(isinstance(event, RunStep) for event in events)
+        assert [(event.id, event.observed_run_seq) for event in events] == [(1, 1), (2, 2)]
+        assert [event.message for event in events] == [log1["message"], log2["message"]]
+        transport.assert_done()
 
     async def test_append_message(self):
         mock_http = AsyncMock()

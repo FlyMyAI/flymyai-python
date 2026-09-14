@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from enum import Enum
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, cast
+from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Union, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -78,6 +78,20 @@ class IntegrationConnectionStatus(str, Enum):
     DISABLED = "disabled"
 
 
+class WorkspaceGrantSubjectKind(str, Enum):
+    """Stable owner resource that may receive workspace access."""
+
+    TASK = "task"
+    GROUP = "group"
+
+
+class WorkspaceGrantRole(str, Enum):
+    """Access level granted to an owner task or flat agent group."""
+
+    READ = "read"
+    WRITE = "write"
+
+
 class ExecutionLogType(str, Enum):
     DECLARED_FUNCTIONS = "declared_functions"
     TOOL_CALLED = "tool_called"
@@ -143,19 +157,52 @@ class ExecutionLog(BaseModel):
     data: Any = Field(default_factory=dict)
 
 
+class RunTaskSummary(BaseModel):
+    """Bounded task metadata embedded in an execution-list row."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    uuid: str
+    name: str
+    status: AgentStatus
+    is_public: bool = False
+    available_tool_labels: List[str] = Field(default_factory=list)
+    available_tool_labels_complete: bool = False
+    has_input_schema: bool = False
+
+
+class RunCompilationSummary(BaseModel):
+    """Bounded latest-compilation metadata embedded in an execution row."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: ResourceID
+    status: CompilationStatus
+    created_at: datetime
+    cron_schedule: str = ""
+    timezone: str = ""
+
+
 class Run(BaseModel):
     """A single agent execution (run)."""
 
     id: ResourceID
     user_agent_task: int
     previous_execution: Optional[ResourceID] = None
-    original_prompt: str
+    original_prompt: str = ""
     variables: Dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     updated_at: datetime
     messages: List[Dict[str, Any]] = Field(default_factory=list)
     status: ExecutionStatus = ExecutionStatus.PENDING
     run_seq: int = 0
+    effort: str = ""
+    model: str = ""
+    is_favorite: bool = False
+    task_summary: Optional[RunTaskSummary] = None
+    latest_compilation: Optional[RunCompilationSummary] = None
+    total_price: Any = None
+    total_price_complete: Optional[bool] = None
     error: Optional[str] = None
     agent_result: Optional[Dict[str, Any]] = None
 
@@ -172,11 +219,182 @@ class Run(BaseModel):
         )
 
 
+class RunGoalProgress(BaseModel):
+    """Optional owner-only goal progress; verified is still pending completion."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    # Read models preserve future server vocabulary without promoting it to
+    # execution authority. Run.is_terminal still uses the canonical run status.
+    schema_version: str = Field(alias="schema", min_length=1, max_length=128)
+    goal_id: Optional[str] = Field(
+        pattern=r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+    )
+    status: Optional[str] = Field(min_length=1, max_length=128)
+    review_count: Optional[int] = Field(ge=0, le=64)
+    reason: str = Field(min_length=1, max_length=128)
+    terminal: Optional[bool]
+    run_seq: int = Field(ge=0)
+    revision: Optional[int] = Field(ge=0)
+
+
+class CodingAvailability(BaseModel):
+    """Configured owner admission capability, not a live worker/provider probe."""
+
+    default: Literal["coding"]
+    available: bool
+    code: Optional[str]
+    detail: Optional[str]
+
+
+class RunContinuationCapabilities(BaseModel):
+    append: bool
+    fork: bool
+    resume: bool
+    reason: Optional[str]
+
+
+class RunRuntimeAdmission(BaseModel):
+    runtime: Literal["coding", "legacy", "unavailable"]
+    admission: Literal["pinned", "legacy", "unknown"]
+    continuation: RunContinuationCapabilities
+
+
+class CodingContinuation(BaseModel):
+    """New execution linked to its completed source; observe the returned id."""
+
+    id: ResourceID
+    previous_execution: ResourceID
+    status: ExecutionStatus
+    effort: str
+    model: str
+    run_seq: int = Field(ge=0)
+
+
 class RunDetail(Run):
     """Run with execution logs attached."""
 
     logs: List[ExecutionLog] = Field(default_factory=list)
     user_agent_task_uuid: Optional[str] = None
+    goal: Optional[RunGoalProgress] = None
+    runtime_admission: Optional[RunRuntimeAdmission] = None
+
+
+class RunResourceInline(BaseModel):
+    format: Literal["json", "text"]
+    value: Any
+    size_bytes: int = Field(ge=0, le=4096)
+    truncated: bool
+
+
+class RunResourceRetrieval(BaseModel):
+    href: str
+    accept_ranges: Literal["bytes"]
+    max_range_bytes: Literal[65536]
+
+
+class RunResourceReceipt(BaseModel):
+    kind: Literal["chunked_postgres_v1"]
+    chunk_bytes: Literal[65536]
+
+
+class RunResource(BaseModel):
+    """Owner-authorized result/error reference, bound to run and content digest."""
+
+    version: Literal["execution_resource_v1"]
+    ref: str = Field(max_length=512)
+    kind: Literal["agent_result", "error"]
+    media_type: Literal["application/json", "text/plain"]
+    encoding: Literal["utf-8"]
+    size_bytes: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    inline: RunResourceInline
+    truncated: bool
+    retrieval: RunResourceRetrieval
+    receipt: RunResourceReceipt
+
+
+class RunPresentationCursor(BaseModel):
+    version: Literal["presentation_cursor_v1"]
+    run_seq: int = Field(ge=0)
+    as_of_seq: int = Field(ge=0)
+
+
+class RunStep(BaseModel):
+    """A compact status event. Full log data requires an explicit history read."""
+
+    id: int = Field(ge=1)
+    type: str
+    message: str
+    message_size_bytes: int = Field(ge=0)
+    message_truncated: bool
+    label: str
+    label_size_bytes: int = Field(ge=0)
+    label_truncated: bool
+    # Observation generation, not the generation in which a historical log was written.
+    observed_run_seq: Optional[int] = None
+
+
+class RunStatus(BaseModel):
+    """One bounded observation page, not a fully hydrated execution."""
+
+    view: Literal["bounded_v1"]
+    id: ResourceID
+    status: Literal["pending", "running", "completed", "failed", "cancelled", "archived"]
+    run_seq: int = Field(ge=0)
+    updated_at: datetime
+    is_settled: bool
+    step_count: int = Field(ge=0, le=10000)
+    tool_step_count: int = Field(ge=0, le=10000)
+    last_step_id: Optional[int] = Field(ge=1)
+    new_steps: List[RunStep] = Field(max_length=100)
+    agent_surface_revision: int = Field(ge=0)
+    page_size: int = Field(ge=1, le=100)
+    has_more: bool
+    next_since: int = Field(ge=0)
+    poll_complete: bool
+    step_count_has_more: bool
+    presentation_cursor_v1: RunPresentationCursor
+    goal: Optional[RunGoalProgress] = None
+    runtime_admission: Optional[RunRuntimeAdmission] = None
+    chat_files_revision: Optional[str] = None
+    result: Optional[RunResource] = None
+    error: Optional[RunResource] = None
+
+    @property
+    def is_terminal(self) -> bool:
+        return self.is_settled and self.status in {
+            "completed", "failed", "cancelled", "archived",
+        }
+
+    @property
+    def output(self) -> Any:
+        """Return a complete inline result; large results require read_resource."""
+        if self.result is None:
+            return None
+        if self.result.truncated or self.result.inline.truncated:
+            raise ValueError("Result is a resource; use runs.read_resource() with explicit ranges.")
+        return self.result.inline.value
+
+
+class RunTranscriptPage(BaseModel):
+    """Recent messages in chronological order; next_cursor selects older messages."""
+
+    messages: List[Dict[str, Any]] = Field(max_length=50)
+    has_more: bool
+    next_cursor: Optional[str] = Field(max_length=512)
+    page_size: int = Field(ge=1, le=50)
+    response_bytes_limit: int
+    receipt: Dict[str, Any]
+
+
+class RunLogPage(BaseModel):
+    logs: List[Dict[str, Any]] = Field(max_length=100)
+    has_more: bool
+    next_cursor: Optional[str] = Field(max_length=512)
+    page_size: int = Field(ge=1, le=100)
+    response_bytes_limit: int
+    receipt: Dict[str, Any]
 
 
 class AppendMessageResponse(BaseModel):
@@ -343,6 +561,51 @@ class AgentGroup(BaseModel):
     @property
     def id(self) -> str:
         return self.public_id
+
+
+class WorkspaceGrantSubject(BaseModel):
+    """Stable task or group identity returned by the workspace grant API."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    kind: WorkspaceGrantSubjectKind
+    id: str
+
+
+class WorkspaceGrant(BaseModel):
+    """One active owner workspace grant."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    grant_id: str
+    subject: WorkspaceGrantSubject
+    role: WorkspaceGrantRole
+    created_at: datetime
+
+    @property
+    def id(self) -> str:
+        return self.grant_id
+
+
+class WorkspaceGrantPage(BaseModel):
+    """One keyset-paginated workspace grant page, capped by the backend."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    workspace: str
+    revision: int = Field(ge=0, strict=True)
+    grants: List[WorkspaceGrant] = Field(default_factory=list)
+    next_cursor: Optional[str] = None
+
+
+class WorkspaceGrantMutation(BaseModel):
+    """Compact acknowledgement for a grant upsert or revocation."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    grant_id: str
+    revision: int = Field(ge=0, strict=True)
+    no_change: bool = False
 
 
 class AvailableTool(BaseModel):
