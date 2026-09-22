@@ -13,8 +13,8 @@ unreviewed adapters/operations fail closed until isolation and resource caps pas
 
 Scope tools and read/write semantics on the server; enforce expiry, call/spend
 limits, consenting-payer billing, per-call metadata audit and immediate denial of new calls
-after revoke. Already admitted provider operations may finish. Teams need their
-own human membership model; agent groups are not human teams. Read-only access
+after revoke. Already admitted provider operations may finish. Human identity uses existing User.is_team / TeamMembership with explicit MCP
+consent; agent groups are not human teams. Read-only access
 still exposes owner data. Never trust tool names or remote readOnlyHint alone.
 
 Required conformance: owner shares, authenticated recipient calls an allowed
@@ -29,25 +29,38 @@ retention. No N+1, full-account hydration or unbounded schema/payload logs.
 The MCP sharing scaffold flag defaults off. Do not expose sharing tools/routes
 or claim availability in user docs before the runtime contract is implemented.
 
+## Team MCP v1 decision (Denis, 2026-09-22, task 15)
 
-## Team-first MCP sharing (stage 2, 2026-09-22)
+Reuse existing `User.is_team` / `TeamMembership` for human identity. MCP policy is
+an explicit overlay; legacy membership alone never grants shared MCP access.
+Invitations require verified personal login, explicit consent to the existing
+team project/history scope, and owner approval. Removing a member removes that
+legacy membership too, with explicit consent. AgentGroup and multiagent Agent
+Teams remain separate products. Link invitations join this same human team;
+isolated guest-only grants are deferred, not silently approximated.
 
-The primary v1 flow is a human team: invite people, explicitly share a connection,
-use one team MCP URL with distinct member/device tokens, inspect usage and revoke.
-Guest links are supplementary scoped grants, never implicit team membership.
-"Shareable by default" requires an adapter sharing design; new connections remain
-private until their credential owner consents to exact team actions.
+All MCP types are shareable by default as a design requirement, never public by
+default. New connections remain private. Runtime approval requires exact owner
+account, reviewed actions, live expiry/revoke checks, bounded resources and
+conformance tests. Current pilot permits only reviewed Linear issue summaries,
+Notion search and Composio Gmail summaries. Unknown actions and delegated writes
+fail before provider dispatch. Keep the full type inventory and reasoned
+`shareable: false` exceptions in the catalog invariant.
 
-Human teams are not AgentGroup or multiagent Agent Teams. Legacy users.User teams
-and TeamMembership already exist and carry project/data permissions. Do not
-reuse, migrate or widen those privileges implicitly when adding MCP membership.
-Keep actor, credential owner and consenting billing payer distinct. Offboarding
-revokes devices and the departing person's delegations; joining again must not
-reactivate old credentials. Ownership transfer requires the recipient's explicit
-acceptance of future billing, and never transfers personal provider credentials.
+Team wallet pays MCP runtime; actor, credential owner and payer are distinct.
+Defaults: 7 days (maximum 30), invitation 24h, 500 calls/$5 monthly, audit 30 days.
+Roles: owner/admin/member/viewer. Viewer has no device/runtime authority. Device
+secrets are shown once; owner credentials stay server-side. Member offboarding
+revokes personal delegations and devices; rejoin never reactivates old tokens.
+Ownership transfer needs recipient acceptance of billing and retains the team
+wallet. Personal credentials do not transfer. Existing in-flight charges keep
+their payer and settle exactly once. MCP usage and an agent's own LLM cost are
+separate charges.
 
-Conformance must exercise team roles, private/shared visibility, the same MCP URL
-with two member tokens, device revoke, member removal/rejoin, transfer during a
-billable call, bounded usage/audit pagination, and no inherited project authority.
-A read-only pilot is an intermediate slice, not evidence of complete team v1 or
-allowed-write support. Preserve the complete MCP type inventory and exceptions.
+Flags default off. No old API/MCP behavior or schemas change. Safety maintenance
+may refund existing sharing holds and purge expired sharing data while dispatch
+is off; it cannot create new calls or send invitations. Test account/session
+swaps, two device tokens at one URL, live revoke, role/expiry changes, transfer
+during a call, concurrent quotas, duplicate/unknown outcomes, output projections,
+secret-free logs and finite retention. Pilot write tests prove denial, not write
+support. Measure SQL counts, CPU, RSS and response bytes; do not hydrate accounts.

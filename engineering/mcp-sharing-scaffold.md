@@ -1,36 +1,51 @@
-# MCP sharing preparation - not released
-
-Sharing is a required design capability for every MCP surface, not automatic
-access to a connection. Runtime sharing is disabled and unimplemented here.
-
-The planned owner proxy keeps connection credentials in the backend. A recipient
-uses a scoped token with a distinct audience. Existing API keys, REST
-contracts, MCP tool lists, SDK namespaces and user routes keep their semantics.
-The first pilot proposes verified read operations. Delegated writes and unknown
-custom-server semantics require separate approval and conformance coverage.
-
-New connectors must document credentials, actor/owner/billing identities, exact
-action scope, expiry/revoke, budgets, audit and resource limits. Record explicit
-`shareable: false` with a reason for exceptions. Test permitted read/write in a
-fixture when supported; the read-only pilot must reject writes before dispatch.
-
-Current preparation adds no delegated execution, invitation delivery, tokens,
-billing, persistent models or user-visible sharing UI. No merge/deployment is
-authorized by this note. The full proposal, mockup and evidence are sibling
-workspace artifacts MCP_SHARING_PLAN.md, MCP_SHARING_MOCKUPS.html and
-MCP_SHARING_REPORT_2.md. This note is intentionally outside published guides.
+# MCP sharing v1 - disabled pilot
 
 
-## Team-first v1
+Reuse existing `User.is_team` / `TeamMembership` for human identity. MCP policy is
+an explicit overlay; legacy membership alone never grants shared MCP access.
+Invitations require verified personal login, explicit consent to the existing
+team project/history scope, and owner approval. Removing a member removes that
+legacy membership too, with explicit consent. AgentGroup and multiagent Agent
+Teams remain separate products. Link invitations join this same human team;
+isolated guest-only grants are deferred, not silently approximated.
 
-The main flow is a team with one MCP URL, private/shared connections and separate
-member/device tokens. Guest links are supplementary. Reviewed fixture writes
-belong to full v1; verified reads are its first implementation slice. Keep actor,
-credential owner and consenting payer distinct. Offboarding revokes device
-tokens and personal delegations; transfer requires the new payer to accept.
+All MCP types are shareable by default as a design requirement, never public by
+default. New connections remain private. Runtime approval requires exact owner
+account, reviewed actions, live expiry/revoke checks, bounded resources and
+conformance tests. Current pilot permits only reviewed Linear issue summaries,
+Notion search and Composio Gmail summaries. Unknown actions and delegated writes
+fail before provider dispatch. Keep the full type inventory and reasoned
+`shareable: false` exceptions in the catalog invariant.
 
-Legacy human teams already exist in users.TeamMembership and grant project/data
-access. Their relationship to the MCP workspace awaits Denis's explicit choice;
-no implicit inheritance of those permissions is allowed. AgentGroup and
-multiagent Agent Teams are separate concepts. No persistent team runtime has
-been implemented in this preparation. New functionality remains disabled.
+Team wallet pays MCP runtime; actor, credential owner and payer are distinct.
+Defaults: 7 days (maximum 30), invitation 24h, 500 calls/$5 monthly, audit 30 days.
+Roles: owner/admin/member/viewer. Viewer has no device/runtime authority. Device
+secrets are shown once; owner credentials stay server-side. Member offboarding
+revokes personal delegations and devices; rejoin never reactivates old tokens.
+Ownership transfer needs recipient acceptance of billing and retains the team
+wallet. Personal credentials do not transfer. Existing in-flight charges keep
+their payer and settle exactly once. MCP usage and an agent's own LLM cost are
+separate charges.
+
+Flags default off. No old API/MCP behavior or schemas change. Safety maintenance
+may refund existing sharing holds and purge expired sharing data while dispatch
+is off; it cannot create new calls or send invitations. Test account/session
+swaps, two device tokens at one URL, live revoke, role/expiry changes, transfer
+during a call, concurrent quotas, duplicate/unknown outcomes, output projections,
+secret-free logs and finite retention. Pilot write tests prove denial, not write
+support. Measure SQL counts, CPU, RSS and response bytes; do not hydrate accounts.
+
+Implementation: backend `apps/mcp_sharing`, Agents MCP `teamSharing.ts` and
+`teamManagement.ts`, frontend `/mcp-teams`, Python sync/async `client.teams`.
+Migration lives in independent app `mcp_sharing/0002_team_workspace`, not the
+conflicting agents0147 chain. Media endpoint and its eight tools are unchanged;
+media delegation remains a reviewed-adapter gate. See backend
+`docs/mcp-team-api.md` for the REST/device protocol and
+`docs/agents/mcp_sharing_developer_protocol.md` for adding/testing MCP types.
+
+No deployment or public availability is implied. Existing MCP OAuth/team API
+keys cannot manage membership or replace a device token. No copied owner keys
+in client configurations. Metadata pages 25, tools pages 20 connections, request
+64KiB, response 256 KiB, provider deadline 30s, edge 35s. Eight runtime requests per
+process, two active calls/member, eight/team, 100 protocol requests/minute/team.
+There are no unbounded sessions, result caches or automatic mutation retries.

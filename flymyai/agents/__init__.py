@@ -49,6 +49,15 @@ from flymyai.agents._types import (
     Tool,
 )
 
+from flymyai.agents._mcp_sharing import (
+    McpTeam,
+    McpTeamPage,
+    McpTeamConnection,
+    McpTeamDevice,
+    McpTeamInvite,
+    McpTeamError,
+)
+
 AgentClient = SyncAgentClient
 
 __all__ = [
@@ -56,6 +65,12 @@ __all__ = [
     "AgentClient",
     "SyncAgentClient",
     "AsyncAgentClient",
+    "McpTeam",
+    "McpTeamPage",
+    "McpTeamConnection",
+    "McpTeamDevice",
+    "McpTeamInvite",
+    "McpTeamError",
     # Exceptions
     "FlyMyAIAgentError",
     "McpResourceSetStaleRevisionError",
