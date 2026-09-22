@@ -1,0 +1,35 @@
+name: Agents SDK contracts
+
+on:
+  push:
+    branches: ['feat/**']
+    paths:
+      - 'flymyai/agents/**'
+      - 'tests/test_subagent_limits.py'
+      - 'tests/test_agents_variables.py'
+      - '.github/workflows/agents-contract.yml'
+  pull_request:
+    paths:
+      - 'flymyai/agents/**'
+      - 'tests/test_subagent_limits.py'
+      - 'tests/test_agents_variables.py'
+      - '.github/workflows/agents-contract.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: python -m pip install . pytest
+      # All requests in these tests use MockTransport. No API credentials.
+      - run: python -m pytest tests/test_subagent_limits.py tests/test_agents_variables.py -q
