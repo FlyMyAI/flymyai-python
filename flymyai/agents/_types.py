@@ -151,6 +151,7 @@ class Run(BaseModel):
     previous_execution: Optional[ResourceID] = None
     original_prompt: str
     variables: Dict[str, Any] = Field(default_factory=dict)
+    subagent_limits: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
     messages: List[Dict[str, Any]] = Field(default_factory=list)

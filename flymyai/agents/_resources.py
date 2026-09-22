@@ -658,6 +658,7 @@ class Agents:
         *,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        subagent_limits: Optional[Dict[str, Any]] = None,
     ) -> RunDetail:
         """Create an execution and start the agent loop.
 
@@ -671,12 +672,18 @@ class Agents:
         variables:
             Runtime values to substitute into the ``goal`` Jinja2 template.
             Must match the agent's ``input_schema`` when one is set.
+        subagent_limits:
+            Owner limits pinned for this run: cap_usd (default 3, zero disables
+            delegation), max_children (1-6), max_parallel (1-3). The USD cap
+            covers helpers and their tools; ordinary lead charges are separate.
         Returns
         -------
         RunDetail
             Newly created run (status will be ``pending``/``running``).
         """
         body: Dict[str, Any] = {"variables": variables or {}}
+        if subagent_limits is not None:
+            body["subagent_limits"] = subagent_limits
         data = self._c._request(
             "POST",
             f"/api/v1/agents/tasks/{agent_id}/run-loop/",
@@ -1567,6 +1574,7 @@ class Compilations:
         *,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        subagent_limits: Optional[Dict[str, Any]] = None,
         external_user_id: Optional[str] = None,
         deployment_id: Optional[str] = None,
         connections: Optional[RuntimeConnections] = None,
@@ -1599,6 +1607,8 @@ class Compilations:
             resource_set_revision=resource_set_revision,
         )
         body: Dict[str, Any] = {}
+        if subagent_limits is not None:
+            body["subagent_limits"] = subagent_limits
         if variables:
             body["variables"] = variables
         if external_user_id is not None:
@@ -1626,6 +1636,7 @@ class Compilations:
         *,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        subagent_limits: Optional[Dict[str, Any]] = None,
         external_user_id: Optional[str] = None,
         deployment_id: Optional[str] = None,
         connections: Optional[RuntimeConnections] = None,
@@ -1642,6 +1653,7 @@ class Compilations:
         run = self.run_instruction(
             compilation_id,
             variables=variables,
+            subagent_limits=subagent_limits,
             external_user_id=external_user_id,
             deployment_id=deployment_id,
             connections=connections,
@@ -2055,8 +2067,11 @@ class AsyncAgents:
         *,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        subagent_limits: Optional[Dict[str, Any]] = None,
     ) -> RunDetail:
         body: Dict[str, Any] = {"variables": variables or {}}
+        if subagent_limits is not None:
+            body["subagent_limits"] = subagent_limits
         data = await self._c._request(
             "POST",
             f"/api/v1/agents/tasks/{agent_id}/run-loop/",
@@ -2801,6 +2816,7 @@ class AsyncCompilations:
         *,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        subagent_limits: Optional[Dict[str, Any]] = None,
         external_user_id: Optional[str] = None,
         deployment_id: Optional[str] = None,
         connections: Optional[RuntimeConnections] = None,
@@ -2828,6 +2844,8 @@ class AsyncCompilations:
             resource_set_revision=resource_set_revision,
         )
         body: Dict[str, Any] = {}
+        if subagent_limits is not None:
+            body["subagent_limits"] = subagent_limits
         if variables:
             body["variables"] = variables
         if external_user_id is not None:
@@ -2855,6 +2873,7 @@ class AsyncCompilations:
         *,
         idempotency_key: str,
         variables: Optional[Dict[str, Any]] = None,
+        subagent_limits: Optional[Dict[str, Any]] = None,
         external_user_id: Optional[str] = None,
         deployment_id: Optional[str] = None,
         connections: Optional[RuntimeConnections] = None,
@@ -2870,6 +2889,7 @@ class AsyncCompilations:
         run = await self.run_instruction(
             compilation_id,
             variables=variables,
+            subagent_limits=subagent_limits,
             external_user_id=external_user_id,
             deployment_id=deployment_id,
             connections=connections,
