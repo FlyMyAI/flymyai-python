@@ -29,12 +29,10 @@ def test_bounded_pages_query_parameters_and_personal_auth():
         assert request.headers["X-API-KEY"] == "personal-key"
         assert request.url.params["group"] == "action"
         assert request.url.params["cursor"] == "linear_list_issues"
-        return response(
-            {
-                "items": [{"key": "notion_search", "spent": "0.001", "calls": 1}],
-                "next_cursor": None,
-            }
-        )
+        return response({
+            "items": [{"key": "notion_search", "spent": "0.001", "calls": 1}],
+            "next_cursor": None,
+        })
 
     with client_with(handler) as client:
         page = client.teams.usage(uuid4(), group="action", cursor="linear_list_issues")
@@ -47,16 +45,14 @@ def test_device_is_one_time_secret_no_automatic_retry():
     def handler(request):
         seen.append(request)
         assert request.headers["Idempotency-Key"] == "device-operation"
-        return response(
-            {
-                "id": str(uuid4()),
-                "member_id": str(uuid4()),
-                "label": "Laptop",
-                "prefix": "fmst_abc",
-                "expires_at": "2026-09-29T00:00:00Z",
-                "token": "fmst_test-secret",
-            }
-        )
+        return response({
+            "id": str(uuid4()),
+            "member_id": str(uuid4()),
+            "label": "Laptop",
+            "prefix": "fmst_abc",
+            "expires_at": "2026-09-29T00:00:00Z",
+            "token": "fmst_test-secret",
+        })
 
     with client_with(handler) as client:
         device = client.teams.create_device(

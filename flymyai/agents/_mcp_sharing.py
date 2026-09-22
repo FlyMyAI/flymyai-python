@@ -1,4 +1,5 @@
 """Optional team management. Bounded pages, no automatic retries or secret cache."""
+
 from __future__ import annotations
 
 import json
@@ -119,7 +120,8 @@ def _options(
             or any(ord(c) < 33 or ord(c) > 126 for c in key)
         ):
             raise ValueError(
-                "idempotency_key must be 8-128 printable ASCII characters without spaces"
+                "idempotency_key must be 8-128 printable ASCII characters without"
+                " spaces"
             )
         headers["Idempotency-Key"] = key
     raw = json.dumps(data, separators=(",", ":")).encode() if data is not None else None
