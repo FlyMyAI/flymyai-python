@@ -4,7 +4,7 @@ Sharing is a required design capability for every MCP surface, not automatic
 access to a connection. Runtime sharing is disabled and unimplemented here.
 
 The planned owner proxy keeps connection credentials in the backend. A recipient
-uses a grant-scoped token with a distinct audience. Existing API keys, REST
+uses a scoped token with a distinct audience. Existing API keys, REST
 contracts, MCP tool lists, SDK namespaces and user routes keep their semantics.
 The first pilot proposes verified read operations. Delegated writes and unknown
 custom-server semantics require separate approval and conformance coverage.
@@ -18,4 +18,19 @@ Current preparation adds no delegated execution, invitation delivery, tokens,
 billing, persistent models or user-visible sharing UI. No merge/deployment is
 authorized by this note. The full proposal, mockup and evidence are sibling
 workspace artifacts MCP_SHARING_PLAN.md, MCP_SHARING_MOCKUPS.html and
-MCP_SHARING_REPORT_1.md. This note is intentionally outside published guides.
+MCP_SHARING_REPORT_2.md. This note is intentionally outside published guides.
+
+
+## Team-first v1
+
+The main flow is a team with one MCP URL, private/shared connections and separate
+member/device tokens. Guest links are supplementary. Reviewed fixture writes
+belong to full v1; verified reads are its first implementation slice. Keep actor,
+credential owner and consenting payer distinct. Offboarding revokes device
+tokens and personal delegations; transfer requires the new payer to accept.
+
+Legacy human teams already exist in users.TeamMembership and grant project/data
+access. Their relationship to the MCP workspace awaits Denis's explicit choice;
+no implicit inheritance of those permissions is allowed. AgentGroup and
+multiagent Agent Teams are separate concepts. No persistent team runtime has
+been implemented in this preparation. New functionality remains disabled.

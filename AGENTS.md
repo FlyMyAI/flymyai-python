@@ -12,7 +12,7 @@ say `shareable: false` and explain why. A design decision is not runtime approva
 unreviewed adapters/operations fail closed until isolation and resource caps pass.
 
 Scope tools and read/write semantics on the server; enforce expiry, call/spend
-limits, owner billing, per-call metadata audit and immediate denial of new calls
+limits, consenting-payer billing, per-call metadata audit and immediate denial of new calls
 after revoke. Already admitted provider operations may finish. Teams need their
 own human membership model; agent groups are not human teams. Read-only access
 still exposes owner data. Never trust tool names or remote readOnlyHint alone.
@@ -28,3 +28,26 @@ Bound SQL counts, input/output bytes, CPU, heap, sessions, caches and audit
 retention. No N+1, full-account hydration or unbounded schema/payload logs.
 The MCP sharing scaffold flag defaults off. Do not expose sharing tools/routes
 or claim availability in user docs before the runtime contract is implemented.
+
+
+## Team-first MCP sharing (stage 2, 2026-09-22)
+
+The primary v1 flow is a human team: invite people, explicitly share a connection,
+use one team MCP URL with distinct member/device tokens, inspect usage and revoke.
+Guest links are supplementary scoped grants, never implicit team membership.
+"Shareable by default" requires an adapter sharing design; new connections remain
+private until their credential owner consents to exact team actions.
+
+Human teams are not AgentGroup or multiagent Agent Teams. Legacy users.User teams
+and TeamMembership already exist and carry project/data permissions. Do not
+reuse, migrate or widen those privileges implicitly when adding MCP membership.
+Keep actor, credential owner and consenting billing payer distinct. Offboarding
+revokes devices and the departing person's delegations; joining again must not
+reactivate old credentials. Ownership transfer requires the recipient's explicit
+acceptance of future billing, and never transfers personal provider credentials.
+
+Conformance must exercise team roles, private/shared visibility, the same MCP URL
+with two member tokens, device revoke, member removal/rejoin, transfer during a
+billable call, bounded usage/audit pagination, and no inherited project authority.
+A read-only pilot is an intermediate slice, not evidence of complete team v1 or
+allowed-write support. Preserve the complete MCP type inventory and exceptions.
