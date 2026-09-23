@@ -42,3 +42,29 @@ token. Initialize and retain its `Mcp-Session-Id`. JSON-RPC ids must be unique
 within the session; explicit Idempotency-Key covers reconnect/retry. An unknown
 outcome is terminal for automatic retry. Owner revoke/expiry is checked on each
 request and before delivering a result.
+
+
+## Personal MCP sharing decision (Denis, 2026-09-23)
+
+The primary UI is one MCP entry with My MCPs, Shared by me and Shared with me.
+Personal sharing is an exact-connection grant to a verified email and does not
+create TeamMembership or grant project/history access. Sending the addressed
+invitation is the owner's approval; the verified recipient may register first
+and accept without another owner approval. The credential owner's wallet pays.
+Team sharing remains a separate existing User.is_team / TeamMembership flow with
+explicit project/history consent, owner approval and the team wallet. This
+supersedes the earlier deferral of isolated personal grants.
+
+All MCP types remain shareable by default as a design requirement, never public
+by default. Reviewed reads only; no new write or generic proxy adapters. Scope
+personal device tokens to one grant; adding another grant must not expand old
+tokens. Revocation and renewed source consent invalidate old devices. Email
+links carry a public UUID only; authorization always requires the verified
+addressed account. Browser return intent contains no email or bearer secret and
+expires in 24 hours. Do not persist legacy bearer invitation fragments.
+
+Test registration continuation, wrong/unverified email, two aliases of one MCP,
+one-grant/device revoke, source reconnect, account/session swap, exact device
+audience, owner-pays idempotency and limits, bounded SQL/bytes/RSS, retention and
+flag-off behavior. Personal recipients must not consume the owner's control
+budget or another recipient's protocol budget. Preserve legacy APIs and teams.

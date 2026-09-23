@@ -118,3 +118,7 @@ __all__ = [
     "SchemaSuggestion",
     "Tool",
 ]
+
+from ._mcp_personal import McpShare, McpSharePerson, McpPersonalInvitation
+
+__all__ += ["McpShare", "McpSharePerson", "McpPersonalInvitation"]
