@@ -2,8 +2,34 @@ import httpx
 
 from flymyai.core.client import FlyMyAI, AsyncFlyMyAI, FlyMyAIM1, AsyncFlymyAIM1
 from flymyai.core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
+from flymyai.agents import (
+    AgentGroup,
+    AgentClient,
+    AsyncAgentClient,
+    ConnectionBinding,
+    ExternalPrincipal,
+    ExternalPrincipalStatus,
+    FlyMyAIAgentError,
+    IntegrationConnection,
+    IntegrationConnectionStatus,
+    McpAccessMode,
+    McpResourceSet,
+    McpResourceSetAuthorityType,
+    McpResourceSetManagementMode,
+    McpResourceSetMember,
+    McpResourceSetMemberInput,
+    McpResourceSetStatus,
+    McpResourceSetSummary,
+    McpResourceSetStaleRevisionError,
+    McpResourceType,
+    RuntimeConnections,
+    SchemaSuggestion,
+    SuggestSchemaError,
+    VariablesValidationError,
+)
 
 __all__ = [
+    # Prediction clients
     "run",
     "httpx",
     "async_run",
@@ -11,6 +37,30 @@ __all__ = [
     "AsyncFlyMyAI",
     "FlyMyAIExceptionGroup",
     "FlyMyAIPredictException",
+    # Agent clients
+    "AgentClient",
+    "AsyncAgentClient",
+    "ConnectionBinding",
+    "ExternalPrincipal",
+    "ExternalPrincipalStatus",
+    "FlyMyAIAgentError",
+    "IntegrationConnection",
+    "IntegrationConnectionStatus",
+    "McpAccessMode",
+    "McpResourceSetManagementMode",
+    "McpResourceSetAuthorityType",
+    "McpResourceSetStaleRevisionError",
+    "VariablesValidationError",
+    "SuggestSchemaError",
+    "SchemaSuggestion",
+    "AgentGroup",
+    "McpResourceSet",
+    "McpResourceSetMember",
+    "McpResourceSetMemberInput",
+    "McpResourceSetStatus",
+    "McpResourceSetSummary",
+    "McpResourceType",
+    "RuntimeConnections",
 ]
 
 

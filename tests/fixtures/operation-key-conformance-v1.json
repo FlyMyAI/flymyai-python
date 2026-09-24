@@ -1,0 +1,78 @@
+{
+  "accepted": [
+    {
+      "name": "opaque-ascii-punctuation",
+      "value": "logical call !#$%&'()*+,/;<=>?@[]^`{|}~"
+    },
+    {
+      "name": "ascii-255-code-points",
+      "repeat": {
+        "value": "x",
+        "count": 255
+      }
+    }
+  ],
+  "rejected": [
+    {
+      "name": "empty",
+      "value": ""
+    },
+    {
+      "name": "blank",
+      "value": "   "
+    },
+    {
+      "name": "leading-space",
+      "value": " logical-call"
+    },
+    {
+      "name": "trailing-space",
+      "value": "logical-call "
+    },
+    {
+      "name": "ascii-256-code-points",
+      "repeat": {
+        "value": "x",
+        "count": 256
+      }
+    },
+    {
+      "name": "astral-256-code-points",
+      "repeat": {
+        "value": "\ud83d\ude00",
+        "count": 256
+      }
+    },
+    {
+      "name": "newline-control",
+      "value": "line\nbreak"
+    },
+    {
+      "name": "delete-control",
+      "value": "delete\u007fcharacter"
+    },
+    {
+      "name": "zero-width-space",
+      "value": "zero\u200bwidth"
+    },
+    {
+      "name": "non-breaking-space",
+      "value": "non\u00a0breaking-space"
+    },
+    {
+      "name": "accented-unicode",
+      "value": "caf\u00e9-operation"
+    },
+    {
+      "name": "cyrillic-unicode",
+      "value": "\u0437\u0430\u043f\u0443\u0441\u043a-42"
+    },
+    {
+      "name": "astral-255-code-points",
+      "repeat": {
+        "value": "\ud83d\ude00",
+        "count": 255
+      }
+    }
+  ]
+}
