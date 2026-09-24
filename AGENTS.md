@@ -72,7 +72,9 @@ The primary UI is one MCP entry with My MCPs, Shared by me and Shared with me.
 Personal sharing is an exact-connection grant to a verified email and does not
 create TeamMembership or grant project/history access. Sending the addressed
 invitation is the owner's approval; the verified recipient may register first
-and accept without another owner approval. The credential owner's wallet pays.
+and accept without another owner approval. The verified recipient consents to and pays FlyMy execution from their own
+wallet. Credential owner, caller and payer are separate. Never fall back to the
+owner's wallet; provider charges remain separate.
 Team sharing remains a separate existing User.is_team / TeamMembership flow with
 explicit project/history consent, owner approval and the team wallet. This
 supersedes the earlier deferral of isolated personal grants.
@@ -87,6 +89,6 @@ expires in 24 hours. Do not persist legacy bearer invitation fragments.
 
 Test registration continuation, wrong/unverified email, two aliases of one MCP,
 one-grant/device revoke, source reconnect, account/session swap, exact device
-audience, owner-pays idempotency and limits, bounded SQL/bytes/RSS, retention and
+audience, recipient-pays reserve/settle/refund, idempotency and limits, bounded SQL/bytes/RSS, retention and
 flag-off behavior. Personal recipients must not consume the owner's control
 budget or another recipient's protocol budget. Preserve legacy APIs and teams.

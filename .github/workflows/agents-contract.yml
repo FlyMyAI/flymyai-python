@@ -5,14 +5,16 @@ on:
     branches: ['feat/**']
     paths:
       - 'flymyai/agents/**'
-      - 'tests/test_subagent_limits.py'
-      - 'tests/test_agents_variables.py'
+      - 'tests/test_*agent*.py'
+      - 'tests/test_mcp_*.py'
+      - 'tests/test_browser_use.py'
       - '.github/workflows/agents-contract.yml'
   pull_request:
     paths:
       - 'flymyai/agents/**'
-      - 'tests/test_subagent_limits.py'
-      - 'tests/test_agents_variables.py'
+      - 'tests/test_*agent*.py'
+      - 'tests/test_mcp_*.py'
+      - 'tests/test_browser_use.py'
       - '.github/workflows/agents-contract.yml'
 
 permissions:
@@ -30,6 +32,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-      - run: python -m pip install . pytest
-      # All requests in these tests use MockTransport. No API credentials.
-      - run: python -m pytest tests/test_subagent_limits.py tests/test_agents_variables.py -q
+      - run: python -m pip install . pytest pytest-asyncio respx
+      # Offline HTTP transports only. Never use production credentials here.
+      - run: >-
+          python -m pytest tests/test_agent_client.py tests/test_agents_variables.py
+          tests/test_agents_embedded_context.py tests/test_browser_use.py
+          tests/test_subagent_limits.py tests/test_mcp_resource_scopes.py
+          tests/test_mcp_personal.py tests/test_mcp_teams.py -q

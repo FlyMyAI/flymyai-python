@@ -87,7 +87,10 @@ class ServerSentEvent:
 
     @override
     def __repr__(self) -> str:
-        return f"ServerSentEvent(event={self.event}, data={self.data}, id={self.id}, retry={self.retry})"
+        return (
+            f"ServerSentEvent(event={self.event}, data={self.data}, id={self.id},"
+            f" retry={self.retry})"
+        )
 
 
 class SSEDecoder:
