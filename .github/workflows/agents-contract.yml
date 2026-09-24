@@ -1,20 +1,20 @@
-name: Agents SDK contracts
+name: SDK offline contracts
 
 on:
   push:
     branches: ['feat/**']
     paths:
-      - 'flymyai/agents/**'
-      - 'tests/test_*agent*.py'
-      - 'tests/test_mcp_*.py'
-      - 'tests/test_browser_use.py'
+      - 'flymyai/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'setup.py'
       - '.github/workflows/agents-contract.yml'
   pull_request:
     paths:
-      - 'flymyai/agents/**'
-      - 'tests/test_*agent*.py'
-      - 'tests/test_mcp_*.py'
-      - 'tests/test_browser_use.py'
+      - 'flymyai/**'
+      - 'tests/**'
+      - 'pyproject.toml'
+      - 'setup.py'
       - '.github/workflows/agents-contract.yml'
 
 permissions:
@@ -26,7 +26,7 @@ jobs:
     timeout-minutes: 10
     strategy:
       matrix:
-        python-version: ['3.8', '3.12']
+          python-version: ['3.8', '3.12', '3.13']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -35,7 +35,16 @@ jobs:
       - run: python -m pip install . pytest pytest-asyncio respx
       # Offline HTTP transports only. Never use production credentials here.
       - run: >-
-          python -m pytest tests/test_agent_client.py tests/test_agents_variables.py
-          tests/test_agents_embedded_context.py tests/test_browser_use.py
-          tests/test_subagent_limits.py tests/test_mcp_resource_scopes.py
-          tests/test_mcp_personal.py tests/test_mcp_teams.py -q
+          python -m pytest tests --ignore=tests/test_async_inference.py
+          --ignore=tests/test_flymyai_client.py --ignore=tests/test_stream.py -q
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: python -m pip install black==23.12.1 flake8==7.3.0
+      - run: python -m black --preview --check .
+      - run: python -m flake8 --max-line-length=88 flymyai/agents/_mcp_personal.py tests/test_mcp_personal.py
