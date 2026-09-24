@@ -103,3 +103,13 @@ __all__ = [
     "SchemaSuggestion",
     "Tool",
 ]
+
+from flymyai.agents._mcp_sharing import (
+    McpTeam, McpTeamPage, McpTeamConnection, McpTeamDevice, McpTeamInvite, McpTeamError,
+)
+from flymyai.agents._mcp_personal import McpShare, McpSharePerson, McpPersonalInvitation
+
+__all__ += [
+    "McpTeam", "McpTeamPage", "McpTeamConnection", "McpTeamDevice", "McpTeamInvite", "McpTeamError",
+    "McpShare", "McpSharePerson", "McpPersonalInvitation",
+]
