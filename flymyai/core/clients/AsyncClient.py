@@ -51,7 +51,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
                 openapi_schema - dict with openapi;
         """
         history, response = await aretryable_callback(
-            lambda: self._openapi_schema(),
+            lambda: self._openapi_schema(client_info=self.amend_client_info(model)),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
