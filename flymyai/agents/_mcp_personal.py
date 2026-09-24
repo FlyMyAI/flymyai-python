@@ -112,7 +112,9 @@ class McpShares:
     def accept(self, invitation_id: Any, *, accept_billing: bool) -> McpShare:
         return McpShare.model_validate(
             self._transport._request(
-                "POST", _path(invitation_id, "accept/", invitation=True), {"accept_billing": accept_billing}
+                "POST",
+                _path(invitation_id, "accept/", invitation=True),
+                {"accept_billing": accept_billing},
             )
         )
 
@@ -228,7 +230,9 @@ class AsyncMcpShares:
     async def accept(self, invitation_id: Any, *, accept_billing: bool) -> McpShare:
         return McpShare.model_validate(
             await self._transport._request(
-                "POST", _path(invitation_id, "accept/", invitation=True), {"accept_billing": accept_billing}
+                "POST",
+                _path(invitation_id, "accept/", invitation=True),
+                {"accept_billing": accept_billing},
             )
         )
 
