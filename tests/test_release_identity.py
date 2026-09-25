@@ -6,7 +6,7 @@ from pathlib import Path
 import tomli
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "1.2.0rc5"
+EXPECTED_VERSION = "1.2.0rc7"
 
 
 def test_python_sdk_build_metadata_uses_one_unreleased_rc_identity():
