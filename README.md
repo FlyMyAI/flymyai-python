@@ -533,7 +533,7 @@ async def main():
 asyncio.run(main())
 ```
 
-## Personal MCP sharing (UAT candidate)
+## Personal MCP sharing
 
 The optional `AgentClient.shares` and `AsyncAgentClient.shares` clients manage
 email invitations, exact-connection grants, device tokens and revocation.
@@ -542,10 +542,11 @@ A recipient must verify the addressed email and explicitly pass
 wallet, without owner-wallet fallback. Provider charges remain with the connected
 account; existing team MCP calls continue using the team wallet.
 
-The backend and Agents MCP require the independent
-`MCP_PERSONAL_SHARING_ENABLED` gate, off by default. These candidate APIs are not
-available in production. Existing inference clients and resource-set/agent
-contracts remain available.
+Personal sharing is live on FlyMy.AI production (backend and Agents MCP) since
+2026-09-25; see the [sharing guide](https://docs.flymy.ai/agents/guides/mcp-personal-sharing/).
+Self-hosted deployments keep it behind the independent
+`MCP_PERSONAL_SHARING_ENABLED` gate, off by default. Existing inference clients
+and resource-set/agent contracts remain available.
 
 ## Advanced agent helpers
 
