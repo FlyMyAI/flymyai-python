@@ -101,6 +101,21 @@ asyncio.run(main())
 
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction). A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
+### Limits for automatic subagents
+
+Ordinary `client.agents.run(...)` calls use the same delegation runtime as chat.
+Pass `subagent_limits={"cap_usd": "3", "max_children": 6, "max_parallel": 3}`
+alongside the required `idempotency_key` to pin owner limits for a new run.
+`cap_usd=0` disables helpers. The cap covers subagents and their tools; lead
+charges remain separate. The server validates limits before starting work and
+rejects a changed request under a reused idempotency key.
+
+Sync and async clients support this option. Owner
+`client.compilations.run_instruction(...)` and `run_instruction_and_wait(...)`
+accept it too; omission inherits the frozen source run's limits. Scheduled runs
+inherit those limits automatically. Embedded customer calls cannot override
+owner limits. Owner run responses expose the effective `subagent_limits`.
+
 ## Personal connection first
 
 A new user starts in one implicit personal space. The first connection of a
@@ -517,6 +532,20 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Personal MCP sharing (UAT candidate)
+
+The optional `AgentClient.shares` and `AsyncAgentClient.shares` clients manage
+email invitations, exact-connection grants, device tokens and revocation.
+A recipient must verify the addressed email and explicitly pass
+`accept_billing=True` when accepting. FlyMy execution charges use the recipient's
+wallet, without owner-wallet fallback. Provider charges remain with the connected
+account; existing team MCP calls continue using the team wallet.
+
+The backend and Agents MCP require the independent
+`MCP_PERSONAL_SHARING_ENABLED` gate, off by default. These candidate APIs are not
+available in production. Existing inference clients and resource-set/agent
+contracts remain available.
 
 ## Advanced agent helpers
 
