@@ -16,6 +16,7 @@ from tests.test_mcp_teams import client_with, response
 
 APP_ID = "app:denis/paint-arena"
 FLEET_ID = "fleet:0b9c6f36-3f1f-4f5b-9a55-1f2a7c1f0e11"
+ARTIFACT_ID = "artifact:9d3f6a2e-1b4c-4e7d-8a5f-0c2b7e9d1a36"
 PROJECT = {
     "schema": "flymy.project.v1",
     "id": APP_ID,
@@ -78,6 +79,24 @@ def test_lists_reads_and_pages_the_journal_with_the_owners_key():
             f"/api/v1/agents/projects/{FLEET_ID}/errors/",
             {"limit": "5", "before": "2026-10-01"},
         ),
+    ]
+
+
+def test_an_artifact_is_a_project_read_by_its_id():
+    seen = []
+
+    def handler(request):
+        seen.append(request.url.path)
+        if request.url.path.endswith("/errors/"):
+            return response({"project": ARTIFACT_ID, "errors": [], "next_before": None})
+        return response({"id": ARTIFACT_ID, "kind": "artifact", "name": "Pod racer"})
+
+    client = client_with(handler)
+    assert client.projects.get(ARTIFACT_ID).kind == "artifact"
+    assert client.projects.errors(ARTIFACT_ID).errors == []
+    assert seen == [
+        f"/api/v1/agents/projects/{ARTIFACT_ID}/",
+        f"/api/v1/agents/projects/{ARTIFACT_ID}/errors/",
     ]
 
 
@@ -167,6 +186,10 @@ def test_stop_and_a_two_step_start():
         # a fleet has no project agent and is not stopped or started: talk to its lead
         lambda c: c.projects.agent(FLEET_ID),
         lambda c: c.projects.stop(FLEET_ID, idempotency_key="stop-1"),
+        # an artifact changes through client.artifacts
+        lambda c: c.projects.agent(ARTIFACT_ID),
+        lambda c: c.projects.start(ARTIFACT_ID),
+        lambda c: c.projects.get(ARTIFACT_ID.upper()),
         # a start without plan_token is only the plan, so it takes no key
         lambda c: c.projects.start(APP_ID, idempotency_key="start-1"),
         lambda c: c.projects.start(APP_ID, plan_token="start-plan-1"),

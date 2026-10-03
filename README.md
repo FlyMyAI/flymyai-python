@@ -603,8 +603,8 @@ them, never in place.
 
 `AgentClient.projects` and `AsyncAgentClient.projects` read and run your projects
 (`flymy.project.v1`): an app applied from one `flymy.yaml` (its pages, agents,
-servers, storage and budgets), a page published on its own, or a fleet (a lead
-agent and the agents it starts). A project is its config: creating, stopping and
+servers, storage and budgets), a page published on its own, a fleet (a lead agent
+and the agents it starts) or a frontend artifact. A project is its config: creating, stopping and
 starting it are a plan and an apply of that config, and each leaves a release.
 
 ```python
@@ -639,8 +639,10 @@ journal = client.projects.errors("app:me/paint-arena", limit=20)
 ```
 
 `get`, `errors`, `templates` and `agent` (the project's own agent, created on first
-use) complete the set. A fleet is read with `get` and `errors`; it has no project
-agent and is not stopped or started.
+use) complete the set. A fleet (`fleet:<lead agent id>`) and a frontend artifact
+(`artifact:<artifact id>`) are read with `get` and `errors`; they have no project
+agent and are not stopped or started (an artifact changes through
+`client.artifacts`).
 
 ## Advanced agent helpers
 

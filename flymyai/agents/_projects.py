@@ -1,6 +1,6 @@
 """Projects (``flymy.project.v1``): what you build and run as one unit - an app applied
-from one ``flymy.yaml``, a page published on its own, or a fleet (a lead agent and the
-agents it starts).
+from one ``flymy.yaml``, a page published on its own, a fleet (a lead agent and the
+agents it starts) or a frontend artifact.
 
 A project is its config: creating it, stopping and starting it are a plan and an apply
 of its ``flymy.yaml``, and each leaves a release. A plan creates nothing and returns a
@@ -27,6 +27,9 @@ _SITE_ID = re.compile(
 _FLEET_ID = re.compile(
     r"fleet:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
 )
+_ARTIFACT_ID = re.compile(
+    r"artifact:([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"
+)
 _ID_MAX_CHARS = 200
 _ERRORS_LIMIT_MAX = 200
 
@@ -36,9 +39,9 @@ class _Model(BaseModel):
 
 
 class Project(_Model):
-    """A project (``flymy.project.v1``): ``id``, ``kind`` (app, site or fleet),
-    ``name``, ``status``, ``lifecycle``, ``money``, ``errors``, ``budget`` and, read
-    by id, its pages, agents, servers, storages and diagram."""
+    """A project (``flymy.project.v1``): ``id``, ``kind`` (app, site, fleet or
+    artifact), ``name``, ``status``, ``lifecycle``, ``money``, ``errors``, ``budget``
+    and, read by id, its pages, agents, servers, storages and diagram."""
 
     id: str
     kind: str
@@ -47,8 +50,8 @@ class Project(_Model):
 
 
 class ProjectList(_Model):
-    """Your apps and pages, then your fleets; ``modules`` names what this platform
-    serves."""
+    """Your apps and pages, then your fleets and your artifacts; ``modules`` names what
+    this platform serves."""
 
     modules: List[str] = []
     projects: List[Project] = []
@@ -97,8 +100,8 @@ class ProjectAgent(_Model):
 
 
 def _path(project_id: Any, route: str = "", *, fleets: bool = True) -> str:
-    """The route of a project id from ``list()``; a fleet has only its detail and its
-    errors journal."""
+    """The route of a project id from ``list()``; a fleet and an artifact have only
+    their detail and their errors journal."""
 
     value = str(project_id)
     if len(value) <= _ID_MAX_CHARS:
@@ -116,9 +119,17 @@ def _path(project_id: Any, route: str = "", *, fleets: bool = True) -> str:
                     " talk to its lead"
                 )
             return f"{_ROOT}fleet:{fleet.group(1)}/{route}"
+        artifact = _ARTIFACT_ID.fullmatch(value)
+        if artifact:
+            if not fleets:
+                raise ValueError(
+                    "an artifact has no project agent and is not stopped or started:"
+                    " change it with client.artifacts"
+                )
+            return f"{_ROOT}artifact:{artifact.group(1)}/{route}"
     raise ValueError(
-        "project_id must be an id from list(): app:<owner>/<name>, site:<page id>"
-        " or fleet:<lead agent id>"
+        "project_id must be an id from list(): app:<owner>/<name>, site:<page id>,"
+        " fleet:<lead agent id> or artifact:<artifact id>"
     )
 
 
