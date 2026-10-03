@@ -548,6 +548,56 @@ Self-hosted deployments keep it behind the independent
 `MCP_PERSONAL_SHARING_ENABLED` gate, off by default. Existing inference clients
 and resource-set/agent contracts remain available.
 
+## Frontend artifacts
+
+`AgentClient.artifacts` and `AsyncAgentClient.artifacts` manage frontend artifacts
+(`flymy.artifact.v1`): a small web page, a presentation or a mini game with
+immutable versions. Share it by link (with or without its sources) or with people
+by name to view or edit, and clone anyone's shared artifact into your own copy.
+The module is on per account: check `client.artifacts.status().enabled`.
+
+```python
+from flymyai import AgentClient
+from flymyai.agents import artifact_file, artifact_files_from_directory
+
+client = AgentClient(api_key="fly-...")
+
+# a folder (a built site, a game, a page copied from a Claude artifact)
+made = client.artifacts.create(
+    name="Pod racer",
+    files=artifact_files_from_directory("./pod-racer"),
+    visibility="link",
+    idempotency_key="pod-racer-create-1",
+)
+racer = made.artifact
+print(racer.share_url)
+
+# a new version on top of the latest; the other files are kept
+client.artifacts.publish(
+    racer.id,
+    base_version=racer.latest_version,
+    files=[artifact_file("js/app.js", "speed = 2")],
+    message="Faster pods",
+    idempotency_key="pod-racer-v2",
+)
+
+# a teammate may publish versions too; "view" lets them read and clone
+client.artifacts.add_member(racer.id, "teammate@example.com", role="edit")
+shared_with_me = client.artifacts.list(scope="shared")
+
+# your own copy of someone's artifact shared with sources
+copy = client.artifacts.clone(
+    share_link="https://app.flymy.ai/artifacts/s/<handle>",
+    idempotency_key="clone-1",
+)
+```
+
+Writes that create something take a caller-owned `idempotency_key`: reuse it only
+to retry the identical call. A version published on a stale `base_version`
+raises `ArtifactStaleBaseVersionError` with `latest_version`. These are the v1
+methods and they stay: a breaking change would arrive as new methods next to
+them, never in place.
+
 ## Advanced agent helpers
 
 #### Draft an `input_schema` from a prompt

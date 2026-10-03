@@ -5,6 +5,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
+from flymyai.agents._artifacts import Artifacts, AsyncArtifacts
 from flymyai.agents._mcp_sharing import McpTeams, AsyncMcpTeams
 from flymyai.agents._mcp_personal import McpShares, AsyncMcpShares
 
@@ -104,6 +105,23 @@ class McpResourceSetStaleRevisionError(FlyMyAIAgentError):
         self.current_revision = current_revision
 
 
+class ArtifactStaleBaseVersionError(FlyMyAIAgentError):
+    """An artifact version was published on a ``base_version`` that is not the
+    latest any more (HTTP 412): read :attr:`latest_version`, apply the change
+    there and publish again with a new idempotency key."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any,
+        latest_version: Optional[int],
+    ) -> None:
+        super().__init__(message, status_code=status_code, response_body=response_body)
+        self.latest_version = latest_version
+
+
 def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
     """Return a :class:`VariablesValidationError` if ``body`` looks like one."""
     if not isinstance(body, dict):
@@ -162,6 +180,20 @@ def _raise_for_status(resp: httpx.Response) -> None:
             current_revision=(
                 current_revision if isinstance(current_revision, int) else None
             ),
+        )
+
+    if (
+        resp.status_code == 412
+        and isinstance(body, dict)
+        and body.get("code") == "stale_base_version"
+    ):
+        details = body.get("details")
+        latest = details.get("latest_version") if isinstance(details, dict) else None
+        raise ArtifactStaleBaseVersionError(
+            str(body.get("detail", "A newer version of the artifact exists.")),
+            status_code=412,
+            response_body=body,
+            latest_version=latest if isinstance(latest, int) else None,
         )
 
     detail = body.get("detail", body) if isinstance(body, dict) else body
@@ -226,6 +258,7 @@ class SyncAgentClient:
         self.agent_groups = AgentGroups(self)
         self.teams = McpTeams(self)
         self.shares = McpShares(self)
+        self.artifacts = Artifacts(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._http.request(method, path, **kwargs)
@@ -294,6 +327,7 @@ class AsyncAgentClient:
         self.agent_groups = AsyncAgentGroups(self)
         self.teams = AsyncMcpTeams(self)
         self.shares = AsyncMcpShares(self)
+        self.artifacts = AsyncArtifacts(self)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = await self._http.request(method, path, **kwargs)
