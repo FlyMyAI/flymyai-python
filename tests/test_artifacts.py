@@ -314,9 +314,13 @@ def test_optional_runtime_binding_inherit_and_explicit_detach(asynchronous):
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
-            seen.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            seen.append(
+                json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            )
             assert self.path.startswith("/api/v1/artifacts/")
-            payload = json.dumps({"schema": "flymy.artifact.v1", "artifact": SUMMARY, "version": PLAN}).encode()
+            payload = json.dumps(
+                {"schema": "flymy.artifact.v1", "artifact": SUMMARY, "version": PLAN}
+            ).encode()
             self.send_response(201)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(payload)))
@@ -332,20 +336,37 @@ def test_optional_runtime_binding_inherit_and_explicit_detach(asynchronous):
     address = f"http://127.0.0.1:{server.server_port}"
     try:
         if asynchronous:
+
             async def go():
                 client = AsyncAgentClient(api_key="fixture-key", base_url=address)
                 try:
-                    await client.artifacts.create(name="Bound", files=[], runtime=runtime, idempotency_key="create")
-                    await client.artifacts.publish(ARTIFACT, base_version=1, idempotency_key="inherit")
-                    await client.artifacts.publish(ARTIFACT, base_version=2, runtime=None, idempotency_key="detach")
+                    await client.artifacts.create(
+                        name="Bound",
+                        files=[],
+                        runtime=runtime,
+                        idempotency_key="create",
+                    )
+                    await client.artifacts.publish(
+                        ARTIFACT, base_version=1, idempotency_key="inherit"
+                    )
+                    await client.artifacts.publish(
+                        ARTIFACT, base_version=2, runtime=None, idempotency_key="detach"
+                    )
                 finally:
                     await client._http.aclose()
+
             asyncio.run(go())
         else:
             with SyncAgentClient(api_key="fixture-key", base_url=address) as client:
-                client.artifacts.create(name="Bound", files=[], runtime=runtime, idempotency_key="create")
-                client.artifacts.publish(ARTIFACT, base_version=1, idempotency_key="inherit")
-                client.artifacts.publish(ARTIFACT, base_version=2, runtime=None, idempotency_key="detach")
+                client.artifacts.create(
+                    name="Bound", files=[], runtime=runtime, idempotency_key="create"
+                )
+                client.artifacts.publish(
+                    ARTIFACT, base_version=1, idempotency_key="inherit"
+                )
+                client.artifacts.publish(
+                    ARTIFACT, base_version=2, runtime=None, idempotency_key="detach"
+                )
     finally:
         server.shutdown()
         server.server_close()
