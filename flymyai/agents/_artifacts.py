@@ -40,6 +40,8 @@ _TEXT_SUFFIXES = {
     ".vert",
     ".wgsl",
     ".ts",
+    ".yaml",
+    ".yml",
 }
 
 T = TypeVar("T")

@@ -211,3 +211,21 @@ __all__ += [
     "Projects",
     "ProjectTemplates",
 ]
+
+from flymyai.agents._apps import (
+    AppFile,
+    AppFiles,
+    AppPlan,
+    AppRelease,
+    Apps,
+    AsyncApps,
+)
+
+__all__ += [
+    "AppFile",
+    "AppFiles",
+    "AppPlan",
+    "AppRelease",
+    "Apps",
+    "AsyncApps",
+]

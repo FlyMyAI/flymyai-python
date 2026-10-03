@@ -225,12 +225,15 @@ def test_files_from_a_directory_keep_text_as_text_and_skip_hidden(tmp_path):
     (tmp_path / "js" / "app.js").write_text("go()", encoding="utf-8")
     (tmp_path / "car.png").write_bytes(b"\x89PNG\x00")
     (tmp_path / ".DS_Store").write_bytes(b"x")
+    # an app template's config is text too
+    (tmp_path / "flymy.yaml").write_text("kind: App\n", encoding="utf-8")
     files = artifact_files_from_directory(tmp_path)
     assert files == [
         {
             "path": "car.png",
             "content_base64": base64.b64encode(b"\x89PNG\x00").decode(),
         },
+        {"path": "flymy.yaml", "content": "kind: App\n"},
         {"path": "index.html", "content": "<p>hi</p>"},
         {"path": "js/app.js", "content": "go()"},
     ]

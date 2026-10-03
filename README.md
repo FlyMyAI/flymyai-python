@@ -638,8 +638,29 @@ client.projects.start(
 journal = client.projects.errors("app:me/paint-arena", limit=20)
 ```
 
-`get`, `errors`, `templates` and `agent` (the project's own agent, created on first
-use) complete the set. A fleet (`fleet:<lead agent id>`) and a frontend artifact
+Change an app by applying its `flymy.yaml` again with `AgentClient.apps`: `plan`
+shows what it would create, change or stop and its price, and `apply` applies
+exactly that plan as a release.
+
+```python
+import time
+
+from flymyai.agents import artifact_files_from_directory
+
+files = artifact_files_from_directory("./paint-arena")  # flymy.yaml at the root
+plan = client.apps.plan(files=files)
+print(plan.changes, plan.usd_per_hour)  # show the user before applying
+release = client.apps.apply(
+    files=files, plan_token=plan.plan_token, idempotency_key="paint-arena-apply-2"
+)
+while client.apps.status(release.release).status == "applying":
+    time.sleep(5)
+```
+
+`client.apps.files("me/paint-arena")` reads the applied template back; `plan` and
+`apply` also take `app="me/paint-arena"` with `overrides` to replace some files and
+keep the rest. `get`, `errors`, `templates` and `agent` (the project's own agent,
+created on first use) complete the projects set. A fleet (`fleet:<lead agent id>`) and a frontend artifact
 (`artifact:<artifact id>`) are read with `get` and `errors`; they have no project
 agent and are not stopped or started (an artifact changes through
 `client.artifacts`).
