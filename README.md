@@ -617,6 +617,7 @@ for project in client.projects.list().projects:
 
 # a plan creates nothing: show its price, then create exactly that plan
 plan = client.projects.plan(name="paint-arena", budget={"per_day_usd": "5"})
+print(plan.plan["usd_per_hour"], plan.plan["changes"])
 made = client.projects.create(
     name="paint-arena",
     budget={"per_day_usd": "5"},
@@ -626,7 +627,8 @@ made = client.projects.create(
 
 # stop it (its servers stop and the rest of their holds is refunded), start it again
 client.projects.stop("app:me/paint-arena", idempotency_key="paint-arena-stop-1")
-start = client.projects.start("app:me/paint-arena")  # the plan and its usd_per_hour
+start = client.projects.start("app:me/paint-arena")  # the plan, nothing changes
+print(start.plan["usd_per_hour"])
 client.projects.start(
     "app:me/paint-arena",
     plan_token=start.plan_token,

@@ -61,17 +61,28 @@ class ProjectTemplates(_Model):
 
 
 class ProjectPlan(_Model):
-    """What creating or starting would do and cost, and the ``plan_token`` that
-    applies exactly this plan. Nothing was created or changed."""
+    """What creating or starting would do and cost (``plan["usd_per_hour"]``, its
+    ``changes`` and ``budgets``), and the ``plan_token`` that applies exactly this
+    plan. Nothing was created or changed."""
 
+    project: Optional[str] = None
+    plan: Dict[str, Any] = {}
     plan_token: Optional[str] = None
+
+
+class ProjectCreated(_Model):
+    """The created project's id and its first release, applying."""
+
+    project: str
+    release: Dict[str, Any] = {}
 
 
 class ProjectErrors(_Model):
     """One page of a project's errors journal (``flymy.project-errors.v1``), newest
     first; pass ``next_before`` back as ``before`` for older entries."""
 
-    entries: List[Dict[str, Any]] = []
+    project: Optional[str] = None
+    errors: List[Dict[str, Any]] = []
     next_before: Optional[str] = None
 
 
@@ -207,12 +218,13 @@ class Projects:
         template: Optional[str] = None,
         description: Optional[str] = None,
         budget: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+    ) -> ProjectCreated:
         """Create exactly the plan the user confirmed: send the same fields as
-        :meth:`plan` plus its ``plan_token``. Returns the project and its first
+        :meth:`plan` plus its ``plan_token``. Returns the project id and its first
         release."""
         body = _project_body(name, template, description, budget, plan_token)
-        return self._c._request("POST", _ROOT, json=body, headers=_key(idempotency_key))
+        data = self._c._request("POST", _ROOT, json=body, headers=_key(idempotency_key))
+        return ProjectCreated.model_validate(data)
 
     def agent(self, project_id: str) -> ProjectAgent:
         """The agent in charge of an app or a page, created on first use."""
@@ -300,11 +312,12 @@ class AsyncProjects:
         template: Optional[str] = None,
         description: Optional[str] = None,
         budget: Optional[Dict[str, str]] = None,
-    ) -> Dict[str, Any]:
+    ) -> ProjectCreated:
         body = _project_body(name, template, description, budget, plan_token)
-        return await self._c._request(
+        data = await self._c._request(
             "POST", _ROOT, json=body, headers=_key(idempotency_key)
         )
+        return ProjectCreated.model_validate(data)
 
     async def agent(self, project_id: str) -> ProjectAgent:
         data = await self._c._request("POST", _path(project_id, "agent/", fleets=False))
