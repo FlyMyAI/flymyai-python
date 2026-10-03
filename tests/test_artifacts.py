@@ -49,7 +49,10 @@ PLAN = {
 
 
 def test_create_sends_the_files_and_the_callers_key():
-    files = [artifact_file("index.html", "<p>hi</p>"), artifact_file("car.png", b"\x89PNG")]
+    files = [
+        artifact_file("index.html", "<p>hi</p>"),
+        artifact_file("car.png", b"\x89PNG"),
+    ]
 
     def handler(request):
         assert request.method == "POST"
@@ -59,18 +62,29 @@ def test_create_sends_the_files_and_the_callers_key():
             "name": "Pod racer",
             "files": [
                 {"path": "index.html", "content": "<p>hi</p>"},
-                {"path": "car.png", "content_base64": base64.b64encode(b"\x89PNG").decode()},
+                {
+                    "path": "car.png",
+                    "content_base64": base64.b64encode(b"\x89PNG").decode(),
+                },
             ],
             "visibility": "link",
         }
-        return response({"schema": "flymy.artifact.v1", "artifact": SUMMARY, "version": PLAN}, 201)
+        return response(
+            {"schema": "flymy.artifact.v1", "artifact": SUMMARY, "version": PLAN}, 201
+        )
 
     with client_with(handler) as client:
         made = client.artifacts.create(
-            name="Pod racer", files=files, visibility="link", idempotency_key="create-pod-racer-1"
+            name="Pod racer",
+            files=files,
+            visibility="link",
+            idempotency_key="create-pod-racer-1",
         )
     assert isinstance(made, ArtifactReceipt)
-    assert str(made.artifact.id) == ARTIFACT and made.version.added == ["index.html", "car.png"]
+    assert str(made.artifact.id) == ARTIFACT and made.version.added == [
+        "index.html",
+        "car.png",
+    ]
 
 
 def test_a_dry_run_answers_the_plan():
@@ -80,9 +94,11 @@ def test_a_dry_run_answers_the_plan():
 
     with client_with(handler) as client:
         plan = client.artifacts.create(
-            name="Pod racer", files=[artifact_file("index.html", "<p>hi</p>")],
-            idempotency_key="plan-1", dry_run=True,
-        )  # fmt: skip
+            name="Pod racer",
+            files=[artifact_file("index.html", "<p>hi</p>")],
+            idempotency_key="plan-1",
+            dry_run=True,
+        )
     assert isinstance(plan, ArtifactDryRun) and plan.plan.files_count == 2
 
 
@@ -91,7 +107,9 @@ def test_lists_whats_shared_with_me_and_keeps_fields_added_later_in_v1():
         assert request.url.path == "/api/v1/artifacts/"
         assert dict(request.url.params) == {"scope": "shared", "page_size": "10"}
         row = {**SUMMARY, "role": "editor", "a_field_added_later": 1}
-        return response({"results": [row], "next_cursor": None, "previous_cursor": None})
+        return response(
+            {"results": [row], "next_cursor": None, "previous_cursor": None}
+        )
 
     with client_with(handler) as client:
         page = client.artifacts.list(scope="shared", page_size=10)
@@ -105,21 +123,46 @@ def test_someones_artifact_by_its_share_link_and_a_clone_of_it():
     seen = []
 
     def handler(request):
-        seen.append((request.method, request.url.path, request.headers.get("Idempotency-Key")))
+        seen.append(
+            (request.method, request.url.path, request.headers.get("Idempotency-Key"))
+        )
         if request.method == "GET":
-            live = {"version": 2, "entry": "index.html", "message": "", "files_count": 1, "total_bytes": 9,
-                    "live": True, "created_at": NOW, "view": {"url": "https://u.test/v/t/", "expires_at": NOW}}
-            return response({**SUMMARY, "schema": "flymy.artifact.v1", "role": "viewer",
-                             "author": {"username": "ana"}, "live": live, "versions": [live]})  # fmt: skip
-        return response({"schema": "flymy.artifact.v1", "artifact": SUMMARY, "version": PLAN}, 201)
+            live = {
+                "version": 2,
+                "entry": "index.html",
+                "message": "",
+                "files_count": 1,
+                "total_bytes": 9,
+                "live": True,
+                "created_at": NOW,
+                "view": {"url": "https://u.test/v/t/", "expires_at": NOW},
+            }
+            return response({
+                **SUMMARY,
+                "schema": "flymy.artifact.v1",
+                "role": "viewer",
+                "author": {"username": "ana"},
+                "live": live,
+                "versions": [live],
+            })
+        return response(
+            {"schema": "flymy.artifact.v1", "artifact": SUMMARY, "version": PLAN}, 201
+        )
 
     with client_with(handler) as client:
-        shared = client.artifacts.get(share_link="https://app.test/artifacts/s/AbCdEfGh12345678")
-        client.artifacts.clone(share_link="AbCdEfGh12345678", version=2, idempotency_key="clone-1")
+        shared = client.artifacts.get(
+            share_link="https://app.test/artifacts/s/AbCdEfGh12345678"
+        )
+        client.artifacts.clone(
+            share_link="AbCdEfGh12345678", version=2, idempotency_key="clone-1"
+        )
         with pytest.raises(ValueError):
             client.artifacts.get(ARTIFACT, share_link="AbCdEfGh12345678")
     assert shared.author.username == "ana"
-    assert shared.live.view.url == "https://u.test/v/t/" and shared.versions[0].version == 2
+    assert (
+        shared.live.view.url == "https://u.test/v/t/"
+        and shared.versions[0].version == 2
+    )
     assert seen == [
         ("GET", "/api/v1/artifacts/shared/AbCdEfGh12345678/", None),
         ("POST", "/api/v1/artifacts/shared/AbCdEfGh12345678/clone/", "clone-1"),
@@ -129,13 +172,23 @@ def test_someones_artifact_by_its_share_link_and_a_clone_of_it():
 def test_a_stale_base_version_names_the_latest():
     def handler(request):
         assert json.loads(request.content)["base_version"] == 2
-        return response({"code": "stale_base_version", "detail": "The artifact is at version 3.",
-                         "details": {"latest_version": 3}}, 412)  # fmt: skip
+        return response(
+            {
+                "code": "stale_base_version",
+                "detail": "The artifact is at version 3.",
+                "details": {"latest_version": 3},
+            },
+            412,
+        )
 
     with client_with(handler) as client:
         with pytest.raises(ArtifactStaleBaseVersionError) as raised:
-            client.artifacts.publish(ARTIFACT, base_version=2, files=[artifact_file("a.js", "1")],
-                                     idempotency_key="publish-1")  # fmt: skip
+            client.artifacts.publish(
+                ARTIFACT,
+                base_version=2,
+                files=[artifact_file("a.js", "1")],
+                idempotency_key="publish-1",
+            )
     assert raised.value.latest_version == 3 and raised.value.status_code == 412
 
 
@@ -145,8 +198,14 @@ def test_people_by_name():
     def handler(request):
         seen.append((request.method, request.url.raw_path.decode(), request.content))
         if request.method == "POST":
-            return response({"schema": "flymy.artifact.v1", "changed": True,
-                             "member": {"username": "bo", "role": "edit", "added_at": NOW}}, 201)  # fmt: skip
+            return response(
+                {
+                    "schema": "flymy.artifact.v1",
+                    "changed": True,
+                    "member": {"username": "bo", "role": "edit", "added_at": NOW},
+                },
+                201,
+            )
         return response({"id": ARTIFACT, "removed": "bo b"})
 
     with client_with(handler) as client:
@@ -168,7 +227,10 @@ def test_files_from_a_directory_keep_text_as_text_and_skip_hidden(tmp_path):
     (tmp_path / ".DS_Store").write_bytes(b"x")
     files = artifact_files_from_directory(tmp_path)
     assert files == [
-        {"path": "car.png", "content_base64": base64.b64encode(b"\x89PNG\x00").decode()},
+        {
+            "path": "car.png",
+            "content_base64": base64.b64encode(b"\x89PNG\x00").decode(),
+        },
         {"path": "index.html", "content": "<p>hi</p>"},
         {"path": "js/app.js", "content": "go()"},
     ]
@@ -177,17 +239,27 @@ def test_files_from_a_directory_keep_text_as_text_and_skip_hidden(tmp_path):
 def test_the_async_client_has_the_same_artifacts():
     def handler(request):
         if request.method == "GET":
-            return response({"results": [SUMMARY], "next_cursor": None, "previous_cursor": None})
-        return response({"schema": "flymy.artifact.v1", "artifact": SUMMARY, "version": PLAN}, 201)
+            return response(
+                {"results": [SUMMARY], "next_cursor": None, "previous_cursor": None}
+            )
+        return response(
+            {"schema": "flymy.artifact.v1", "artifact": SUMMARY, "version": PLAN}, 201
+        )
 
     async def go():
-        client = AsyncAgentClient(api_key="personal-key", base_url="https://example.test")
+        client = AsyncAgentClient(
+            api_key="personal-key", base_url="https://example.test"
+        )
         await client._http.aclose()
-        client._http = httpx.AsyncClient(base_url="https://example.test", transport=httpx.MockTransport(handler))
+        client._http = httpx.AsyncClient(
+            base_url="https://example.test", transport=httpx.MockTransport(handler)
+        )
         try:
             page = await client.artifacts.list()
             made = await client.artifacts.create(
-                name="Pod racer", files=[artifact_file("index.html", "<p>hi</p>")], idempotency_key="create-1"
+                name="Pod racer",
+                files=[artifact_file("index.html", "<p>hi</p>")],
+                idempotency_key="create-1",
             )
         finally:
             await client.close()
@@ -200,10 +272,25 @@ def test_the_async_client_has_the_same_artifacts():
 # The v1 methods stay (a frozen agent keeps the calls it was frozen with): one may be
 # added, none renamed or removed.
 V1_METHODS = {
-    "status", "list", "get", "create", "publish", "versions", "files", "read_file", "view",
-    "update", "share", "clone", "lineage", "history", "members", "add_member",
-    "remove_member", "delete",
-}  # fmt: skip
+    "status",
+    "list",
+    "get",
+    "create",
+    "publish",
+    "versions",
+    "files",
+    "read_file",
+    "view",
+    "update",
+    "share",
+    "clone",
+    "lineage",
+    "history",
+    "members",
+    "add_member",
+    "remove_member",
+    "delete",
+}
 
 
 @pytest.mark.parametrize("resource", [Artifacts, AsyncArtifacts])

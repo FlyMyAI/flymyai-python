@@ -23,9 +23,24 @@ from pydantic import BaseModel, ConfigDict, Field
 _ROOT = "/api/v1/artifacts/"
 _HANDLE = re.compile(r"[A-Za-z0-9_-]{8,64}")
 _TEXT_SUFFIXES = {
-    ".html", ".htm", ".css", ".js", ".mjs", ".json", ".txt", ".md", ".svg", ".xml",
-    ".csv", ".map", ".glsl", ".frag", ".vert", ".wgsl", ".ts",
-}  # fmt: skip
+    ".html",
+    ".htm",
+    ".css",
+    ".js",
+    ".mjs",
+    ".json",
+    ".txt",
+    ".md",
+    ".svg",
+    ".xml",
+    ".csv",
+    ".map",
+    ".glsl",
+    ".frag",
+    ".vert",
+    ".wgsl",
+    ".ts",
+}
 
 T = TypeVar("T")
 
@@ -216,7 +231,9 @@ def artifact_files_from_directory(root: Union[str, Path]) -> List[Dict[str, str]
     base = Path(root)
     files = []
     for item in sorted(base.rglob("*")):
-        if not item.is_file() or any(part.startswith(".") for part in item.relative_to(base).parts):
+        if not item.is_file() or any(
+            part.startswith(".") for part in item.relative_to(base).parts
+        ):
             continue
         path = item.relative_to(base).as_posix()
         raw = item.read_bytes()
@@ -258,7 +275,9 @@ def _key(idempotency_key: str) -> Dict[str, str]:
         or not 1 <= len(idempotency_key) <= 255
         or any(ord(c) < 0x21 or ord(c) > 0x7E for c in idempotency_key)
     ):
-        raise ValueError("idempotency_key must be 1-255 printable ASCII characters without spaces")
+        raise ValueError(
+            "idempotency_key must be 1-255 printable ASCII characters without spaces"
+        )
     return {"Idempotency-Key": idempotency_key}
 
 
@@ -287,7 +306,9 @@ class _Spec:
     """The request of each call, shared by the sync and async resources."""
 
     @staticmethod
-    def list(scope: str, cursor: Optional[str], page_size: Optional[int]) -> Dict[str, Any]:
+    def list(
+        scope: str, cursor: Optional[str], page_size: Optional[int]
+    ) -> Dict[str, Any]:
         if scope not in ("mine", "shared"):
             raise ValueError("scope must be mine or shared")
         params = _page(cursor, page_size)
@@ -304,19 +325,30 @@ class Artifacts:
 
     def status(self) -> ArtifactsStatus:
         """Whether artifacts are on for you, and the limits."""
-        return ArtifactsStatus.model_validate(self._c._request("GET", f"{_ROOT}status/"))
+        return ArtifactsStatus.model_validate(
+            self._c._request("GET", f"{_ROOT}status/")
+        )
 
     def list(
-        self, *, scope: str = "mine", cursor: Optional[str] = None, page_size: Optional[int] = None
+        self,
+        *,
+        scope: str = "mine",
+        cursor: Optional[str] = None,
+        page_size: Optional[int] = None,
     ) -> ArtifactPage[ArtifactSummary]:
         """Your artifacts, most recently changed first; ``scope="shared"`` lists the
         ones shared with you by name (``role`` editor or member)."""
         data = self._c._request("GET", _ROOT, **_Spec.list(scope, cursor, page_size))
         return ArtifactPage[ArtifactSummary].model_validate(data)
 
-    def get(self, artifact_id: Any = None, *, share_link: Optional[str] = None) -> Artifact:
-        """One artifact: yours or shared with you by ``artifact_id``, or anyone's by ``share_link``."""
-        return Artifact.model_validate(self._c._request("GET", _base(artifact_id, share_link)))
+    def get(
+        self, artifact_id: Any = None, *, share_link: Optional[str] = None
+    ) -> Artifact:
+        """One artifact: yours or shared with you by ``artifact_id``, or anyone's by
+        ``share_link``."""
+        return Artifact.model_validate(
+            self._c._request("GET", _base(artifact_id, share_link))
+        )
 
     def create(
         self,
@@ -334,10 +366,19 @@ class Artifacts:
         """Create an artifact from its files; version 1 goes live, private unless
         ``visibility`` says otherwise. Build ``files`` with :func:`artifact_file` or
         :func:`artifact_files_from_directory`."""
-        body = _body(name=name, files=files, description=description, entry=entry,
-                     message=message, visibility=visibility, with_sources=with_sources,
-                     dry_run=dry_run or None)  # fmt: skip
-        return _write(self._c._request("POST", _ROOT, json=body, headers=_key(idempotency_key)))
+        body = _body(
+            name=name,
+            files=files,
+            description=description,
+            entry=entry,
+            message=message,
+            visibility=visibility,
+            with_sources=with_sources,
+            dry_run=dry_run or None,
+        )
+        return _write(
+            self._c._request("POST", _ROOT, json=body, headers=_key(idempotency_key))
+        )
 
     def publish(
         self,
@@ -355,19 +396,40 @@ class Artifacts:
         """A new version on top of ``base_version`` (the latest): ``files`` add or
         replace paths, ``delete`` removes paths, the rest is kept. Raises
         :class:`ArtifactStaleBaseVersionError` when someone published meanwhile."""
-        body = _body(base_version=base_version, files=files, delete=delete, entry=entry,
-                     message=message, publish=publish, dry_run=dry_run or None)  # fmt: skip
-        data = self._c._request("POST", f"{_ROOT}{_id(artifact_id)}/versions/", json=body,
-                                headers=_key(idempotency_key))  # fmt: skip
+        body = _body(
+            base_version=base_version,
+            files=files,
+            delete=delete,
+            entry=entry,
+            message=message,
+            publish=publish,
+            dry_run=dry_run or None,
+        )
+        data = self._c._request(
+            "POST",
+            f"{_ROOT}{_id(artifact_id)}/versions/",
+            json=body,
+            headers=_key(idempotency_key),
+        )
         return _write(data)
 
     def versions(
-        self, artifact_id: Any, *, cursor: Optional[str] = None, page_size: Optional[int] = None
+        self,
+        artifact_id: Any,
+        *,
+        cursor: Optional[str] = None,
+        page_size: Optional[int] = None,
     ) -> ArtifactPage[ArtifactVersion]:
-        data = self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/versions/", params=_page(cursor, page_size))
+        data = self._c._request(
+            "GET",
+            f"{_ROOT}{_id(artifact_id)}/versions/",
+            params=_page(cursor, page_size),
+        )
         return ArtifactPage[ArtifactVersion].model_validate(data)
 
-    def files(self, artifact_id: Any = None, *, version: int, share_link: Optional[str] = None) -> ArtifactFiles:
+    def files(
+        self, artifact_id: Any = None, *, version: int, share_link: Optional[str] = None
+    ) -> ArtifactFiles:
         """A version's file list (path, bytes, sha256, content_type)."""
         path = f"{_base(artifact_id, share_link)}versions/{int(version)}/files/"
         return ArtifactFiles.model_validate(self._c._request("GET", path))
@@ -382,12 +444,17 @@ class Artifacts:
         offset: int = 0,
         max_bytes: Optional[int] = None,
     ) -> ArtifactFileText:
-        """One text file's content from ``offset`` (follow ``next_offset`` while ``truncated``)."""
+        """One text file's content from ``offset``; follow ``next_offset`` while
+        ``truncated``."""
         params = _body(path=path, offset=offset, max_bytes=max_bytes)
         url = f"{_base(artifact_id, share_link)}versions/{int(version)}/files/"
-        return ArtifactFileText.model_validate(self._c._request("GET", url, params=params))
+        return ArtifactFileText.model_validate(
+            self._c._request("GET", url, params=params)
+        )
 
-    def view(self, artifact_id: Any = None, *, version: int, share_link: Optional[str] = None) -> ArtifactView:
+    def view(
+        self, artifact_id: Any = None, *, version: int, share_link: Optional[str] = None
+    ) -> ArtifactView:
         """A sandboxed frame URL for a version, valid 8 hours. Give people the
         ``owner_url`` or ``share_url`` instead."""
         url = f"{_base(artifact_id, share_link)}versions/{int(version)}/view/"
@@ -403,7 +470,9 @@ class Artifacts:
     ) -> Artifact:
         """Rename, describe or choose the live version (owner or editor)."""
         body = _body(name=name, description=description, live_version=live_version)
-        return Artifact.model_validate(self._c._request("PATCH", f"{_ROOT}{_id(artifact_id)}/", json=body))
+        return Artifact.model_validate(
+            self._c._request("PATCH", f"{_ROOT}{_id(artifact_id)}/", json=body)
+        )
 
     def share(
         self,
@@ -414,10 +483,17 @@ class Artifacts:
         with_sources: Optional[bool] = None,
         reset_link: Optional[bool] = None,
     ) -> Artifact:
-        """Who sees it: ``private``, ``link`` or ``public``, with or without sources (owner)."""
-        body = _body(visibility=visibility, with_sources=with_sources, reset_link=reset_link)
-        data = self._c._request("PATCH", f"{_ROOT}{_id(artifact_id)}/share/", json=body,
-                                headers=_key(idempotency_key))  # fmt: skip
+        """Who sees it: ``private``, ``link`` or ``public``, with or without sources
+        (owner)."""
+        body = _body(
+            visibility=visibility, with_sources=with_sources, reset_link=reset_link
+        )
+        data = self._c._request(
+            "PATCH",
+            f"{_ROOT}{_id(artifact_id)}/share/",
+            json=body,
+            headers=_key(idempotency_key),
+        )
         return Artifact.model_validate(data)
 
     def clone(
@@ -433,32 +509,61 @@ class Artifacts:
         """Your own separate copy of an artifact (yours, shared with you, or by a
         link with sources); ``forked_from`` records where it came from."""
         body = _body(version=version, name=name, dry_run=dry_run or None)
-        data = self._c._request("POST", f"{_base(artifact_id, share_link)}clone/", json=body,
-                                headers=_key(idempotency_key))  # fmt: skip
+        data = self._c._request(
+            "POST",
+            f"{_base(artifact_id, share_link)}clone/",
+            json=body,
+            headers=_key(idempotency_key),
+        )
         return _write(data)
 
     def lineage(
-        self, artifact_id: Any, *, cursor: Optional[str] = None, page_size: Optional[int] = None
+        self,
+        artifact_id: Any,
+        *,
+        cursor: Optional[str] = None,
+        page_size: Optional[int] = None,
     ) -> ArtifactLineage:
-        data = self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/lineage/", params=_page(cursor, page_size))
+        data = self._c._request(
+            "GET",
+            f"{_ROOT}{_id(artifact_id)}/lineage/",
+            params=_page(cursor, page_size),
+        )
         return ArtifactLineage.model_validate(data)
 
     def history(
-        self, artifact_id: Any, *, cursor: Optional[str] = None, page_size: Optional[int] = None
+        self,
+        artifact_id: Any,
+        *,
+        cursor: Optional[str] = None,
+        page_size: Optional[int] = None,
     ) -> ArtifactPage[ArtifactEvent]:
-        data = self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/history/", params=_page(cursor, page_size))
+        data = self._c._request(
+            "GET",
+            f"{_ROOT}{_id(artifact_id)}/history/",
+            params=_page(cursor, page_size),
+        )
         return ArtifactPage[ArtifactEvent].model_validate(data)
 
     def members(self, artifact_id: Any) -> ArtifactMembers:
         """Who it is shared with by name (owner and members may read)."""
-        return ArtifactMembers.model_validate(self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/members/"))
+        return ArtifactMembers.model_validate(
+            self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/members/")
+        )
 
-    def add_member(self, artifact_id: Any, user: str, *, role: str = "view") -> ArtifactMemberReceipt:
+    def add_member(
+        self, artifact_id: Any, user: str, *, role: str = "view"
+    ) -> ArtifactMemberReceipt:
         """Share with a FlyMyAI user (email or username) to ``view`` or ``edit``, or
-        change their role (owner). Calling it again with the same role changes nothing."""
+        change their role (owner). Calling it again with the same role changes nothing.
+        """
         if role not in ("view", "edit"):
             raise ValueError("role must be view or edit")
-        data = self._c._request("POST", f"{_ROOT}{_id(artifact_id)}/members/", json={"user": user, "role": role})
+        data = self._c._request(
+            "POST",
+            f"{_ROOT}{_id(artifact_id)}/members/",
+            json={"user": user, "role": role},
+        )
         return ArtifactMemberReceipt.model_validate(data)
 
     def remove_member(self, artifact_id: Any, username: str) -> Dict[str, Any]:
@@ -478,16 +583,28 @@ class AsyncArtifacts:
         self._c = client
 
     async def status(self) -> ArtifactsStatus:
-        return ArtifactsStatus.model_validate(await self._c._request("GET", f"{_ROOT}status/"))
+        return ArtifactsStatus.model_validate(
+            await self._c._request("GET", f"{_ROOT}status/")
+        )
 
     async def list(
-        self, *, scope: str = "mine", cursor: Optional[str] = None, page_size: Optional[int] = None
+        self,
+        *,
+        scope: str = "mine",
+        cursor: Optional[str] = None,
+        page_size: Optional[int] = None,
     ) -> ArtifactPage[ArtifactSummary]:
-        data = await self._c._request("GET", _ROOT, **_Spec.list(scope, cursor, page_size))
+        data = await self._c._request(
+            "GET", _ROOT, **_Spec.list(scope, cursor, page_size)
+        )
         return ArtifactPage[ArtifactSummary].model_validate(data)
 
-    async def get(self, artifact_id: Any = None, *, share_link: Optional[str] = None) -> Artifact:
-        return Artifact.model_validate(await self._c._request("GET", _base(artifact_id, share_link)))
+    async def get(
+        self, artifact_id: Any = None, *, share_link: Optional[str] = None
+    ) -> Artifact:
+        return Artifact.model_validate(
+            await self._c._request("GET", _base(artifact_id, share_link))
+        )
 
     async def create(
         self,
@@ -502,10 +619,21 @@ class AsyncArtifacts:
         with_sources: Optional[bool] = None,
         dry_run: bool = False,
     ) -> Union[ArtifactReceipt, ArtifactDryRun]:
-        body = _body(name=name, files=files, description=description, entry=entry,
-                     message=message, visibility=visibility, with_sources=with_sources,
-                     dry_run=dry_run or None)  # fmt: skip
-        return _write(await self._c._request("POST", _ROOT, json=body, headers=_key(idempotency_key)))
+        body = _body(
+            name=name,
+            files=files,
+            description=description,
+            entry=entry,
+            message=message,
+            visibility=visibility,
+            with_sources=with_sources,
+            dry_run=dry_run or None,
+        )
+        return _write(
+            await self._c._request(
+                "POST", _ROOT, json=body, headers=_key(idempotency_key)
+            )
+        )
 
     async def publish(
         self,
@@ -520,19 +648,40 @@ class AsyncArtifacts:
         publish: bool = True,
         dry_run: bool = False,
     ) -> Union[ArtifactReceipt, ArtifactDryRun]:
-        body = _body(base_version=base_version, files=files, delete=delete, entry=entry,
-                     message=message, publish=publish, dry_run=dry_run or None)  # fmt: skip
-        data = await self._c._request("POST", f"{_ROOT}{_id(artifact_id)}/versions/", json=body,
-                                      headers=_key(idempotency_key))  # fmt: skip
+        body = _body(
+            base_version=base_version,
+            files=files,
+            delete=delete,
+            entry=entry,
+            message=message,
+            publish=publish,
+            dry_run=dry_run or None,
+        )
+        data = await self._c._request(
+            "POST",
+            f"{_ROOT}{_id(artifact_id)}/versions/",
+            json=body,
+            headers=_key(idempotency_key),
+        )
         return _write(data)
 
     async def versions(
-        self, artifact_id: Any, *, cursor: Optional[str] = None, page_size: Optional[int] = None
+        self,
+        artifact_id: Any,
+        *,
+        cursor: Optional[str] = None,
+        page_size: Optional[int] = None,
     ) -> ArtifactPage[ArtifactVersion]:
-        data = await self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/versions/", params=_page(cursor, page_size))
+        data = await self._c._request(
+            "GET",
+            f"{_ROOT}{_id(artifact_id)}/versions/",
+            params=_page(cursor, page_size),
+        )
         return ArtifactPage[ArtifactVersion].model_validate(data)
 
-    async def files(self, artifact_id: Any = None, *, version: int, share_link: Optional[str] = None) -> ArtifactFiles:
+    async def files(
+        self, artifact_id: Any = None, *, version: int, share_link: Optional[str] = None
+    ) -> ArtifactFiles:
         path = f"{_base(artifact_id, share_link)}versions/{int(version)}/files/"
         return ArtifactFiles.model_validate(await self._c._request("GET", path))
 
@@ -548,9 +697,13 @@ class AsyncArtifacts:
     ) -> ArtifactFileText:
         params = _body(path=path, offset=offset, max_bytes=max_bytes)
         url = f"{_base(artifact_id, share_link)}versions/{int(version)}/files/"
-        return ArtifactFileText.model_validate(await self._c._request("GET", url, params=params))
+        return ArtifactFileText.model_validate(
+            await self._c._request("GET", url, params=params)
+        )
 
-    async def view(self, artifact_id: Any = None, *, version: int, share_link: Optional[str] = None) -> ArtifactView:
+    async def view(
+        self, artifact_id: Any = None, *, version: int, share_link: Optional[str] = None
+    ) -> ArtifactView:
         url = f"{_base(artifact_id, share_link)}versions/{int(version)}/view/"
         return ArtifactView.model_validate(await self._c._request("GET", url))
 
@@ -563,7 +716,9 @@ class AsyncArtifacts:
         live_version: Optional[int] = None,
     ) -> Artifact:
         body = _body(name=name, description=description, live_version=live_version)
-        return Artifact.model_validate(await self._c._request("PATCH", f"{_ROOT}{_id(artifact_id)}/", json=body))
+        return Artifact.model_validate(
+            await self._c._request("PATCH", f"{_ROOT}{_id(artifact_id)}/", json=body)
+        )
 
     async def share(
         self,
@@ -574,9 +729,15 @@ class AsyncArtifacts:
         with_sources: Optional[bool] = None,
         reset_link: Optional[bool] = None,
     ) -> Artifact:
-        body = _body(visibility=visibility, with_sources=with_sources, reset_link=reset_link)
-        data = await self._c._request("PATCH", f"{_ROOT}{_id(artifact_id)}/share/", json=body,
-                                      headers=_key(idempotency_key))  # fmt: skip
+        body = _body(
+            visibility=visibility, with_sources=with_sources, reset_link=reset_link
+        )
+        data = await self._c._request(
+            "PATCH",
+            f"{_ROOT}{_id(artifact_id)}/share/",
+            json=body,
+            headers=_key(idempotency_key),
+        )
         return Artifact.model_validate(data)
 
     async def clone(
@@ -590,29 +751,57 @@ class AsyncArtifacts:
         dry_run: bool = False,
     ) -> Union[ArtifactReceipt, ArtifactDryRun]:
         body = _body(version=version, name=name, dry_run=dry_run or None)
-        data = await self._c._request("POST", f"{_base(artifact_id, share_link)}clone/", json=body,
-                                      headers=_key(idempotency_key))  # fmt: skip
+        data = await self._c._request(
+            "POST",
+            f"{_base(artifact_id, share_link)}clone/",
+            json=body,
+            headers=_key(idempotency_key),
+        )
         return _write(data)
 
     async def lineage(
-        self, artifact_id: Any, *, cursor: Optional[str] = None, page_size: Optional[int] = None
+        self,
+        artifact_id: Any,
+        *,
+        cursor: Optional[str] = None,
+        page_size: Optional[int] = None,
     ) -> ArtifactLineage:
-        data = await self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/lineage/", params=_page(cursor, page_size))
+        data = await self._c._request(
+            "GET",
+            f"{_ROOT}{_id(artifact_id)}/lineage/",
+            params=_page(cursor, page_size),
+        )
         return ArtifactLineage.model_validate(data)
 
     async def history(
-        self, artifact_id: Any, *, cursor: Optional[str] = None, page_size: Optional[int] = None
+        self,
+        artifact_id: Any,
+        *,
+        cursor: Optional[str] = None,
+        page_size: Optional[int] = None,
     ) -> ArtifactPage[ArtifactEvent]:
-        data = await self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/history/", params=_page(cursor, page_size))
+        data = await self._c._request(
+            "GET",
+            f"{_ROOT}{_id(artifact_id)}/history/",
+            params=_page(cursor, page_size),
+        )
         return ArtifactPage[ArtifactEvent].model_validate(data)
 
     async def members(self, artifact_id: Any) -> ArtifactMembers:
-        return ArtifactMembers.model_validate(await self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/members/"))
+        return ArtifactMembers.model_validate(
+            await self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/members/")
+        )
 
-    async def add_member(self, artifact_id: Any, user: str, *, role: str = "view") -> ArtifactMemberReceipt:
+    async def add_member(
+        self, artifact_id: Any, user: str, *, role: str = "view"
+    ) -> ArtifactMemberReceipt:
         if role not in ("view", "edit"):
             raise ValueError("role must be view or edit")
-        data = await self._c._request("POST", f"{_ROOT}{_id(artifact_id)}/members/", json={"user": user, "role": role})
+        data = await self._c._request(
+            "POST",
+            f"{_ROOT}{_id(artifact_id)}/members/",
+            json={"user": user, "role": role},
+        )
         return ArtifactMemberReceipt.model_validate(data)
 
     async def remove_member(self, artifact_id: Any, username: str) -> Dict[str, Any]:
