@@ -15,7 +15,6 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Generic, List, Optional, TypeVar, Union
-from urllib.parse import quote
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -195,10 +194,17 @@ class ArtifactEvent(_Model):
 
 
 class ArtifactMember(_Model):
-    username: str
+    """Someone the artifact is shared with by name. Nobody learns who an email or a
+    username belongs to: the owner sees ``invited_as`` (exactly what they typed), a
+    member sees only which row is theirs (``you``)."""
+
+    id: Optional[str] = None  # remove_member takes it
     role: str  # view or edit
+    status: str = "accepted"  # pending until the person accepts
     added_at: datetime
-    email: Optional[str] = None  # the owner sees it
+    accepted_at: Optional[datetime] = None
+    you: bool = False
+    invited_as: Optional[str] = None  # the owner sees it
 
 
 class ArtifactMembers(_Model):
@@ -211,6 +217,34 @@ class ArtifactMembers(_Model):
 class ArtifactMemberReceipt(_Model):
     member: ArtifactMember
     changed: bool
+
+
+class ArtifactInvitedTo(_Model):
+    id: UUID
+    name: str
+
+
+class ArtifactInvitation(_Model):
+    """An artifact someone shared with you by name, waiting for your answer: nothing of
+    it is shared with you until you accept."""
+
+    id: str
+    artifact: ArtifactInvitedTo
+    owner: ArtifactAuthor
+    role: str  # view or edit
+    invited_as: Optional[str] = None  # your email or username as the owner typed it
+    status: str = "pending"
+    invited_at: datetime
+
+
+class ArtifactInvitationAccepted(_Model):
+    invitation: ArtifactInvitation
+    artifact: ArtifactSummary
+
+
+class ArtifactInvitationDeclined(_Model):
+    id: str
+    declined: bool
 
 
 class ArtifactsStatus(_Model):
@@ -548,7 +582,8 @@ class Artifacts:
         return ArtifactPage[ArtifactEvent].model_validate(data)
 
     def members(self, artifact_id: Any) -> ArtifactMembers:
-        """Who it is shared with by name (owner and members may read)."""
+        """Who it is shared with by name and who has not accepted yet (the owner and
+        the members who accepted may read)."""
         return ArtifactMembers.model_validate(
             self._c._request("GET", f"{_ROOT}{_id(artifact_id)}/members/")
         )
@@ -556,9 +591,10 @@ class Artifacts:
     def add_member(
         self, artifact_id: Any, user: str, *, role: str = "view"
     ) -> ArtifactMemberReceipt:
-        """Share with a FlyMyAI user (email or username) to ``view`` or ``edit``, or
-        change their role (owner). Calling it again with the same role changes nothing.
-        """
+        """Invite a FlyMyAI user (email or username) to ``view`` or ``edit``, or change
+        their role (owner). The person accepts first; until then nothing is shared. An
+        email answers the same whether an account has it. Calling it again with the same
+        role changes nothing."""
         if role not in ("view", "edit"):
             raise ValueError("role must be view or edit")
         data = self._c._request(
@@ -568,10 +604,34 @@ class Artifacts:
         )
         return ArtifactMemberReceipt.model_validate(data)
 
-    def remove_member(self, artifact_id: Any, username: str) -> Dict[str, Any]:
-        """Stop sharing with someone (owner); a member may remove themself to leave."""
-        path = f"{_ROOT}{_id(artifact_id)}/members/{quote(username, safe='')}/"
+    def remove_member(self, artifact_id: Any, member_id: Any) -> Dict[str, Any]:
+        """Stop sharing with one person, invited or accepted, by the member's ``id``
+        (owner); a member may remove their own row to leave."""
+        path = f"{_ROOT}{_id(artifact_id)}/members/{_id(member_id)}/"
         return self._c._request("DELETE", path)
+
+    def invitations(
+        self, *, cursor: Optional[str] = None, page_size: Optional[int] = None
+    ) -> ArtifactPage[ArtifactInvitation]:
+        """Invitations waiting for you, newest first."""
+        data = self._c._request(
+            "GET", f"{_ROOT}invitations/", params=_page(cursor, page_size)
+        )
+        return ArtifactPage[ArtifactInvitation].model_validate(data)
+
+    def accept_invitation(self, invitation_id: Any) -> ArtifactInvitationAccepted:
+        """Accept: the artifact is shared with you from now on."""
+        data = self._c._request(
+            "POST", f"{_ROOT}invitations/{_id(invitation_id)}/accept/"
+        )
+        return ArtifactInvitationAccepted.model_validate(data)
+
+    def decline_invitation(self, invitation_id: Any) -> ArtifactInvitationDeclined:
+        """Decline: it goes and nothing is shared; the owner may invite again."""
+        data = self._c._request(
+            "POST", f"{_ROOT}invitations/{_id(invitation_id)}/decline/"
+        )
+        return ArtifactInvitationDeclined.model_validate(data)
 
     def delete(self, artifact_id: Any) -> Dict[str, Any]:
         """Delete the artifact (owner): its link and open frames stop; clones stay."""
@@ -806,9 +866,31 @@ class AsyncArtifacts:
         )
         return ArtifactMemberReceipt.model_validate(data)
 
-    async def remove_member(self, artifact_id: Any, username: str) -> Dict[str, Any]:
-        path = f"{_ROOT}{_id(artifact_id)}/members/{quote(username, safe='')}/"
+    async def remove_member(self, artifact_id: Any, member_id: Any) -> Dict[str, Any]:
+        path = f"{_ROOT}{_id(artifact_id)}/members/{_id(member_id)}/"
         return await self._c._request("DELETE", path)
+
+    async def invitations(
+        self, *, cursor: Optional[str] = None, page_size: Optional[int] = None
+    ) -> ArtifactPage[ArtifactInvitation]:
+        data = await self._c._request(
+            "GET", f"{_ROOT}invitations/", params=_page(cursor, page_size)
+        )
+        return ArtifactPage[ArtifactInvitation].model_validate(data)
+
+    async def accept_invitation(self, invitation_id: Any) -> ArtifactInvitationAccepted:
+        data = await self._c._request(
+            "POST", f"{_ROOT}invitations/{_id(invitation_id)}/accept/"
+        )
+        return ArtifactInvitationAccepted.model_validate(data)
+
+    async def decline_invitation(
+        self, invitation_id: Any
+    ) -> ArtifactInvitationDeclined:
+        data = await self._c._request(
+            "POST", f"{_ROOT}invitations/{_id(invitation_id)}/decline/"
+        )
+        return ArtifactInvitationDeclined.model_validate(data)
 
     async def delete(self, artifact_id: Any) -> Dict[str, Any]:
         return await self._c._request("DELETE", f"{_ROOT}{_id(artifact_id)}/")

@@ -581,8 +581,14 @@ client.artifacts.publish(
     idempotency_key="pod-racer-v2",
 )
 
-# a teammate may publish versions too; "view" lets them read and clone
-client.artifacts.add_member(racer.id, "teammate@example.com", role="edit")
+# invite a teammate to publish versions too ("view" lets them read and clone);
+# they accept first, and nothing is shared with them until then
+invited = client.artifacts.add_member(racer.id, "teammate@example.com", role="edit")
+print(invited.member.status)  # pending
+
+# on the teammate's side: what waits for them, and their answer
+for invitation in client.artifacts.invitations().results:
+    client.artifacts.accept_invitation(invitation.id)
 shared_with_me = client.artifacts.list(scope="shared")
 
 # your own copy of someone's artifact shared with sources
@@ -591,6 +597,12 @@ copy = client.artifacts.clone(
     idempotency_key="clone-1",
 )
 ```
+
+Sharing by name never tells anyone who an email or a username belongs to: an email
+answers the same whether an account has it, the owner sees each person as they typed
+them (`invited_as`) with `status` pending or accepted, and a member sees only which
+row is theirs (`you`). `remove_member(artifact_id, member.id)` stops sharing with an
+invited or accepted person; a member removes their own row to leave.
 
 Writes that create something take a caller-owned `idempotency_key`: reuse it only
 to retry the identical call. A version published on a stale `base_version`

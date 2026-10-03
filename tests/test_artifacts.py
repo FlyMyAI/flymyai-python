@@ -192,31 +192,92 @@ def test_a_stale_base_version_names_the_latest():
     assert raised.value.latest_version == 3 and raised.value.status_code == 412
 
 
-def test_people_by_name():
+MEMBER = str(uuid4())
+PENDING = {
+    "id": MEMBER,
+    "role": "edit",
+    "status": "pending",
+    "added_at": NOW,
+    "accepted_at": None,
+    "you": False,
+    "invited_as": "bo@example.test",
+}
+
+
+def test_people_by_name_are_invited_and_removed_by_member_id():
     seen = []
 
     def handler(request):
         seen.append((request.method, request.url.raw_path.decode(), request.content))
         if request.method == "POST":
             return response(
-                {
-                    "schema": "flymy.artifact.v1",
-                    "changed": True,
-                    "member": {"username": "bo", "role": "edit", "added_at": NOW},
-                },
-                201,
+                {"schema": "flymy.artifact.v1", "changed": True, "member": PENDING}, 201
             )
-        return response({"id": ARTIFACT, "removed": "bo b"})
+        return response({"id": ARTIFACT, "removed": MEMBER})
 
     with client_with(handler) as client:
         added = client.artifacts.add_member(ARTIFACT, "bo@example.test", role="edit")
-        client.artifacts.remove_member(ARTIFACT, "bo b")
-        with pytest.raises(ValueError):
-            client.artifacts.add_member(ARTIFACT, "bo", role="admin")
-    assert added.member.role == "edit" and added.changed
+        client.artifacts.remove_member(ARTIFACT, added.member.id)
+        for bad in (
+            lambda: client.artifacts.add_member(ARTIFACT, "bo", role="admin"),
+            # never a username or an email in a path
+            lambda: client.artifacts.remove_member(ARTIFACT, "bo b"),
+            lambda: client.artifacts.remove_member(ARTIFACT, "bo@example.test"),
+        ):
+            with pytest.raises(ValueError):
+                bad()
+    member = added.member
+    assert member.status == "pending" and member.accepted_at is None
+    assert member.invited_as == "bo@example.test" and not member.you
+    assert added.changed
     assert seen[0][:2] == ("POST", f"/api/v1/artifacts/{ARTIFACT}/members/")
     assert json.loads(seen[0][2]) == {"user": "bo@example.test", "role": "edit"}
-    assert seen[1][:2] == ("DELETE", f"/api/v1/artifacts/{ARTIFACT}/members/bo%20b/")
+    assert seen[1][:2] == ("DELETE", f"/api/v1/artifacts/{ARTIFACT}/members/{MEMBER}/")
+    assert len(seen) == 2
+
+
+def test_the_invited_person_lists_accepts_and_declines():
+    invitation = {
+        "id": MEMBER,
+        "artifact": {"id": ARTIFACT, "name": "Pod racer"},
+        "owner": {"username": "ana"},
+        "role": "edit",
+        "invited_as": "bo@example.test",
+        "status": "pending",
+        "invited_at": NOW,
+    }
+    seen = []
+
+    def handler(request):
+        seen.append((request.method, request.url.path, dict(request.url.params)))
+        if request.url.path.endswith("/accept/"):
+            return response({
+                "schema": "flymy.artifact.v1",
+                "invitation": {**invitation, "status": "accepted"},
+                "artifact": {**SUMMARY, "role": "editor"},
+            })
+        if request.url.path.endswith("/decline/"):
+            return response(
+                {"schema": "flymy.artifact.v1", "id": MEMBER, "declined": True}
+            )
+        return response(
+            {"results": [invitation], "next_cursor": None, "previous_cursor": None}
+        )
+
+    with client_with(handler) as client:
+        waiting = client.artifacts.invitations(page_size=5)
+        accepted = client.artifacts.accept_invitation(waiting.results[0].id)
+        declined = client.artifacts.decline_invitation(MEMBER)
+        with pytest.raises(ValueError):
+            client.artifacts.accept_invitation("../x")
+    first = waiting.results[0]
+    assert first.artifact.name == "Pod racer" and first.owner.username == "ana"
+    assert accepted.artifact.role == "editor" and declined.declined
+    assert seen == [
+        ("GET", "/api/v1/artifacts/invitations/", {"page_size": "5"}),
+        ("POST", f"/api/v1/artifacts/invitations/{MEMBER}/accept/", {}),
+        ("POST", f"/api/v1/artifacts/invitations/{MEMBER}/decline/", {}),
+    ]
 
 
 def test_files_from_a_directory_keep_text_as_text_and_skip_hidden(tmp_path):
@@ -293,6 +354,11 @@ V1_METHODS = {
     "add_member",
     "remove_member",
     "delete",
+    # S2 (2026-10-03, before v1 reached production): sharing by name is an invitation
+    # the person accepts, and remove_member takes the member's id
+    "invitations",
+    "accept_invitation",
+    "decline_invitation",
 }
 
 
