@@ -585,6 +585,13 @@ and resource-set/agent contracts remain available.
 
 ## Frontend artifacts
 
+Unreleased optional `runtime` on sync/async `artifacts.create` and `artifacts.publish`
+binds existing handles: `{"schema": "flymy.artifact-runtime.v1", "source":
+{"site": "<own-page-uuid>", "version": 1}, "calls": {"ask": "decide"}}`.
+The owner binds the exact source release; callers still need both artifact and source access.
+Omitting the argument on publish inherits it; `runtime=None` detaches it. Clones preserve
+call names as `needs_rebinding` and never inherit the source owner's executable binding.
+
 `AgentClient.artifacts` and `AsyncAgentClient.artifacts` manage frontend artifacts
 (`flymy.artifact.v1`): a small web page, a presentation or a mini game with
 immutable versions. Share it by link (with or without its sources) or with people
