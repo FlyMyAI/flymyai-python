@@ -21,6 +21,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 _ROOT = "/api/v1/artifacts/"
+_RUNTIME_UNSET = object()
 _HANDLE = re.compile(r"[A-Za-z0-9_-]{8,64}")
 _TEXT_SUFFIXES = {
     ".html",
@@ -80,6 +81,7 @@ class ArtifactFrame(_Model):
 
     url: str
     expires_at: datetime
+    runtime: Optional[Dict[str, Any]] = None
 
 
 class ArtifactView(ArtifactFrame):
@@ -90,6 +92,7 @@ class ArtifactView(ArtifactFrame):
 
 
 class ArtifactVersion(_Model):
+    runtime: Optional[Dict[str, Any]] = None
     version: int
     entry: str
     message: Optional[str] = None
@@ -119,6 +122,7 @@ class Artifact(ArtifactSummary):
 
 
 class ArtifactPlan(_Model):
+    runtime: Optional[Dict[str, Any]] = None
     version: int
     entry: str
     files_count: int
@@ -361,6 +365,7 @@ class Artifacts:
         message: Optional[str] = None,
         visibility: Optional[str] = None,
         with_sources: Optional[bool] = None,
+        runtime: Optional[Dict[str, Any]] = None,
         dry_run: bool = False,
     ) -> Union[ArtifactReceipt, ArtifactDryRun]:
         """Create an artifact from its files; version 1 goes live, private unless
@@ -374,6 +379,7 @@ class Artifacts:
             message=message,
             visibility=visibility,
             with_sources=with_sources,
+            runtime=runtime,
             dry_run=dry_run or None,
         )
         return _write(
@@ -391,6 +397,7 @@ class Artifacts:
         entry: Optional[str] = None,
         message: Optional[str] = None,
         publish: bool = True,
+        runtime: Any = _RUNTIME_UNSET,
         dry_run: bool = False,
     ) -> Union[ArtifactReceipt, ArtifactDryRun]:
         """A new version on top of ``base_version`` (the latest): ``files`` add or
@@ -405,6 +412,8 @@ class Artifacts:
             publish=publish,
             dry_run=dry_run or None,
         )
+        if runtime is not _RUNTIME_UNSET:
+            body["runtime"] = runtime
         data = self._c._request(
             "POST",
             f"{_ROOT}{_id(artifact_id)}/versions/",
@@ -617,6 +626,7 @@ class AsyncArtifacts:
         message: Optional[str] = None,
         visibility: Optional[str] = None,
         with_sources: Optional[bool] = None,
+        runtime: Optional[Dict[str, Any]] = None,
         dry_run: bool = False,
     ) -> Union[ArtifactReceipt, ArtifactDryRun]:
         body = _body(
@@ -627,6 +637,7 @@ class AsyncArtifacts:
             message=message,
             visibility=visibility,
             with_sources=with_sources,
+            runtime=runtime,
             dry_run=dry_run or None,
         )
         return _write(
@@ -646,6 +657,7 @@ class AsyncArtifacts:
         entry: Optional[str] = None,
         message: Optional[str] = None,
         publish: bool = True,
+        runtime: Any = _RUNTIME_UNSET,
         dry_run: bool = False,
     ) -> Union[ArtifactReceipt, ArtifactDryRun]:
         body = _body(
@@ -657,6 +669,8 @@ class AsyncArtifacts:
             publish=publish,
             dry_run=dry_run or None,
         )
+        if runtime is not _RUNTIME_UNSET:
+            body["runtime"] = runtime
         data = await self._c._request(
             "POST",
             f"{_ROOT}{_id(artifact_id)}/versions/",

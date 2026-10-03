@@ -297,3 +297,81 @@ V1_METHODS = {
 def test_the_v1_methods_stay(resource):
     methods = {name for name in dir(resource) if not name.startswith("_")}
     assert V1_METHODS <= methods
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+def test_optional_runtime_binding_inherit_and_explicit_detach(asynchronous):
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+    from threading import Thread
+    from flymyai.agents._client import SyncAgentClient
+
+    runtime = {
+        "schema": "flymy.artifact-runtime.v1",
+        "source": {"site": ARTIFACT, "version": 1},
+        "calls": {"ask": "decide"},
+    }
+    seen = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            seen.append(
+                json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            )
+            assert self.path.startswith("/api/v1/artifacts/")
+            payload = json.dumps(
+                {"schema": "flymy.artifact.v1", "artifact": SUMMARY, "version": PLAN}
+            ).encode()
+            self.send_response(201)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+    worker = Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    address = f"http://127.0.0.1:{server.server_port}"
+    try:
+        if asynchronous:
+
+            async def go():
+                client = AsyncAgentClient(api_key="fixture-key", base_url=address)
+                try:
+                    await client.artifacts.create(
+                        name="Bound",
+                        files=[],
+                        runtime=runtime,
+                        idempotency_key="create",
+                    )
+                    await client.artifacts.publish(
+                        ARTIFACT, base_version=1, idempotency_key="inherit"
+                    )
+                    await client.artifacts.publish(
+                        ARTIFACT, base_version=2, runtime=None, idempotency_key="detach"
+                    )
+                finally:
+                    await client._http.aclose()
+
+            asyncio.run(go())
+        else:
+            with SyncAgentClient(api_key="fixture-key", base_url=address) as client:
+                client.artifacts.create(
+                    name="Bound", files=[], runtime=runtime, idempotency_key="create"
+                )
+                client.artifacts.publish(
+                    ARTIFACT, base_version=1, idempotency_key="inherit"
+                )
+                client.artifacts.publish(
+                    ARTIFACT, base_version=2, runtime=None, idempotency_key="detach"
+                )
+    finally:
+        server.shutdown()
+        server.server_close()
+        worker.join(5)
+    assert not worker.is_alive()
+    assert seen[0]["runtime"] == runtime
+    assert "runtime" not in seen[1]
+    assert seen[2]["runtime"] is None

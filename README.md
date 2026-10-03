@@ -101,6 +101,41 @@ asyncio.run(main())
 
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction). A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
+### Config-defined apps and projects
+
+`client.apps` and `client.projects` are available on both agent clients. They
+return the versioned API dictionaries, including additional response fields.
+Use a backend that supports the app/project APIs; these additions are unreleased.
+
+```python
+from flymyai import AgentClient
+from flymyai.agents import artifact_files_from_directory
+
+with AgentClient() as client:
+    catalog = client.apps.catalog()
+    files = artifact_files_from_directory("./my-app")  # includes flymy.yaml
+    plan = client.apps.plan(files=files)
+    # Review the plan, permissions and cost before this separate apply step.
+    release = client.apps.apply(
+        files=files, plan_token=plan["plan_token"], idempotency_key="my-app-release-1"
+    )
+    project = client.projects.get("app:my-name/my-app")
+```
+
+To edit an applied app, plan and apply the same `app="owner/name"` and
+`overrides=[{"path": "...", "content": "..."}]`. `apps.files()` reads its stored
+template, `apps.release(id)` follows the returned release, and
+`apps.remove_instance()` removes an explicitly named on-demand instance.
+`projects.errors()` reads a bounded page of failures using `before`/`limit`.
+`projects.stop()` requires an idempotency key; restarting uses `start_plan()` then
+`start()` with that plan token and a key. Fleet projects support reading; their
+unsupported lifecycle operations remain backend errors.
+
+Writes are sent once. A stale plan raises `FlyMyAIAgentError` with the API response;
+review a new plan before applying it. A lost response does not cause an automatic
+retry or replan. Read the release/project state and keep the operation key bound
+to the same request.
+
 ### Limits for automatic subagents
 
 Ordinary `client.agents.run(...)` calls use the same delegation runtime as chat.
@@ -549,6 +584,13 @@ Self-hosted deployments keep it behind the independent
 and resource-set/agent contracts remain available.
 
 ## Frontend artifacts
+
+Unreleased optional `runtime` on sync/async `artifacts.create` and `artifacts.publish`
+binds existing handles: `{"schema": "flymy.artifact-runtime.v1", "source":
+{"site": "<own-page-uuid>", "version": 1}, "calls": {"ask": "decide"}}`.
+The owner binds the exact source release; callers still need both artifact and source access.
+Omitting the argument on publish inherits it; `runtime=None` detaches it. Clones preserve
+call names as `needs_rebinding` and never inherit the source owner's executable binding.
 
 `AgentClient.artifacts` and `AsyncAgentClient.artifacts` manage frontend artifacts
 (`flymy.artifact.v1`): a small web page, a presentation or a mini game with
