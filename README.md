@@ -548,6 +548,135 @@ Self-hosted deployments keep it behind the independent
 `MCP_PERSONAL_SHARING_ENABLED` gate, off by default. Existing inference clients
 and resource-set/agent contracts remain available.
 
+## Frontend artifacts
+
+`AgentClient.artifacts` and `AsyncAgentClient.artifacts` manage frontend artifacts
+(`flymy.artifact.v1`): a small web page, a presentation or a mini game with
+immutable versions. Share it by link (with or without its sources) or with people
+by name to view or edit, and clone anyone's shared artifact into your own copy.
+Artifacts are on for every account; `client.artifacts.status()` returns your limits.
+
+```python
+from flymyai import AgentClient
+from flymyai.agents import artifact_file, artifact_files_from_directory
+
+client = AgentClient(api_key="fly-...")
+
+# a folder (a built site, a game, a page copied from a Claude artifact)
+made = client.artifacts.create(
+    name="Pod racer",
+    files=artifact_files_from_directory("./pod-racer"),
+    visibility="link",
+    idempotency_key="pod-racer-create-1",
+)
+racer = made.artifact
+print(racer.share_url)
+
+# a new version on top of the latest; the other files are kept
+client.artifacts.publish(
+    racer.id,
+    base_version=racer.latest_version,
+    files=[artifact_file("js/app.js", "speed = 2")],
+    message="Faster pods",
+    idempotency_key="pod-racer-v2",
+)
+
+# invite a teammate to publish versions too ("view" lets them read and clone);
+# they accept first, and nothing is shared with them until then
+invited = client.artifacts.add_member(racer.id, "teammate@example.com", role="edit")
+print(invited.member.status)  # pending
+
+# on the teammate's side: what waits for them, and their answer
+for invitation in client.artifacts.invitations().results:
+    client.artifacts.accept_invitation(invitation.id)
+shared_with_me = client.artifacts.list(scope="shared")
+
+# your own copy of someone's artifact shared with sources
+copy = client.artifacts.clone(
+    share_link="https://app.flymy.ai/artifacts/s/<handle>",
+    idempotency_key="clone-1",
+)
+```
+
+Sharing by name never tells anyone who an email or a username belongs to: an email
+answers the same whether an account has it, the owner sees each person as they typed
+them (`invited_as`) with `status` pending or accepted, and a member sees only which
+row is theirs (`you`). `remove_member(artifact_id, member.id)` stops sharing with an
+invited or accepted person; a member removes their own row to leave.
+
+Writes that create something take a caller-owned `idempotency_key`: reuse it only
+to retry the identical call. A version published on a stale `base_version`
+raises `ArtifactStaleBaseVersionError` with `latest_version`. These are the v1
+methods and they stay: a breaking change would arrive as new methods next to
+them, never in place.
+
+
+## Projects
+
+`AgentClient.projects` and `AsyncAgentClient.projects` read and run your projects
+(`flymy.project.v1`): an app applied from one `flymy.yaml` (its pages, agents,
+servers, storage and budgets), a page published on its own, a fleet (a lead agent
+and the agents it starts) or a frontend artifact. A project is its config: creating, stopping and
+starting it are a plan and an apply of that config, and each leaves a release.
+
+```python
+from flymyai import AgentClient
+
+client = AgentClient(api_key="fly-...")
+
+for project in client.projects.list().projects:
+    print(project.id, project.status)
+
+# a plan creates nothing: show its price, then create exactly that plan
+plan = client.projects.plan(name="paint-arena", budget={"per_day_usd": "5"})
+print(plan.plan["usd_per_hour"], plan.plan["changes"])
+made = client.projects.create(
+    name="paint-arena",
+    budget={"per_day_usd": "5"},
+    plan_token=plan.plan_token,
+    idempotency_key="paint-arena-create-1",
+)
+
+# stop it (its servers stop and the rest of their holds is refunded), start it again
+client.projects.stop("app:me/paint-arena", idempotency_key="paint-arena-stop-1")
+start = client.projects.start("app:me/paint-arena")  # the plan, nothing changes
+print(start.plan["usd_per_hour"])
+client.projects.start(
+    "app:me/paint-arena",
+    plan_token=start.plan_token,
+    idempotency_key="paint-arena-start-1",
+)
+
+journal = client.projects.errors("app:me/paint-arena", limit=20)
+```
+
+Change an app by applying its `flymy.yaml` again with `AgentClient.apps`: `plan`
+shows what it would create, change or stop and its price, and `apply` applies
+exactly that plan as a release.
+
+```python
+import time
+
+from flymyai.agents import artifact_files_from_directory
+
+files = artifact_files_from_directory("./paint-arena")  # flymy.yaml at the root
+plan = client.apps.plan(files=files)
+print(plan.changes, plan.usd_per_hour)  # show the user before applying
+release = client.apps.apply(
+    files=files, plan_token=plan.plan_token, idempotency_key="paint-arena-apply-2"
+)
+while client.apps.status(release.release).status == "applying":
+    time.sleep(5)
+```
+
+`client.apps.files("me/paint-arena")` reads the applied template back; `plan` and
+`apply` also take `app="me/paint-arena"` with `overrides` to replace some files and
+keep the rest. `get`, `errors`, `templates` and `agent` (the project's own agent,
+created on first use) complete the projects set. A fleet (`fleet:<lead agent id>`) and a frontend artifact
+(`artifact:<artifact id>`) are read with `get` and `errors`; they have no project
+agent and are not stopped or started (an artifact changes through
+`client.artifacts`).
+
 ## Advanced agent helpers
 
 #### Draft an `input_schema` from a prompt
