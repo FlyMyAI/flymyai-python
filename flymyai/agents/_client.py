@@ -6,6 +6,7 @@ from typing import Any, Dict, Optional
 import httpx
 
 from flymyai.agents._artifacts import Artifacts, AsyncArtifacts
+from flymyai.agents._projects import AsyncProjects, Projects
 from flymyai.agents._mcp_sharing import McpTeams, AsyncMcpTeams
 from flymyai.agents._mcp_personal import McpShares, AsyncMcpShares
 
@@ -259,6 +260,7 @@ class SyncAgentClient:
         self.teams = McpTeams(self)
         self.shares = McpShares(self)
         self.artifacts = Artifacts(self)
+        self.projects = Projects(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = self._http.request(method, path, **kwargs)
@@ -328,6 +330,7 @@ class AsyncAgentClient:
         self.teams = AsyncMcpTeams(self)
         self.shares = AsyncMcpShares(self)
         self.artifacts = AsyncArtifacts(self)
+        self.projects = AsyncProjects(self)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
         resp = await self._http.request(method, path, **kwargs)

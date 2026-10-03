@@ -554,7 +554,7 @@ and resource-set/agent contracts remain available.
 (`flymy.artifact.v1`): a small web page, a presentation or a mini game with
 immutable versions. Share it by link (with or without its sources) or with people
 by name to view or edit, and clone anyone's shared artifact into your own copy.
-The module is on per account: check `client.artifacts.status().enabled`.
+Artifacts are on for every account; `client.artifacts.status()` returns your limits.
 
 ```python
 from flymyai import AgentClient
@@ -597,6 +597,48 @@ to retry the identical call. A version published on a stale `base_version`
 raises `ArtifactStaleBaseVersionError` with `latest_version`. These are the v1
 methods and they stay: a breaking change would arrive as new methods next to
 them, never in place.
+
+
+## Projects
+
+`AgentClient.projects` and `AsyncAgentClient.projects` read and run your projects
+(`flymy.project.v1`): an app applied from one `flymy.yaml` (its pages, agents,
+servers, storage and budgets), a page published on its own, or a fleet (a lead
+agent and the agents it starts). A project is its config: creating, stopping and
+starting it are a plan and an apply of that config, and each leaves a release.
+
+```python
+from flymyai import AgentClient
+
+client = AgentClient(api_key="fly-...")
+
+for project in client.projects.list().projects:
+    print(project.id, project.status)
+
+# a plan creates nothing: show its price, then create exactly that plan
+plan = client.projects.plan(name="paint-arena", budget={"per_day_usd": "5"})
+made = client.projects.create(
+    name="paint-arena",
+    budget={"per_day_usd": "5"},
+    plan_token=plan.plan_token,
+    idempotency_key="paint-arena-create-1",
+)
+
+# stop it (its servers stop and the rest of their holds is refunded), start it again
+client.projects.stop("app:me/paint-arena", idempotency_key="paint-arena-stop-1")
+start = client.projects.start("app:me/paint-arena")  # the plan and its usd_per_hour
+client.projects.start(
+    "app:me/paint-arena",
+    plan_token=start.plan_token,
+    idempotency_key="paint-arena-start-1",
+)
+
+journal = client.projects.errors("app:me/paint-arena", limit=20)
+```
+
+`get`, `errors`, `templates` and `agent` (the project's own agent, created on first
+use) complete the set. A fleet is read with `get` and `errors`; it has no project
+agent and is not stopped or started.
 
 ## Advanced agent helpers
 

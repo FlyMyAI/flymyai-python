@@ -187,3 +187,25 @@ __all__ += [
     "artifact_file",
     "artifact_files_from_directory",
 ]
+
+from flymyai.agents._projects import (
+    AsyncProjects,
+    Project,
+    ProjectAgent,
+    ProjectErrors,
+    ProjectList,
+    ProjectPlan,
+    Projects,
+    ProjectTemplates,
+)
+
+__all__ += [
+    "AsyncProjects",
+    "Project",
+    "ProjectAgent",
+    "ProjectErrors",
+    "ProjectList",
+    "ProjectPlan",
+    "Projects",
+    "ProjectTemplates",
+]
