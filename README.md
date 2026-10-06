@@ -533,6 +533,51 @@ async def main():
 asyncio.run(main())
 ```
 
+## Custom MCP servers and OAuth
+
+`client.mcp_servers` adds an MCP server by URL - a service that is not in the
+catalog, or a provider's own MCP endpoint - and calls it. `auth_type` is `none`,
+`api_key`, `bearer_token`, `basic` or `oauth`. With `oauth` FlyMyAI discovers
+the server's authorization and registers itself where the provider allows it;
+`authorize` returns a link a person opens to approve, and then the server is
+connected.
+
+```python
+import webbrowser
+
+from flymyai import AgentClient
+from flymyai.agents import McpServerOAuthError
+
+with AgentClient(api_key="fly-secret-key") as client:
+    server = client.mcp_servers.create(
+        name="Linear", url="https://mcp.linear.app/mcp", auth_type="oauth"
+    )
+    try:
+        authorization = client.mcp_servers.authorize(server.id)
+    except McpServerOAuthError as error:
+        if error.code != "oauth_client_required":
+            raise
+        # No automatic registration (Slack's MCP is like this): register
+        # error.redirect_uri in your own OAuth app, save its client ID and
+        # secret on the server, then authorize again.
+        client.mcp_servers.update(
+            server.id, oauth_client_id="...", oauth_client_secret="..."
+        )
+        authorization = client.mcp_servers.authorize(server.id)
+    webbrowser.open(authorization.authorize_url)  # works once, 15 minutes
+
+    # After the approval: status "connected", the tools in discovered_tools.
+    server = client.mcp_servers.get(server.id)
+    if server.status == "connected":
+        client.mcp_servers.call(
+            server.id, "list_issues", {"first": 5}, idempotency_key="issues-1"
+        )
+```
+
+`server.oauth` (owner only) says `authorized`, `reconnect_required` (authorize
+again), `issuer`, `scopes`, `client` and `redirect_uri`; tokens and the client
+secret never come back. `disconnect` forgets the grant.
+
 ## Personal MCP sharing
 
 The optional `AgentClient.shares` and `AsyncAgentClient.shares` clients manage

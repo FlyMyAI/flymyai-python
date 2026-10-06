@@ -10,6 +10,7 @@ from flymyai.agents._artifacts import Artifacts, AsyncArtifacts
 from flymyai.agents._projects import AsyncProjects, Projects
 from flymyai.agents._mcp_sharing import McpTeams, AsyncMcpTeams
 from flymyai.agents._mcp_personal import McpShares, AsyncMcpShares
+from flymyai.agents._mcp_servers import McpServers, AsyncMcpServers
 
 from flymyai.agents._resources import (
     AgentGroups,
@@ -107,6 +108,26 @@ class McpResourceSetStaleRevisionError(FlyMyAIAgentError):
         self.current_revision = current_revision
 
 
+class McpServerOAuthError(FlyMyAIAgentError):
+    """A custom MCP server's OAuth refused (``code`` ``oauth_*``). With
+    ``oauth_client_required`` the provider has no automatic client registration:
+    register ``redirect_uri`` in your own OAuth app, save its ``oauth_client_id`` and
+    ``oauth_client_secret`` on the server, then authorize again."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any = None,
+        code: str,
+        redirect_uri: Optional[str] = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, response_body=response_body)
+        self.code = code
+        self.redirect_uri = redirect_uri
+
+
 class ArtifactStaleBaseVersionError(FlyMyAIAgentError):
     """An artifact version was published on a ``base_version`` that is not the
     latest any more (HTTP 412): read :attr:`latest_version`, apply the change
@@ -198,6 +219,20 @@ def _raise_for_status(resp: httpx.Response) -> None:
             latest_version=latest if isinstance(latest, int) else None,
         )
 
+    if (
+        isinstance(body, dict)
+        and isinstance(body.get("code"), str)
+        and body["code"].startswith("oauth_")
+    ):
+        redirect_uri = body.get("redirect_uri")
+        raise McpServerOAuthError(
+            f"HTTP {resp.status_code}: {body.get('detail', body['code'])}",
+            status_code=resp.status_code,
+            response_body=body,
+            code=body["code"],
+            redirect_uri=redirect_uri if isinstance(redirect_uri, str) else None,
+        )
+
     detail = body.get("detail", body) if isinstance(body, dict) else body
     if resp.status_code == 502:
         raise SuggestSchemaError(
@@ -260,6 +295,7 @@ class SyncAgentClient:
         self.agent_groups = AgentGroups(self)
         self.teams = McpTeams(self)
         self.shares = McpShares(self)
+        self.mcp_servers = McpServers(self)
         self.artifacts = Artifacts(self)
         self.projects = Projects(self)
         self.apps = Apps(self)
@@ -331,6 +367,7 @@ class AsyncAgentClient:
         self.agent_groups = AsyncAgentGroups(self)
         self.teams = AsyncMcpTeams(self)
         self.shares = AsyncMcpShares(self)
+        self.mcp_servers = AsyncMcpServers(self)
         self.artifacts = AsyncArtifacts(self)
         self.projects = AsyncProjects(self)
         self.apps = AsyncApps(self)
