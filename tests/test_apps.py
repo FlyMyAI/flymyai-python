@@ -20,6 +20,23 @@ ANSWER = {
 }
 
 
+@pytest.mark.parametrize("async_client", [False, True])
+def test_shared_project_plan_and_create_preserve_exact_source_and_budget(async_client):
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.path, dict(request.headers), json.loads(request.content)))
+        return response(ANSWER)
+
+    options = {"template": "link:zUy4UnQ6jW90-QDW", "budget": {"per_day_usd": "1"}}
+    assert run_call(async_client, handler, "projects", "plan", "my-room", **options) == ANSWER
+    assert run_call(async_client, handler, "projects", "create", "my-room", plan_token="reviewed", idempotency_key="room-copy", **options) == ANSWER
+    assert seen[0][0].endswith("/projects/")
+    assert seen[0][2] == {"name": "my-room", **options}
+    assert seen[1][2] == {**seen[0][2], "plan_token": "reviewed"}
+    assert seen[1][1]["idempotency-key"] == "room-copy"
+
+
 def run_call(async_client, handler, surface, method, *args, **kwargs):
     if not async_client:
         with client_with(handler) as client:

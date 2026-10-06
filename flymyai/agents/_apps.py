@@ -188,6 +188,16 @@ class AsyncApps:
         )
 
 
+def _new_project(
+    name: str, template: str, description: Optional[str], budget: Optional[Dict[str, str]],
+) -> Dict[str, Any]:
+    return {
+        "name": name, "template": template,
+        **({"description": description} if description is not None else {}),
+        **({"budget": budget} if budget is not None else {}),
+    }
+
+
 class Projects:
     def __init__(self, client: Any) -> None:
         self._client = client
@@ -200,6 +210,28 @@ class Projects:
 
     def templates(self) -> Dict[str, Any]:
         return self._client._request("GET", _PROJECTS + "templates/")
+
+    def plan(
+        self, name: str, *, template: str = "empty",
+        description: Optional[str] = None, budget: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Preview an empty, gallery or link:<handle> project without spending."""
+        return self._client._request(
+            "POST", _PROJECTS,
+            json=_new_project(name, template, description, budget),
+        )
+
+    def create(
+        self, name: str, *, plan_token: str, idempotency_key: str,
+        template: str = "empty", description: Optional[str] = None,
+        budget: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Apply the reviewed plan once; link copies are private with empty stores."""
+        body = _new_project(name, template, description, budget)
+        body["plan_token"] = _token(plan_token)
+        return self._client._request(
+            "POST", _PROJECTS, json=body, headers=_key(idempotency_key),
+        )
 
     def errors(
         self, project: str, *, before: Optional[str] = None, limit: int = 50
@@ -244,6 +276,28 @@ class AsyncProjects:
 
     async def templates(self) -> Dict[str, Any]:
         return await self._client._request("GET", _PROJECTS + "templates/")
+
+    async def plan(
+        self, name: str, *, template: str = "empty",
+        description: Optional[str] = None, budget: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Preview an empty, gallery or link:<handle> project without spending."""
+        return await self._client._request(
+            "POST", _PROJECTS,
+            json=_new_project(name, template, description, budget),
+        )
+
+    async def create(
+        self, name: str, *, plan_token: str, idempotency_key: str,
+        template: str = "empty", description: Optional[str] = None,
+        budget: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Apply the reviewed plan once; link copies are private with empty stores."""
+        body = _new_project(name, template, description, budget)
+        body["plan_token"] = _token(plan_token)
+        return await self._client._request(
+            "POST", _PROJECTS, json=body, headers=_key(idempotency_key),
+        )
 
     async def errors(
         self, project: str, *, before: Optional[str] = None, limit: int = 50
