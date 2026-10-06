@@ -209,6 +209,7 @@ class Projects:
         return self._client._request("GET", _project(project))
 
     def templates(self) -> Dict[str, Any]:
+        """Gallery metadata, including optional public demo_url and thumbnail preview_url."""
         return self._client._request("GET", _PROJECTS + "templates/")
 
     def plan(
@@ -275,6 +276,7 @@ class AsyncProjects:
         return await self._client._request("GET", _project(project))
 
     async def templates(self) -> Dict[str, Any]:
+        """Gallery metadata, including optional public demo_url and thumbnail preview_url."""
         return await self._client._request("GET", _PROJECTS + "templates/")
 
     async def plan(
