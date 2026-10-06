@@ -116,7 +116,9 @@ def _fields(
         if url is not None and not url.startswith("https://"):
             raise ValueError("auth_type oauth needs an https:// server url")
     elif auth_type is not None and any(field is not None for field in oauth_fields):
-        raise ValueError("oauth_client_id, oauth_client_secret and oauth_scopes need auth_type oauth")
+        raise ValueError(
+            "oauth_client_id, oauth_client_secret and oauth_scopes need auth_type oauth"
+        )
     return _body(
         name=name,
         url=url,

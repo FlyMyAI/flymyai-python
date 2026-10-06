@@ -51,14 +51,12 @@ def recorder(answers):
 
     def handler(request):
         body = json.loads(request.content) if request.content else None
-        seen.append(
-            (
-                request.method,
-                request.url.path,
-                request.headers.get("Idempotency-Key"),
-                body,
-            )
-        )
+        seen.append((
+            request.method,
+            request.url.path,
+            request.headers.get("Idempotency-Key"),
+            body,
+        ))
         status, payload = answers(request)
         return response(payload, status)
 
@@ -138,14 +136,12 @@ def test_the_own_oauth_app_is_saved_with_only_the_fields_given():
         7, oauth_client_id="1234.5678", oauth_client_secret="app-secret"
     )
 
-    assert seen == [
-        (
-            "PATCH",
-            "/api/v1/agents/mcp-servers/7/",
-            None,
-            {"oauth_client_id": "1234.5678", "oauth_client_secret": "app-secret"},
-        )
-    ]
+    assert seen == [(
+        "PATCH",
+        "/api/v1/agents/mcp-servers/7/",
+        None,
+        {"oauth_client_id": "1234.5678", "oauth_client_secret": "app-secret"},
+    )]
 
 
 @pytest.mark.parametrize(
@@ -187,14 +183,20 @@ def test_invalid_settings_fail_before_any_request(kwargs, message):
 
 
 def test_listing_connecting_and_a_direct_call_with_its_key():
-    connected = {**SERVER, "status": "connected", "oauth": {**OAUTH, "authorized": True}}
+    connected = {
+        **SERVER,
+        "status": "connected",
+        "oauth": {**OAUTH, "authorized": True},
+    }
     seen, handler = recorder(
         lambda request: (
             (200, {"results": [connected]})
             if request.method == "GET"
-            else (200, {"result": {"ok": True}})
-            if request.url.path.endswith("/call/")
-            else (200, connected)
+            else (
+                (200, {"result": {"ok": True}})
+                if request.url.path.endswith("/call/")
+                else (200, connected)
+            )
         )
     )
     client = client_with(handler)
@@ -220,16 +222,16 @@ def test_async_authorize():
     async def scenario():
         def handler(request):
             assert request.url.path == "/api/v1/agents/mcp-servers/7/authorize/"
-            return response(
-                {
-                    "authorize_url": "https://mcp.example.test/authorize",
-                    "redirect_uri": REDIRECT,
-                    "expires_at": "2026-10-06T00:15:00Z",
-                    "server": SERVER,
-                }
-            )
+            return response({
+                "authorize_url": "https://mcp.example.test/authorize",
+                "redirect_uri": REDIRECT,
+                "expires_at": "2026-10-06T00:15:00Z",
+                "server": SERVER,
+            })
 
-        client = AsyncAgentClient(api_key="personal-key", base_url="https://example.test")
+        client = AsyncAgentClient(
+            api_key="personal-key", base_url="https://example.test"
+        )
         await client._http.aclose()
         client._http = httpx.AsyncClient(
             base_url="https://example.test",
