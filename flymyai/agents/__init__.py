@@ -2,6 +2,7 @@ from flymyai.agents._client import (
     AsyncAgentClient,
     FlyMyAIAgentError,
     McpResourceSetStaleRevisionError,
+    McpServerOAuthError,
     SuggestSchemaError,
     SyncAgentClient,
     VariablesValidationError,
@@ -59,6 +60,7 @@ __all__ = [
     # Exceptions
     "FlyMyAIAgentError",
     "McpResourceSetStaleRevisionError",
+    "McpServerOAuthError",
     "VariablesValidationError",
     "SuggestSchemaError",
     # Models
@@ -236,4 +238,20 @@ __all__ += [
     "AppRelease",
     "Apps",
     "AsyncApps",
+]
+
+from flymyai.agents._mcp_servers import (
+    AsyncMcpServers,
+    McpServer,
+    McpServerAuthorization,
+    McpServerOAuth,
+    McpServers,
+)
+
+__all__ += [
+    "AsyncMcpServers",
+    "McpServer",
+    "McpServerAuthorization",
+    "McpServerOAuth",
+    "McpServers",
 ]
