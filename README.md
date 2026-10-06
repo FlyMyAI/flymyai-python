@@ -101,6 +101,13 @@ asyncio.run(main())
 
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction). A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
+On the composition review backend, a tool call requiring owner approval returns
+an immutable pending receipt. Use `client.tools.get_operation(operation_id)` to
+read its current outcome; repeating the original call key preserves its receipt.
+API credentials cannot approve or reject it. The owner decides in their signed-in
+web session. An unknown consumed operation must be reconciled without another
+automatic call. Both synchronous and asynchronous clients expose this read.
+
 ### Config-defined apps and projects
 
 `client.apps` and `client.projects` are available on both agent clients. They
