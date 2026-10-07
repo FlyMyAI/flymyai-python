@@ -13,7 +13,9 @@ _FieldOutput = Tuple[str, _IOOutput, str]  # filename, io[binary], mime
 
 
 def is_binary_input(value: _BinaryInput) -> bool:
-    if isinstance(value, (bytes, BinaryIO)):
+    # typing.BinaryIO matches no file object at runtime, so open files and BytesIO
+    # were refused although to_io handles every io.BufferedIOBase.
+    if isinstance(value, (bytes, io.BufferedIOBase, BinaryIO)):
         return True
     if isinstance(value, str):
         try:
@@ -57,7 +59,10 @@ class BinaryField(BaseField):
     def serialize(self, value=None) -> Tuple[Union[str, Any], _IOOutput, Optional[str]]:
         value = value or self.value
         io_obj = self.to_io(value)
-        filename = io_obj.name
+        # A BytesIO has no name; an anonymous file still needs one in the form.
+        filename = getattr(io_obj, "name", None)
+        if not isinstance(filename, str):
+            filename = uuid.uuid4().hex
         mime = mimetypes.guess_type(filename)[0] or "applications/octet-stream"
         io_obj.seek(0)
         return filename, io_obj, mime
