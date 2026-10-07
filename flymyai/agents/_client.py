@@ -7,6 +7,7 @@ import httpx
 
 from flymyai.agents._artifacts import Artifacts, AsyncArtifacts
 from flymyai.agents._apps import Apps, AsyncApps, Projects, AsyncProjects
+from flymyai.agents._sandbox import Sandboxes, AsyncSandboxes
 from flymyai.agents._mcp_sharing import McpTeams, AsyncMcpTeams
 from flymyai.agents._mcp_personal import McpShares, AsyncMcpShares
 
@@ -261,6 +262,7 @@ class SyncAgentClient:
         self.shares = McpShares(self)
         self.artifacts = Artifacts(self)
         self.apps = Apps(self)
+        self.sandboxes = Sandboxes(self)
         self.projects = Projects(self)
 
     def _request(self, method: str, path: str, **kwargs: Any) -> Any:
@@ -332,6 +334,7 @@ class AsyncAgentClient:
         self.shares = AsyncMcpShares(self)
         self.artifacts = AsyncArtifacts(self)
         self.apps = AsyncApps(self)
+        self.sandboxes = AsyncSandboxes(self)
         self.projects = AsyncProjects(self)
 
     async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
