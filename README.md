@@ -101,6 +101,48 @@ asyncio.run(main())
 
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction). A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
+On the composition review backend, a tool call requiring owner approval returns
+an immutable pending receipt. Use `client.tools.get_operation(operation_id)` to
+read its current outcome; repeating the original call key preserves its receipt.
+API credentials cannot approve or reject it. The owner decides in their signed-in
+web session. An unknown consumed operation must be reconciled without another
+automatic call. Both synchronous and asynchronous clients expose this read.
+
+### Config-defined apps and projects
+
+`client.apps` and `client.projects` are available on both agent clients. They
+retain the published typed App/Project models, including additional response fields.
+Use a backend that supports the app/project APIs; these additions are unreleased.
+
+```python
+from flymyai import AgentClient
+from flymyai.agents import artifact_files_from_directory
+
+with AgentClient() as client:
+    catalog = client.apps.catalog()
+    files = artifact_files_from_directory("./my-app")  # includes flymy.yaml
+    plan = client.apps.plan(files=files)
+    # Review the plan, permissions and cost before this separate apply step.
+    release = client.apps.apply(
+        files=files, plan_token=plan.plan_token, idempotency_key="my-app-release-1"
+    )
+    project = client.projects.get("app:my-name/my-app")
+```
+
+To edit an applied app, plan and apply the same `app="owner/name"` and
+`overrides=[{"path": "...", "content": "..."}]`. `apps.files()` reads its stored
+template, `apps.release(id)` follows the returned release, and
+`apps.remove_instance()` removes an explicitly named on-demand instance.
+`projects.errors()` reads a bounded page of failures using `before`/`limit`.
+`projects.stop()` requires an idempotency key; restarting uses `start_plan()` then
+`start()` with that plan token and a key. Fleet and Artifact projects support reading; unsupported lifecycle operations
+are rejected before network dispatch.
+
+Writes are sent once. A stale plan raises `FlyMyAIAgentError` with the API response;
+review a new plan before applying it. A lost response does not cause an automatic
+retry or replan. Read the release/project state and keep the operation key bound
+to the same request.
+
 ### Limits for automatic subagents
 
 Ordinary `client.agents.run(...)` calls use the same delegation runtime as chat.
@@ -595,6 +637,13 @@ and resource-set/agent contracts remain available.
 
 ## Frontend artifacts
 
+Unreleased optional `runtime` on sync/async `artifacts.create` and `artifacts.publish`
+binds existing handles: `{"schema": "flymy.artifact-runtime.v1", "source":
+{"site": "<own-page-uuid>", "version": 1}, "calls": {"ask": "decide"}}`.
+The owner binds the exact source release; callers still need both artifact and source access.
+Omitting the argument on publish inherits it; `runtime=None` detaches it. Clones preserve
+call names as `needs_rebinding` and never inherit the source owner's executable binding.
+
 `AgentClient.artifacts` and `AsyncAgentClient.artifacts` manage frontend artifacts
 (`flymy.artifact.v1`): a small web page, a presentation or a mini game with
 immutable versions. Share it by link (with or without its sources) or with people
@@ -721,6 +770,45 @@ created on first use) complete the projects set. A fleet (`fleet:<lead agent id>
 (`artifact:<artifact id>`) are read with `get` and `errors`; they have no project
 agent and are not stopped or started (an artifact changes through
 `client.artifacts`).
+
+## Scoped sandboxes (review candidate)
+
+The target's `client.apps.catalog()` must advertise `module:flymy/sandbox`
+version `1.1.0` and the `sandbox_*` surface before using this extension. A config
+declares the sandbox and its finite budget; applying it alone rents no VM.
+Published Apps/Projects and custom MCP OAuth methods remain unchanged.
+
+```python
+# Apply a config containing modules.computer: {use: flymy/sandbox@1.1.0}
+# and billing.budgets.project first. Keep this account client outside the VM.
+lease = client.sandboxes.call(
+    "sandbox_create", app="me/lab", resource="computer.tool",
+    arguments={"ttl_seconds": 120}, idempotency_key="lab-create-1",
+)["output"]
+sandbox_id = lease["sandbox"]
+state = client.sandboxes.call(
+    "sandbox_status", app="me/lab", resource="computer.tool",
+    arguments={"sandbox": sandbox_id},
+)
+# Once running, sandbox_connect installs the scoped runtime SDK for with.calls.
+client.sandboxes.call(
+    "sandbox_connect", app="me/lab", resource="computer.tool",
+    arguments={"sandbox": sandbox_id}, idempotency_key="lab-connect-1",
+)
+client.sandboxes.call(
+    "sandbox_stop", app="me/lab", resource="computer.tool",
+    arguments={"sandbox": sandbox_id}, idempotency_key="lab-stop-1",
+)
+```
+
+Inside the VM, import `flymy` from `/tmp/flymy_sandbox.py`. Its declared model,
+tool, private Storage and Artifact routes use the existing runtime SDK; no
+account or provider key is needed. Save session JSON in private Storage and
+restore it into a new lease. Runtime Artifact publication is private unless the
+call explicitly requests `visibility="link"`. `sandbox_revoke` denies new VM
+calls immediately; stopping also tears down the VM and settles its unused hold.
+Retries of writes must keep the same key and arguments. An unknown command
+outcome must be reconciled without rerunning the command under a new key.
 
 ## Advanced agent helpers
 

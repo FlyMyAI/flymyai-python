@@ -197,6 +197,28 @@ class Apps:
         return AppRelease.model_validate(data)
 
 
+    def list(self) -> Dict[str, Any]:
+        return self._c._request("GET", _ROOT)
+    def catalog(self) -> Dict[str, Any]:
+        return self._c._request("GET", _ROOT + "catalog/")
+    def release(self, release_id: Any) -> Dict[str, Any]:
+        return self._c._request("GET", f"{_ROOT}releases/{UUID(str(release_id))}/")
+    def remove_instance(
+        self,
+        app: str,
+        module: str,
+        key: str,
+        *,
+        idempotency_key: str,
+    ) -> Dict[str, Any]:
+        return self._c._request(
+            "POST",
+            _ROOT + "remove/",
+            json={"app": app, "module": module, "key": key},
+            headers=_key(idempotency_key),
+        )
+
+
 class AsyncApps:
     """``client.apps`` on the async client."""
 
@@ -254,3 +276,27 @@ class AsyncApps:
             "GET", f"{_ROOT}releases/{UUID(str(release_id))}/"
         )
         return AppRelease.model_validate(data)
+
+
+    async def list(self) -> Dict[str, Any]:
+        return await self._c._request("GET", _ROOT)
+    async def catalog(self) -> Dict[str, Any]:
+        return await self._c._request("GET", _ROOT + "catalog/")
+    async def release(self, release_id: Any) -> Dict[str, Any]:
+        return await self._c._request(
+            "GET", f"{_ROOT}releases/{UUID(str(release_id))}/"
+        )
+    async def remove_instance(
+        self,
+        app: str,
+        module: str,
+        key: str,
+        *,
+        idempotency_key: str,
+    ) -> Dict[str, Any]:
+        return await self._c._request(
+            "POST",
+            _ROOT + "remove/",
+            json={"app": app, "module": module, "key": key},
+            headers=_key(idempotency_key),
+        )

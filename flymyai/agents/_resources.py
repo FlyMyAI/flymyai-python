@@ -1128,7 +1128,12 @@ class Tools:
         arguments: Optional[Dict[str, Any]] = None,
         execution_id: Optional[str] = None,
     ) -> Any:
-        """Invoke a tool action in an optional explicit owner chat context."""
+        """Invoke a tool action in an optional explicit owner chat context.
+
+        A required owner approval returns an immutable pending receipt. Read its
+        current outcome with ``get_operation``; API credentials cannot approve.
+        Replaying this key keeps the original receipt, without another dispatch.
+        """
         data = self._c._request(
             "POST",
             f"/api/v1/agents/tools/{tool_id}/call/",
@@ -1136,6 +1141,13 @@ class Tools:
             headers=_idempotency_headers(idempotency_key),
         )
         return data
+
+    def get_operation(self, operation_id: str) -> Dict[str, Any]:
+        """Read one durable outcome. Never automatically resend an unknown call."""
+        operation_id = _validate_public_uuid(operation_id, field_name="operation_id")
+        return self._c._request(
+            "GET", f"/api/v1/agents/tool-operations/{operation_id}/"
+        )
 
 
 class McpResourceSets:
@@ -2414,6 +2426,14 @@ class AsyncTools:
             headers=_idempotency_headers(idempotency_key),
         )
         return data
+
+
+    async def get_operation(self, operation_id: str) -> Dict[str, Any]:
+        """Read one durable outcome; owner approval remains outside API credentials."""
+        operation_id = _validate_public_uuid(operation_id, field_name="operation_id")
+        return await self._c._request(
+            "GET", f"/api/v1/agents/tool-operations/{operation_id}/"
+        )
 
 
 class AsyncMcpResourceSets:

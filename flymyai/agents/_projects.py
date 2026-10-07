@@ -253,6 +253,10 @@ class Projects:
         )
         return Project.model_validate(data)
 
+    def start_plan(self, project_id: str) -> ProjectPlan:
+        """Read the restart plan without applying it."""
+        return self.start(project_id)
+
     def start(
         self,
         project_id: str,
@@ -342,6 +346,10 @@ class AsyncProjects:
             headers=_key(idempotency_key),
         )
         return Project.model_validate(data)
+
+    async def start_plan(self, project_id: str) -> ProjectPlan:
+        """Read the restart plan without applying it."""
+        return await self.start(project_id)
 
     async def start(
         self,
