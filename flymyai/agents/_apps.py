@@ -196,13 +196,15 @@ class Apps:
         data = self._c._request("GET", f"{_ROOT}releases/{UUID(str(release_id))}/")
         return AppRelease.model_validate(data)
 
-
     def list(self) -> Dict[str, Any]:
         return self._c._request("GET", _ROOT)
+
     def catalog(self) -> Dict[str, Any]:
         return self._c._request("GET", _ROOT + "catalog/")
+
     def release(self, release_id: Any) -> Dict[str, Any]:
         return self._c._request("GET", f"{_ROOT}releases/{UUID(str(release_id))}/")
+
     def remove_instance(
         self,
         app: str,
@@ -277,15 +279,17 @@ class AsyncApps:
         )
         return AppRelease.model_validate(data)
 
-
     async def list(self) -> Dict[str, Any]:
         return await self._c._request("GET", _ROOT)
+
     async def catalog(self) -> Dict[str, Any]:
         return await self._c._request("GET", _ROOT + "catalog/")
+
     async def release(self, release_id: Any) -> Dict[str, Any]:
         return await self._c._request(
             "GET", f"{_ROOT}releases/{UUID(str(release_id))}/"
         )
+
     async def remove_instance(
         self,
         app: str,

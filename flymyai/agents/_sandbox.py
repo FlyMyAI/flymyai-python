@@ -4,30 +4,26 @@ from typing import Any, Dict, Optional
 
 from flymyai.agents._artifacts import _key
 
-ACTIONS = frozenset(
-    {
-        "sandbox_create",
-        "sandbox_list",
-        "sandbox_status",
-        "sandbox_command",
-        "sandbox_command_status",
-        "sandbox_read_file",
-        "sandbox_write_file",
-        "sandbox_desktop",
-        "sandbox_connect",
-        "sandbox_revoke",
-        "sandbox_stop",
-    }
-)
-READS = frozenset(
-    {
-        "sandbox_list",
-        "sandbox_status",
-        "sandbox_command_status",
-        "sandbox_read_file",
-        "sandbox_desktop",
-    }
-)
+ACTIONS = frozenset({
+    "sandbox_create",
+    "sandbox_list",
+    "sandbox_status",
+    "sandbox_command",
+    "sandbox_command_status",
+    "sandbox_read_file",
+    "sandbox_write_file",
+    "sandbox_desktop",
+    "sandbox_connect",
+    "sandbox_revoke",
+    "sandbox_stop",
+})
+READS = frozenset({
+    "sandbox_list",
+    "sandbox_status",
+    "sandbox_command_status",
+    "sandbox_read_file",
+    "sandbox_desktop",
+})
 
 
 def _request(
@@ -65,7 +61,7 @@ class Sandboxes:
         arguments: Optional[Dict[str, Any]] = None,
         idempotency_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Call the actions discovered through apps.catalog(). Writes require a stable key.
+        """Call actions discovered through apps.catalog(). Writes need a stable key.
 
         sandbox_connect installs the native runtime SDK in the VM. This SDK's
         account API key must never be copied into customer code or the VM.

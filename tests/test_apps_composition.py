@@ -18,7 +18,9 @@ ANSWER = {
     "plan_token": "reviewed",
     "future": {"kept": True},
     "project": PROJECT,
-    "id": PROJECT, "kind": "app", "name": "maze",
+    "id": PROJECT,
+    "kind": "app",
+    "name": "maze",
 }
 
 
@@ -27,12 +29,29 @@ def test_shared_project_plan_and_create_preserve_exact_source_and_budget(async_c
     seen = []
 
     def handler(request):
-        seen.append((request.url.path, dict(request.headers), json.loads(request.content)))
+        seen.append(
+            (request.url.path, dict(request.headers), json.loads(request.content))
+        )
         return response(ANSWER)
 
     options = {"template": "link:zUy4UnQ6jW90-QDW", "budget": {"per_day_usd": "1"}}
-    assert run_call(async_client, handler, "projects", "plan", name="my-room", **options) == ANSWER
-    assert run_call(async_client, handler, "projects", "create", name="my-room", plan_token="reviewed", idempotency_key="room-copy", **options) == ANSWER
+    assert (
+        run_call(async_client, handler, "projects", "plan", name="my-room", **options)
+        == ANSWER
+    )
+    assert (
+        run_call(
+            async_client,
+            handler,
+            "projects",
+            "create",
+            name="my-room",
+            plan_token="reviewed",
+            idempotency_key="room-copy",
+            **options,
+        )
+        == ANSWER
+    )
     assert seen[0][0].endswith("/projects/")
     assert seen[0][2] == {"name": "my-room", **options}
     assert seen[1][2] == {**seen[0][2], "plan_token": "reviewed"}
@@ -43,7 +62,11 @@ def run_call(async_client, handler, surface, method, *args, **kwargs):
     if not async_client:
         with client_with(handler) as client:
             result = getattr(getattr(client, surface), method)(*args, **kwargs)
-            return result.model_dump(exclude_unset=True) if hasattr(result, "model_dump") else result
+            return (
+                result.model_dump(exclude_unset=True)
+                if hasattr(result, "model_dump")
+                else result
+            )
 
     async def run():
         client = AsyncAgentClient(
@@ -57,7 +80,11 @@ def run_call(async_client, handler, surface, method, *args, **kwargs):
         )
         async with client:
             result = await getattr(getattr(client, surface), method)(*args, **kwargs)
-            return result.model_dump(exclude_unset=True) if hasattr(result, "model_dump") else result
+            return (
+                result.model_dump(exclude_unset=True)
+                if hasattr(result, "model_dump")
+                else result
+            )
 
     return asyncio.run(run())
 
@@ -166,7 +193,14 @@ def test_sync_async_versioned_control_contract(
     async_client, surface, method, args, kwargs, verb, path, body
 ):
     seen = []
-    expected_answer = {**ANSWER, **({"release": str(RELEASE), "status": "applying"} if surface == "apps" and method == "apply" else {})}
+    expected_answer = {
+        **ANSWER,
+        **(
+            {"release": str(RELEASE), "status": "applying"}
+            if surface == "apps" and method == "apply"
+            else {}
+        ),
+    }
 
     def handler(request):
         seen.append(request)
@@ -182,7 +216,10 @@ def test_sync_async_versioned_control_contract(
             }
         return response(expected_answer)
 
-    assert run_call(async_client, handler, surface, method, *args, **kwargs) == expected_answer
+    assert (
+        run_call(async_client, handler, surface, method, *args, **kwargs)
+        == expected_answer
+    )
     assert len(seen) == 1
 
 

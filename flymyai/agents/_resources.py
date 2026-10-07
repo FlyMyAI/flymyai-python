@@ -2427,7 +2427,6 @@ class AsyncTools:
         )
         return data
 
-
     async def get_operation(self, operation_id: str) -> Dict[str, Any]:
         """Read one durable outcome; owner approval remains outside API credentials."""
         operation_id = _validate_public_uuid(operation_id, field_name="operation_id")
