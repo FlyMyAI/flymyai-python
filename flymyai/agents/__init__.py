@@ -2,6 +2,7 @@ from flymyai.agents._client import (
     AsyncAgentClient,
     FlyMyAIAgentError,
     McpResourceSetStaleRevisionError,
+    McpServerOAuthError,
     SuggestSchemaError,
     SyncAgentClient,
     VariablesValidationError,
@@ -59,6 +60,7 @@ __all__ = [
     # Exceptions
     "FlyMyAIAgentError",
     "McpResourceSetStaleRevisionError",
+    "McpServerOAuthError",
     "VariablesValidationError",
     "SuggestSchemaError",
     # Models
@@ -102,4 +104,154 @@ __all__ = [
     "RuntimeConnections",
     "SchemaSuggestion",
     "Tool",
+]
+
+from flymyai.agents._mcp_sharing import (
+    McpTeam,
+    McpTeamPage,
+    McpTeamConnection,
+    McpTeamDevice,
+    McpTeamInvite,
+    McpTeamError,
+)
+from flymyai.agents._mcp_personal import McpShare, McpSharePerson, McpPersonalInvitation
+
+__all__ += [
+    "McpTeam",
+    "McpTeamPage",
+    "McpTeamConnection",
+    "McpTeamDevice",
+    "McpTeamInvite",
+    "McpTeamError",
+    "McpShare",
+    "McpSharePerson",
+    "McpPersonalInvitation",
+]
+
+from flymyai.agents._artifacts import (
+    Artifact,
+    ArtifactAuthor,
+    ArtifactClone,
+    ArtifactDryRun,
+    ArtifactEvent,
+    ArtifactFile,
+    ArtifactFiles,
+    ArtifactFileText,
+    ArtifactForkedFrom,
+    ArtifactFrame,
+    ArtifactInvitation,
+    ArtifactInvitationAccepted,
+    ArtifactInvitationDeclined,
+    ArtifactInvitedTo,
+    ArtifactLineage,
+    ArtifactLiveVersion,
+    ArtifactMember,
+    ArtifactMemberReceipt,
+    ArtifactMembers,
+    ArtifactPage,
+    ArtifactPlan,
+    ArtifactReceipt,
+    ArtifactShare,
+    ArtifactSummary,
+    ArtifactVersion,
+    ArtifactView,
+    Artifacts,
+    ArtifactsStatus,
+    AsyncArtifacts,
+    artifact_file,
+    artifact_files_from_directory,
+)
+from flymyai.agents._client import ArtifactStaleBaseVersionError
+
+__all__ += [
+    "Artifact",
+    "ArtifactAuthor",
+    "ArtifactClone",
+    "ArtifactDryRun",
+    "ArtifactEvent",
+    "ArtifactFile",
+    "ArtifactFiles",
+    "ArtifactFileText",
+    "ArtifactForkedFrom",
+    "ArtifactFrame",
+    "ArtifactInvitation",
+    "ArtifactInvitationAccepted",
+    "ArtifactInvitationDeclined",
+    "ArtifactInvitedTo",
+    "ArtifactLineage",
+    "ArtifactLiveVersion",
+    "ArtifactMember",
+    "ArtifactMemberReceipt",
+    "ArtifactMembers",
+    "ArtifactPage",
+    "ArtifactPlan",
+    "ArtifactReceipt",
+    "ArtifactShare",
+    "ArtifactStaleBaseVersionError",
+    "ArtifactSummary",
+    "ArtifactVersion",
+    "ArtifactView",
+    "Artifacts",
+    "ArtifactsStatus",
+    "AsyncArtifacts",
+    "artifact_file",
+    "artifact_files_from_directory",
+]
+
+from flymyai.agents._projects import (
+    AsyncProjects,
+    Project,
+    ProjectAgent,
+    ProjectCreated,
+    ProjectErrors,
+    ProjectList,
+    ProjectPlan,
+    Projects,
+    ProjectTemplates,
+)
+
+__all__ += [
+    "AsyncProjects",
+    "Project",
+    "ProjectAgent",
+    "ProjectCreated",
+    "ProjectErrors",
+    "ProjectList",
+    "ProjectPlan",
+    "Projects",
+    "ProjectTemplates",
+]
+
+from flymyai.agents._apps import (
+    AppFile,
+    AppFiles,
+    AppPlan,
+    AppRelease,
+    Apps,
+    AsyncApps,
+)
+
+__all__ += [
+    "AppFile",
+    "AppFiles",
+    "AppPlan",
+    "AppRelease",
+    "Apps",
+    "AsyncApps",
+]
+
+from flymyai.agents._mcp_servers import (
+    AsyncMcpServers,
+    McpServer,
+    McpServerAuthorization,
+    McpServerOAuth,
+    McpServers,
+)
+
+__all__ += [
+    "AsyncMcpServers",
+    "McpServer",
+    "McpServerAuthorization",
+    "McpServerOAuth",
+    "McpServers",
 ]

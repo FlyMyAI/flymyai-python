@@ -101,6 +101,63 @@ asyncio.run(main())
 
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction). A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
+On the composition review backend, a tool call requiring owner approval returns
+an immutable pending receipt. Use `client.tools.get_operation(operation_id)` to
+read its current outcome; repeating the original call key preserves its receipt.
+API credentials cannot approve or reject it. The owner decides in their signed-in
+web session. An unknown consumed operation must be reconciled without another
+automatic call. Both synchronous and asynchronous clients expose this read.
+
+### Config-defined apps and projects
+
+`client.apps` and `client.projects` are available on both agent clients. They
+retain the published typed App/Project models, including additional response fields.
+Use a backend that supports the app/project APIs; these additions are unreleased.
+
+```python
+from flymyai import AgentClient
+from flymyai.agents import artifact_files_from_directory
+
+with AgentClient() as client:
+    catalog = client.apps.catalog()
+    files = artifact_files_from_directory("./my-app")  # includes flymy.yaml
+    plan = client.apps.plan(files=files)
+    # Review the plan, permissions and cost before this separate apply step.
+    release = client.apps.apply(
+        files=files, plan_token=plan.plan_token, idempotency_key="my-app-release-1"
+    )
+    project = client.projects.get("app:my-name/my-app")
+```
+
+To edit an applied app, plan and apply the same `app="owner/name"` and
+`overrides=[{"path": "...", "content": "..."}]`. `apps.files()` reads its stored
+template, `apps.release(id)` follows the returned release, and
+`apps.remove_instance()` removes an explicitly named on-demand instance.
+`projects.errors()` reads a bounded page of failures using `before`/`limit`.
+`projects.stop()` requires an idempotency key; restarting uses `start_plan()` then
+`start()` with that plan token and a key. Fleet and Artifact projects support reading; unsupported lifecycle operations
+are rejected before network dispatch.
+
+Writes are sent once. A stale plan raises `FlyMyAIAgentError` with the API response;
+review a new plan before applying it. A lost response does not cause an automatic
+retry or replan. Read the release/project state and keep the operation key bound
+to the same request.
+
+### Limits for automatic subagents
+
+Ordinary `client.agents.run(...)` calls use the same delegation runtime as chat.
+Pass `subagent_limits={"cap_usd": "3", "max_children": 6, "max_parallel": 3}`
+alongside the required `idempotency_key` to pin owner limits for a new run.
+`cap_usd=0` disables helpers. The cap covers subagents and their tools; lead
+charges remain separate. The server validates limits before starting work and
+rejects a changed request under a reused idempotency key.
+
+Sync and async clients support this option. Owner
+`client.compilations.run_instruction(...)` and `run_instruction_and_wait(...)`
+accept it too; omission inherits the frozen source run's limits. Scheduled runs
+inherit those limits automatically. Embedded customer calls cannot override
+owner limits. Owner run responses expose the effective `subagent_limits`.
+
 ## Personal connection first
 
 A new user starts in one implicit personal space. The first connection of a
@@ -517,6 +574,241 @@ async def main():
 
 asyncio.run(main())
 ```
+
+## Custom MCP servers and OAuth
+
+`client.mcp_servers` adds an MCP server by URL - a service that is not in the
+catalog, or a provider's own MCP endpoint - and calls it. `auth_type` is `none`,
+`api_key`, `bearer_token`, `basic` or `oauth`. With `oauth` FlyMyAI discovers
+the server's authorization and registers itself where the provider allows it;
+`authorize` returns a link a person opens to approve, and then the server is
+connected.
+
+```python
+import webbrowser
+
+from flymyai import AgentClient
+from flymyai.agents import McpServerOAuthError
+
+with AgentClient(api_key="fly-secret-key") as client:
+    server = client.mcp_servers.create(
+        name="Linear", url="https://mcp.linear.app/mcp", auth_type="oauth"
+    )
+    try:
+        authorization = client.mcp_servers.authorize(server.id)
+    except McpServerOAuthError as error:
+        if error.code != "oauth_client_required":
+            raise
+        # No automatic registration (Slack's MCP is like this): register
+        # error.redirect_uri in your own OAuth app, save its client ID and
+        # secret on the server, then authorize again.
+        client.mcp_servers.update(
+            server.id, oauth_client_id="...", oauth_client_secret="..."
+        )
+        authorization = client.mcp_servers.authorize(server.id)
+    webbrowser.open(authorization.authorize_url)  # works once, 15 minutes
+
+    # After the approval: status "connected", the tools in discovered_tools.
+    server = client.mcp_servers.get(server.id)
+    if server.status == "connected":
+        client.mcp_servers.call(
+            server.id, "list_issues", {"first": 5}, idempotency_key="issues-1"
+        )
+```
+
+`server.oauth` (owner only) says `authorized`, `reconnect_required` (authorize
+again), `issuer`, `scopes`, `client` and `redirect_uri`; tokens and the client
+secret never come back. `disconnect` forgets the grant.
+
+## Personal MCP sharing
+
+The optional `AgentClient.shares` and `AsyncAgentClient.shares` clients manage
+email invitations, exact-connection grants, device tokens and revocation.
+A recipient must verify the addressed email and explicitly pass
+`accept_billing=True` when accepting. FlyMy execution charges use the recipient's
+wallet, without owner-wallet fallback. Provider charges remain with the connected
+account; existing team MCP calls continue using the team wallet.
+
+Personal sharing is live on FlyMy.AI production (backend and Agents MCP) since
+2026-09-25; see the [sharing guide](https://docs.flymy.ai/agents/guides/mcp-personal-sharing/).
+Self-hosted deployments keep it behind the independent
+`MCP_PERSONAL_SHARING_ENABLED` gate, off by default. Existing inference clients
+and resource-set/agent contracts remain available.
+
+## Frontend artifacts
+
+Unreleased optional `runtime` on sync/async `artifacts.create` and `artifacts.publish`
+binds existing handles: `{"schema": "flymy.artifact-runtime.v1", "source":
+{"site": "<own-page-uuid>", "version": 1}, "calls": {"ask": "decide"}}`.
+The owner binds the exact source release; callers still need both artifact and source access.
+Omitting the argument on publish inherits it; `runtime=None` detaches it. Clones preserve
+call names as `needs_rebinding` and never inherit the source owner's executable binding.
+
+`AgentClient.artifacts` and `AsyncAgentClient.artifacts` manage frontend artifacts
+(`flymy.artifact.v1`): a small web page, a presentation or a mini game with
+immutable versions. Share it by link (with or without its sources) or with people
+by name to view or edit, and clone anyone's shared artifact into your own copy.
+Artifacts are on for every account; `client.artifacts.status()` returns your limits.
+
+```python
+from flymyai import AgentClient
+from flymyai.agents import artifact_file, artifact_files_from_directory
+
+client = AgentClient(api_key="fly-...")
+
+# a folder (a built site, a game, a page copied from a Claude artifact)
+made = client.artifacts.create(
+    name="Pod racer",
+    files=artifact_files_from_directory("./pod-racer"),
+    visibility="link",
+    idempotency_key="pod-racer-create-1",
+)
+racer = made.artifact
+print(racer.share_url)
+
+# a new version on top of the latest; the other files are kept
+client.artifacts.publish(
+    racer.id,
+    base_version=racer.latest_version,
+    files=[artifact_file("js/app.js", "speed = 2")],
+    message="Faster pods",
+    idempotency_key="pod-racer-v2",
+)
+
+# invite a teammate to publish versions too ("view" lets them read and clone);
+# they accept first, and nothing is shared with them until then
+invited = client.artifacts.add_member(racer.id, "teammate@example.com", role="edit")
+print(invited.member.status)  # pending
+
+# on the teammate's side: what waits for them, and their answer
+for invitation in client.artifacts.invitations().results:
+    client.artifacts.accept_invitation(invitation.id)
+shared_with_me = client.artifacts.list(scope="shared")
+
+# your own copy of someone's artifact shared with sources
+copy = client.artifacts.clone(
+    share_link="https://app.flymy.ai/artifacts/s/<handle>",
+    idempotency_key="clone-1",
+)
+```
+
+Sharing by name never tells anyone who an email or a username belongs to: an email
+answers the same whether an account has it, the owner sees each person as they typed
+them (`invited_as`) with `status` pending or accepted, and a member sees only which
+row is theirs (`you`). `remove_member(artifact_id, member.id)` stops sharing with an
+invited or accepted person; a member removes their own row to leave.
+
+Writes that create something take a caller-owned `idempotency_key`: reuse it only
+to retry the identical call. A version published on a stale `base_version`
+raises `ArtifactStaleBaseVersionError` with `latest_version`. These are the v1
+methods and they stay: a breaking change would arrive as new methods next to
+them, never in place.
+
+
+## Projects
+
+`AgentClient.projects` and `AsyncAgentClient.projects` read and run your projects
+(`flymy.project.v1`): an app applied from one `flymy.yaml` (its pages, agents,
+servers, storage and budgets), a page published on its own, a fleet (a lead agent
+and the agents it starts) or a frontend artifact. A project is its config: creating, stopping and
+starting it are a plan and an apply of that config, and each leaves a release.
+
+```python
+from flymyai import AgentClient
+
+client = AgentClient(api_key="fly-...")
+
+for project in client.projects.list().projects:
+    print(project.id, project.status)
+
+# a plan creates nothing: show its price, then create exactly that plan
+plan = client.projects.plan(name="paint-arena", budget={"per_day_usd": "5"})
+print(plan.plan["usd_per_hour"], plan.plan["changes"])
+made = client.projects.create(
+    name="paint-arena",
+    budget={"per_day_usd": "5"},
+    plan_token=plan.plan_token,
+    idempotency_key="paint-arena-create-1",
+)
+
+# stop it (its servers stop and the rest of their holds is refunded), start it again
+client.projects.stop("app:me/paint-arena", idempotency_key="paint-arena-stop-1")
+start = client.projects.start("app:me/paint-arena")  # the plan, nothing changes
+print(start.plan["usd_per_hour"])
+client.projects.start(
+    "app:me/paint-arena",
+    plan_token=start.plan_token,
+    idempotency_key="paint-arena-start-1",
+)
+
+journal = client.projects.errors("app:me/paint-arena", limit=20)
+```
+
+Change an app by applying its `flymy.yaml` again with `AgentClient.apps`: `plan`
+shows what it would create, change or stop and its price, and `apply` applies
+exactly that plan as a release.
+
+```python
+import time
+
+from flymyai.agents import artifact_files_from_directory
+
+files = artifact_files_from_directory("./paint-arena")  # flymy.yaml at the root
+plan = client.apps.plan(files=files)
+print(plan.changes, plan.usd_per_hour)  # show the user before applying
+release = client.apps.apply(
+    files=files, plan_token=plan.plan_token, idempotency_key="paint-arena-apply-2"
+)
+while client.apps.status(release.release).status == "applying":
+    time.sleep(5)
+```
+
+`client.apps.files("me/paint-arena")` reads the applied template back; `plan` and
+`apply` also take `app="me/paint-arena"` with `overrides` to replace some files and
+keep the rest. `get`, `errors`, `templates` and `agent` (the project's own agent,
+created on first use) complete the projects set. A fleet (`fleet:<lead agent id>`) and a frontend artifact
+(`artifact:<artifact id>`) are read with `get` and `errors`; they have no project
+agent and are not stopped or started (an artifact changes through
+`client.artifacts`).
+
+## Scoped sandboxes (review candidate)
+
+The target's `client.apps.catalog()` must advertise `module:flymy/sandbox`
+version `1.1.0` and the `sandbox_*` surface before using this extension. A config
+declares the sandbox and its finite budget; applying it alone rents no VM.
+Published Apps/Projects and custom MCP OAuth methods remain unchanged.
+
+```python
+# Apply a config containing modules.computer: {use: flymy/sandbox@1.1.0}
+# and billing.budgets.project first. Keep this account client outside the VM.
+lease = client.sandboxes.call(
+    "sandbox_create", app="me/lab", resource="computer.tool",
+    arguments={"ttl_seconds": 120}, idempotency_key="lab-create-1",
+)["output"]
+sandbox_id = lease["sandbox"]
+state = client.sandboxes.call(
+    "sandbox_status", app="me/lab", resource="computer.tool",
+    arguments={"sandbox": sandbox_id},
+)
+# Once running, sandbox_connect installs the scoped runtime SDK for with.calls.
+client.sandboxes.call(
+    "sandbox_connect", app="me/lab", resource="computer.tool",
+    arguments={"sandbox": sandbox_id}, idempotency_key="lab-connect-1",
+)
+client.sandboxes.call(
+    "sandbox_stop", app="me/lab", resource="computer.tool",
+    arguments={"sandbox": sandbox_id}, idempotency_key="lab-stop-1",
+)
+```
+
+Inside the VM, import `flymy` from `/tmp/flymy_sandbox.py`. Its declared model,
+tool, private Storage and Artifact routes use the existing runtime SDK; no
+account or provider key is needed. Save session JSON in private Storage and
+restore it into a new lease. Runtime Artifact publication is private unless the
+call explicitly requests `visibility="link"`. `sandbox_revoke` denies new VM
+calls immediately; stopping also tears down the VM and settles its unused hold.
+Retries of writes must keep the same key and arguments. An unknown command
+outcome must be reconciled without rerunning the command under a new key.
 
 ## Advanced agent helpers
 
