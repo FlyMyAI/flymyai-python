@@ -177,6 +177,42 @@ def test_stop_and_a_two_step_start():
     ]
 
 
+def test_the_project_agent_keeps_or_picks_its_model():
+    seen = []
+
+    def handler(request):
+        body = json.loads(request.content) if request.content else None
+        seen.append((request.method, request.url.path, body))
+        return response({
+            "schema": "flymy.project-agent.v1",
+            "project": APP_ID,
+            "agent": "4c1f2e7a-0000-4000-8000-000000000001",
+            "name": "paint-arena agent",
+            "model": (body or {}).get("model", "claude-opus-5-5"),
+            "created": False,
+        })
+
+    client = client_with(handler)
+    kept = client.projects.agent(APP_ID)
+    picked = client.projects.agent(APP_ID, model="gpt-6-luna")
+
+    path = "/api/v1/agents/projects/app:denis/paint-arena/agent/"
+    assert seen == [("POST", path, None), ("POST", path, {"model": "gpt-6-luna"})]
+    assert kept.model == "claude-opus-5-5" and picked.model == "gpt-6-luna"
+
+
+def test_a_refused_model_comes_back_as_the_api_error():
+    def handler(request):
+        return response(
+            {"code": "bad_model", "message": "x is not offered for agents now"},
+            status=400,
+        )
+
+    with pytest.raises(Exception) as caught:
+        client_with(handler).projects.agent(APP_ID, model="x")
+    assert "bad_model" in str(caught.value) or "not offered" in str(caught.value)
+
+
 @pytest.mark.parametrize(
     "call",
     [
@@ -194,6 +230,8 @@ def test_stop_and_a_two_step_start():
         lambda c: c.projects.start(APP_ID, idempotency_key="start-1"),
         lambda c: c.projects.start(APP_ID, plan_token="start-plan-1"),
         lambda c: c.projects.stop(APP_ID, idempotency_key="bad key"),
+        # a model is an id from list_agent_models, never blank
+        lambda c: c.projects.agent(APP_ID, model="  "),
     ],
 )
 def test_a_bad_id_or_call_is_refused_before_any_request(call):

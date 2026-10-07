@@ -99,6 +99,15 @@ class ProjectAgent(_Model):
     created: Optional[bool] = None
 
 
+def _agent_body(model: Optional[str]) -> Dict[str, Any]:
+    """The project agent request: no body keeps its model; ``{"model"}`` picks one."""
+    if model is None:
+        return {}
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("model must be an agent model id from list_agent_models.")
+    return {"json": {"model": model.strip()}}
+
+
 def _path(project_id: Any, route: str = "", *, fleets: bool = True) -> str:
     """The route of a project id from ``list()``; a fleet and an artifact have only
     their detail and their errors journal."""
@@ -237,9 +246,17 @@ class Projects:
         data = self._c._request("POST", _ROOT, json=body, headers=_key(idempotency_key))
         return ProjectCreated.model_validate(data)
 
-    def agent(self, project_id: str) -> ProjectAgent:
-        """The agent in charge of an app or a page, created on first use."""
-        data = self._c._request("POST", _path(project_id, "agent/", fleets=False))
+    def agent(self, project_id: str, *, model: Optional[str] = None) -> ProjectAgent:
+        """The agent in charge of an app or a page, created on first use.
+
+        ``model`` picks its model: an id from ``GET /api/v1/agents/llm-models/``
+        (``list_agent_models`` in the Agents MCP). It stays the agent's model; omit it to
+        keep the current one (a new agent starts on the platform's top model). An id the
+        platform does not offer for agents is refused with 400 ``bad_model``.
+        """
+        data = self._c._request(
+            "POST", _path(project_id, "agent/", fleets=False), **_agent_body(model)
+        )
         return ProjectAgent.model_validate(data)
 
     def stop(self, project_id: str, *, idempotency_key: str) -> Project:
@@ -330,8 +347,12 @@ class AsyncProjects:
         )
         return ProjectCreated.model_validate(data)
 
-    async def agent(self, project_id: str) -> ProjectAgent:
-        data = await self._c._request("POST", _path(project_id, "agent/", fleets=False))
+    async def agent(
+        self, project_id: str, *, model: Optional[str] = None
+    ) -> ProjectAgent:
+        data = await self._c._request(
+            "POST", _path(project_id, "agent/", fleets=False), **_agent_body(model)
+        )
         return ProjectAgent.model_validate(data)
 
     async def stop(self, project_id: str, *, idempotency_key: str) -> Project:

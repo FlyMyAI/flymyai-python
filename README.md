@@ -693,6 +693,11 @@ client.projects.start(
 )
 
 journal = client.projects.errors("app:me/paint-arena", limit=20)
+
+# the project agent (created on first use) runs on the platform's top model; pick
+# another from GET /api/v1/agents/llm-models/ - it stays the agent's model
+agent = client.projects.agent("app:me/paint-arena", model="gpt-6-luna")
+print(agent.agent, agent.model)
 ```
 
 Change an app by applying its `flymy.yaml` again with `AgentClient.apps`: `plan`
