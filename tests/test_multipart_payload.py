@@ -5,6 +5,8 @@ multipart one, so ``response_schema`` never arrived as JSON; a list goes out as 
 field per item, which is how the gateway reads list inputs.
 """
 
+from __future__ import annotations
+
 import io
 import json
 from urllib.parse import parse_qs
