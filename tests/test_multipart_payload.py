@@ -24,7 +24,7 @@ def _request(payload: dict) -> httpx.Request:
     return httpx.Request(
         "POST",
         "https://api.example.com/predict",
-        **MultipartPayload(payload).serialize()
+        **MultipartPayload(payload).serialize(),
     )
 
 
