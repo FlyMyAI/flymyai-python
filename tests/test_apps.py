@@ -134,7 +134,8 @@ def test_an_applied_app_is_changed_by_overrides_and_read_back():
         lambda c: c.apps.plan(app="denis"),
         lambda c: c.apps.plan(app="denis/../x/y"),
         lambda c: c.apps.apply(files=FILES, plan_token="", idempotency_key="k1"),
-        lambda c: c.apps.apply(files=FILES, plan_token="p1", idempotency_key="a b"),
+        # printable ASCII with spaces inside only, as the backend takes it
+        lambda c: c.apps.apply(files=FILES, plan_token="p1", idempotency_key="a b "),
         lambda c: c.apps.files("denis/notes", offset=10),
         lambda c: c.apps.files("denis/notes", path="../secret"),
         lambda c: c.apps.files("denis/notes", path="/etc/passwd"),

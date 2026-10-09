@@ -229,7 +229,8 @@ def test_a_refused_model_comes_back_as_the_api_error():
         # a start without plan_token is only the plan, so it takes no key
         lambda c: c.projects.start(APP_ID, idempotency_key="start-1"),
         lambda c: c.projects.start(APP_ID, plan_token="start-plan-1"),
-        lambda c: c.projects.stop(APP_ID, idempotency_key="bad key"),
+        # printable ASCII with spaces inside only, as the backend takes it
+        lambda c: c.projects.stop(APP_ID, idempotency_key=" bad key"),
         # a model is an id from list_agent_models, never blank
         lambda c: c.projects.agent(APP_ID, model="  "),
     ],
