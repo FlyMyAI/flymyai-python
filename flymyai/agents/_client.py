@@ -129,9 +129,11 @@ class McpServerOAuthError(FlyMyAIAgentError):
 
 
 class ArtifactStaleBaseVersionError(FlyMyAIAgentError):
-    """An artifact version was published on a ``base_version`` that is not the
-    latest any more (HTTP 412): read :attr:`latest_version`, apply the change
-    there and publish again with a new idempotency key."""
+    """An artifact version was published on a ``base_version`` that is neither the
+    latest nor the live version any more (HTTP 412): someone published meanwhile.
+    Read the version your change starts from - :attr:`live_version` to keep a saved
+    draft a draft, or :attr:`latest_version` - apply the change there and publish
+    again with a new idempotency key."""
 
     def __init__(
         self,
@@ -140,9 +142,11 @@ class ArtifactStaleBaseVersionError(FlyMyAIAgentError):
         status_code: int,
         response_body: Any,
         latest_version: Optional[int],
+        live_version: Optional[int] = None,
     ) -> None:
         super().__init__(message, status_code=status_code, response_body=response_body)
         self.latest_version = latest_version
+        self.live_version = live_version
 
 
 def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
@@ -211,12 +215,15 @@ def _raise_for_status(resp: httpx.Response) -> None:
         and body.get("code") == "stale_base_version"
     ):
         details = body.get("details")
-        latest = details.get("latest_version") if isinstance(details, dict) else None
+        details = details if isinstance(details, dict) else {}
+        latest = details.get("latest_version")
+        live = details.get("live_version")
         raise ArtifactStaleBaseVersionError(
             str(body.get("detail", "A newer version of the artifact exists.")),
             status_code=412,
             response_body=body,
             latest_version=latest if isinstance(latest, int) else None,
+            live_version=live if isinstance(live, int) else None,
         )
 
     if (
