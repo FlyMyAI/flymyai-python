@@ -600,6 +600,8 @@ and resource-set/agent contracts remain available.
 immutable versions. Share it by link (with or without its sources) or with people
 by name to view or edit, and clone anyone's shared artifact into your own copy.
 Artifacts are on for every account; `client.artifacts.status()` returns your limits.
+They are in the 1.2.0 pre-releases: `pip install 'flymyai>=1.2.0rc12'` (a plain
+`pip install flymyai` gets 1.1.0, which has no `client.artifacts`).
 
 ```python
 from flymyai import AgentClient
@@ -649,11 +651,75 @@ them (`invited_as`) with `status` pending or accepted, and a member sees only wh
 row is theirs (`you`). `remove_member(artifact_id, member.id)` stops sharing with an
 invited or accepted person; a member removes their own row to leave.
 
-Writes that create something take a caller-owned `idempotency_key`: reuse it only
-to retry the identical call. A version published on a stale `base_version`
-raises `ArtifactStaleBaseVersionError` with `latest_version`. These are the v1
-methods and they stay: a breaking change would arrive as new methods next to
-them, never in place.
+### Start from a standard type
+
+`client.artifacts.types()` lists the standard types: a presentation, a game, a
+landing page, a report, a dashboard and a gallery. `create(type=...)` makes version
+1 from that type's template, so `files` (laid over the template) and `name` (default:
+the type's `default_name`) are optional. Each template keeps its content in one
+file, `edit` (`slides.md`, `site.json`, `game.config.js`, ...), and its `README.md`
+says how to change it.
+
+```python
+for kind in client.artifacts.types():
+    print(kind.key, kind.edit, "-", kind.example_change)
+
+game = client.artifacts.create(type="game", idempotency_key="harvest-create-1")
+print(game.artifact.type, game.artifact.owner_url)
+```
+
+### Change it: a new version next to the live one
+
+People change an artifact by pasting its link into their assistant with the change
+right after it: `<link> add these things to the artifact: <change>`. `get()` opens
+the link - a share link `https://app.flymy.ai/artifacts/s/<handle>` (a query string
+is fine) or its handle as `share_link`, the artifact's own page
+`https://app.flymy.ai/artifacts/<id>` as either argument - and `next` says what
+the caller may do:
+
+- **Owner or editor:** publish with `publish=False`. The live version stays and the
+  new one is saved next to it, so both are kept; `version.page_url` (the app page
+  at `?v=<n>`) shows it. Make it live only when the person asks to update the
+  current version: `update(live_version=...)`, or `publish=True`. `base_version`
+  may be the live version, so a saved draft above it stays a draft.
+- **Anyone else:** `clone()` makes their own copy (when the sources are shared);
+  change the copy. The original stays as it is.
+
+```python
+art = client.artifacts.get(share_link="https://app.flymy.ai/artifacts/s/<handle>")
+print(art.role, art.next)
+if art.role in ("owner", "editor"):
+    config = client.artifacts.read_file(
+        art.id, version=art.live_version, path="game.config.js"
+    )
+    v2 = client.artifacts.publish(
+        art.id,
+        base_version=art.live_version,
+        files=[artifact_file("game.config.js", config.content.replace("crow", "boar"))],
+        publish=False,  # the live version stays
+        message="Other enemies",
+        idempotency_key="harvest-v2-other-enemies",
+    )
+    print(v2.version.version, v2.version.page_url)
+    # only when they asked to "update current version":
+    # client.artifacts.update(art.id, live_version=v2.version.version)
+```
+
+`versions` is `None` for a link viewer when the author shared only the page; with
+sources shared, link viewers see every saved version, not only the live one. An
+unchanged publish answers `no_change` and names the version that already holds
+those files. `app_url` is the app page for the owner and the people it is shared
+with by name. A file that looks like a secret is refused (`secret_file`: env files,
+version control, keys and certificates; `secret_in_file`: a private key or another
+service's token inside a text file), and a request body is at most 40 MB.
+
+Writes that create something take a caller-owned `idempotency_key`: 1-255
+printable ASCII characters, spaces inside allowed but no leading or trailing
+spaces; reuse it only to retry the identical call. A version published on a
+`base_version` that is neither the latest nor the live version raises
+`ArtifactStaleBaseVersionError` with `latest_version` and `live_version`. These
+are the v1 methods and they stay: a breaking change would arrive as new methods
+next to them, never in place.
 
 
 ## Projects
