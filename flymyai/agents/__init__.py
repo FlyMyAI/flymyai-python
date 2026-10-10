@@ -1,3 +1,4 @@
+from flymyai.agents._compute import ComputeLogs, ComputeLogTail
 from flymyai.agents._client import (
     AsyncAgentClient,
     FlyMyAIAgentError,
@@ -53,6 +54,8 @@ from flymyai.agents._types import (
 AgentClient = SyncAgentClient
 
 __all__ = [
+    "ComputeLogs",
+    "ComputeLogTail",
     # Clients
     "AgentClient",
     "SyncAgentClient",
