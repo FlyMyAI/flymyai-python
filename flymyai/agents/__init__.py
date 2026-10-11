@@ -257,3 +257,27 @@ __all__ += [
     "McpServerOAuth",
     "McpServers",
 ]
+
+from flymyai.agents._packages import (
+    AsyncPackages,
+    FleetInstaller,
+    Package,
+    PackageImport,
+    PackageImports,
+    PackagePlan,
+    Packages,
+    PackageShare,
+    PackageShareList,
+)
+
+__all__ += [
+    "AsyncPackages",
+    "FleetInstaller",
+    "Package",
+    "PackageImport",
+    "PackageImports",
+    "PackagePlan",
+    "Packages",
+    "PackageShare",
+    "PackageShareList",
+]
