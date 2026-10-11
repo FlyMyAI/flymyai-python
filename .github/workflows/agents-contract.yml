@@ -1,50 +1,556 @@
-name: SDK offline contracts
-
-on:
+name: SDK offline contracts - bounded 7bf qualification
+'on':
   push:
-    branches: ['feat/**']
+    branches:
+    - feat/bounded-saved-sdk-ci-20261011
     paths:
-      - 'flymyai/**'
-      - 'tests/**'
-      - 'pyproject.toml'
-      - 'setup.py'
-      - '.github/workflows/agents-contract.yml'
-  pull_request:
-    paths:
-      - 'flymyai/**'
-      - 'tests/**'
-      - 'pyproject.toml'
-      - 'setup.py'
-      - '.github/workflows/agents-contract.yml'
-
+    - .github/workflows/agents-contract.yml
 permissions:
   contents: read
+concurrency:
+  group: bounded-sdk-7bf-qualification
+  cancel-in-progress: false
+defaults:
+  run:
+    shell: sh
+env:
+  SDK_BOUNDED_HELPER: |
+    """Workflow-only SDK qualification; all commands stay in the job cgroup.
 
+    The official job container supplies Python. Nothing runs on import.
+    Dependencies use canonical public pip. Tests inherit an additive kernel
+    seccomp network-denial filter. No namespace or extra capabilities are needed.
+    The first action starts bounded sampling before checkout.
+    """
+    import base64
+    import ctypes
+    import errno
+    import hashlib
+    import importlib.metadata
+    import json
+    import os
+    from pathlib import Path
+    import platform
+    import resource
+    import selectors
+    import signal
+    import socket
+    import stat
+    import subprocess
+    import sys
+    import time
+    import xml.etree.ElementTree as ET
+
+    ROOT = Path('/tmp/sdk-bounded')
+    LIMIT = 1536 * 1024**2
+    BYTE_LIMIT = 1024**2
+
+
+    def sha(path):
+        return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+    def cgroup():
+        # Docker may expose a cgroup namespace with relative path '/'.
+        relative = next(x.split(':', 2)[2] for x in Path('/proc/self/cgroup').read_text().splitlines() if x.startswith('0::'))
+        candidates = (Path('/sys/fs/cgroup') / relative.lstrip('/'), Path('/sys/fs/cgroup'))
+        return next(p for p in candidates if (p / 'memory.max').is_file())
+
+
+    def guard():
+        cg = cgroup()
+        values = {name: (cg / name).read_text().strip() for name in ('memory.max', 'memory.swap.max', 'cpu.max', 'memory.events')}
+        assert values['memory.max'] == str(LIMIT), 'container_memory_guard'
+        assert values['memory.swap.max'] == '0', 'container_swap_guard'
+        quota, period = values['cpu.max'].split()
+        assert quota != 'max' and int(quota) <= int(period), 'container_CPU_guard'
+        assert Path('/proc/1/cgroup').read_text() == Path('/proc/self/cgroup').read_text(), 'private_job_PID_namespace'
+        assert not any(k in os.environ for k in ('FMA_APIKEY', 'FMA_API_KEY', 'FLYMYAI_API_KEY', 'AWS_SECRET_ACCESS_KEY', 'GH_TOKEN', 'GITHUB_TOKEN')), 'provider_or_bearer_environment'
+        return cg, values
+
+
+    def point(cg, started):
+        stat = dict(row.split() for row in (cg / 'cpu.stat').read_text().splitlines())
+        return {'elapsed_s': round(time.monotonic() - started, 3), 'memory_current_bytes': int((cg / 'memory.current').read_text()), 'cpu_usage_usec': int(stat['usage_usec']), 'cpu_throttled_usec': int(stat.get('throttled_usec', 0))}
+
+
+    def clean_environment():
+        env = {k: os.environ[k] for k in ('PATH', 'HOME', 'USER', 'LANG', 'LD_LIBRARY_PATH', 'SSL_CERT_FILE') if k in os.environ}
+        env.update(PYTHONDONTWRITEBYTECODE='1', PIP_DISABLE_PIP_VERSION_CHECK='1', PIP_NO_CACHE_DIR='1', PIP_INDEX_URL='https://pypi.org/simple', PIP_CONFIG_FILE='/dev/null', NETRC='/dev/null', PYTHONPATH=str(Path.cwd()))
+        return env
+
+
+    def isolated(args):
+        return [sys.executable, __file__, 'network-exec'] + args
+
+
+    PROBE = """import asyncio,ctypes,errno,json,os,socket,subprocess,sys
+    from pathlib import Path
+    status=dict(x.split(':',1) for x in Path('/proc/self/status').read_text().splitlines() if ':' in x)
+    assert status['NoNewPrivs'].strip()=='1'
+    assert status['Seccomp'].strip()=='2'
+    assert int(status['Seccomp_filters'])>=int(os.environ['SDK_BASE_FILTER_COUNT'])+1
+    libc=ctypes.CDLL(None,use_errno=True);libc.syscall.restype=ctypes.c_long
+    denied=[]
+    for family in (2,10,16,17,40,44):
+        ctypes.set_errno(0)
+        result=libc.syscall(41,family,1,0)
+        assert result==-1 and ctypes.get_errno()==errno.EPERM, 'raw_socket_not_denied'
+        try:
+            s=socket.socket(family,socket.SOCK_STREAM)
+        except OSError as exc:
+            assert exc.errno==errno.EPERM
+        else:
+            s.close();raise AssertionError('Python_socket_not_denied')
+        denied.append(family)
+    a,b=socket.socketpair();a.send(b'ok');assert b.recv(2)==b'ok';a.close();b.close()
+    loop=asyncio.new_event_loop();loop.run_until_complete(asyncio.sleep(0));loop.close()
+    child='import ctypes,errno,json;from pathlib import Path;l=ctypes.CDLL(None,use_errno=True);l.syscall.restype=ctypes.c_long;assert l.syscall(41,2,1,0)==-1 and ctypes.get_errno()==errno.EPERM;assert l.syscall(41,10,1,0)==-1 and ctypes.get_errno()==errno.EPERM;print(json.dumps({"fork_exec_socket_denial":True,"filters":[x for x in Path("/proc/self/status").read_text().splitlines() if x.startswith(("NoNewPrivs:","Seccomp:","Seccomp_filters:"))]}))'
+    actual=subprocess.run([sys.executable,'-c',child],check=True,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,timeout=5)
+    print(json.dumps({'architecture':'x86_64','audit_arch':'0xc000003e','denied_socket_families':denied,'raw_syscall_and_python_denials':True,'AF_UNIX_pair_and_asyncio':True,'descendant':json.loads(actual.stdout),'provider_calls':0,'guard':'kernel seccomp network denial; not a full hostile-code sandbox'}))
+    """
+
+
+    def install_network_filter():
+        """x86_64 cBPF, installed before exec and inherited by every descendant."""
+        assert platform.machine() == 'x86_64' and ctypes.sizeof(ctypes.c_void_p) == 8 and sys.byteorder == 'little', 'unsupported_syscall_ABI'
+        libc = ctypes.CDLL(None, use_errno=True)
+        libc.prctl.argtypes = [ctypes.c_int, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong, ctypes.c_ulong]
+        libc.prctl.restype = ctypes.c_int
+
+        class Instruction(ctypes.Structure):
+            _fields_ = [('code', ctypes.c_ushort), ('jt', ctypes.c_ubyte), ('jf', ctypes.c_ubyte), ('k', ctypes.c_uint)]
+
+        class Program(ctypes.Structure):
+            _fields_ = [('length', ctypes.c_ushort), ('filter', ctypes.POINTER(Instruction))]
+
+        # seccomp_data: nr@0, arch@4, args[0]@16. Linux x86_64 syscall table.
+        # Unknown architectures and x32 ABI are killed, never matched as x86_64.
+        allow = 0x7fff0000
+        refuse = 0x00050000 | errno.EPERM
+        kill = 0x80000000
+        code = [(0x20, 0, 0, 4), (0x15, 1, 0, 0xc000003e), (0x06, 0, 0, kill), (0x20, 0, 0, 0), (0x45, 0, 1, 0x40000000), (0x06, 0, 0, kill)]
+        # Avoid acquiring foreign descriptors or submitting sockets through
+        # io_uring. This is a narrow trusted-unit network policy, not a sandbox.
+        for number in (101, 272, 308, 310, 311, 321, 425, 426, 427, 438):
+            code += [(0x15, 0, 1, number), (0x06, 0, 0, refuse)]
+        for number in (41, 53):  # socket / socketpair: permit AF_UNIX only.
+            code += [(0x15, 0, 4, number), (0x20, 0, 0, 16), (0x15, 0, 1, 1), (0x06, 0, 0, allow), (0x06, 0, 0, refuse)]
+        code += [(0x06, 0, 0, allow)]
+        instructions = (Instruction * len(code))(*(Instruction(*row) for row in code))
+        program = Program(len(code), instructions)
+        if libc.prctl(38, 1, 0, 0, 0) != 0:
+            raise OSError(ctypes.get_errno(), 'PR_SET_NO_NEW_PRIVS denied')
+        pointer = ctypes.cast(ctypes.pointer(program), ctypes.c_void_p).value
+        if libc.prctl(22, 2, pointer, 0, 0) != 0:
+            raise OSError(ctypes.get_errno(), 'PR_SET_SECCOMP filter denied')
+
+
+    def network_exec(args):
+        assert args and os.path.isabs(args[0]), 'absolute_exec_required'
+        # Popen already uses close_fds. Re-prove/close at the actual exec boundary,
+        # retaining only nonsocket stdin/stdout/stderr for bounded receipts.
+        for name in os.listdir('/proc/self/fd'):
+            fd = int(name)
+            if fd > 2:
+                try:
+                    os.close(fd)
+                except OSError as exc:
+                    assert exc.errno == errno.EBADF
+        for fd in (0, 1, 2):
+            assert not stat.S_ISSOCK(os.fstat(fd).st_mode), 'inherited_network_stdio'
+        status = dict(row.split(':', 1) for row in Path('/proc/self/status').read_text().splitlines() if ':' in row)
+        os.environ['SDK_BASE_FILTER_COUNT'] = str(int(status.get('Seccomp_filters', '0')))
+        install_network_filter()
+        os.execv(args[0], args)
+
+
+    def initialize():
+        os.umask(0o077)
+        ROOT.mkdir(exist_ok=False)
+        cg, values = guard()
+        expected = os.environ['SDK_EXPECTED_VERSION']
+        assert '.'.join(str(x) for x in sys.version_info[:3]) == expected, 'official_Python_patch_version'
+        assert sys.version_info[:2] in ((3, 8), (3, 12), (3, 13)), 'supported_Python'
+        assert platform.machine() == 'x86_64', 'official_amd64_runtime_required'
+        now = time.monotonic()
+        # PID 1 predates every action. Exclude image pull/runner orchestration,
+        # which is not workload executed in this job container.
+        stat = Path('/proc/1/stat').read_text().rsplit(')', 1)[1].split()
+        container_started = int(stat[19]) / os.sysconf('SC_CLK_TCK')
+        assert 0 <= now - container_started < 285, 'container_elapsed_preflight_cap'
+        info = {'started': container_started, 'first_action': now, 'deadline': container_started + 295, 'guard': values, 'initial_sample': point(cg, container_started), 'expected_version': expected, 'python': sys.version, 'canonical_job_timeout_minutes': 5, 'container_image': os.environ['SDK_CONTAINER_IMAGE'], 'added_capabilities': [], 'network_policy': 'additive seccomp plus no-new-privileges; only AF_UNIX sockets allowed in actual checks', 'host_image_pull_outside_workload_cgroup': True}
+        pending = ROOT / 'preflight.tmp'
+        pending.write_text(json.dumps(info, indent=2) + '\n')
+        os.replace(pending, ROOT / 'preflight.json')
+        # A background sampler also bounds a stalled checkout before pip starts.
+        sampler = subprocess.Popen([sys.executable, __file__, 'sample'], env=clean_environment(), stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        info['sampler_pid'] = sampler.pid
+        pending.write_text(json.dumps(info, indent=2) + '\n')
+        os.replace(pending, ROOT / 'preflight.json')
+        print('SDK_CONTAINER_PREFLIGHT=' + json.dumps(info, sort_keys=True), flush=True)
+
+
+    def sample():
+        info = json.loads((ROOT / 'preflight.json').read_text())
+        cg, _ = guard()
+        own_cgroup = Path('/proc/self/cgroup').read_text()
+        with (ROOT / 'samples.jsonl').open('w') as stream:
+            for _ in range(601):
+                stream.write(json.dumps(point(cg, info['started']), separators=(',', ':')) + '\n')
+                stream.flush()
+                if (ROOT / 'finished').exists():
+                    return
+                if time.monotonic() >= info['deadline']:
+                    (ROOT / 'watchdog.json').write_text(json.dumps({'status': 'CONTAINER_295S_WORK_DEADLINE', 'elapsed_s': time.monotonic() - info['started']}))
+                    # Private PID and cgroup are checked above. Never signal a host
+                    # or foreign cgroup. Leave PID1 and this sampler for teardown.
+                    for path in Path('/proc').iterdir():
+                        if path.name.isdigit() and int(path.name) not in (1, os.getpid()):
+                            try:
+                                if (path / 'cgroup').read_text() == own_cgroup:
+                                    os.kill(int(path.name), signal.SIGKILL)
+                            except (FileNotFoundError, ProcessLookupError, PermissionError):
+                                pass
+                    return
+                time.sleep(.5)
+        raise RuntimeError('bounded_resource_sample_count_exceeded')
+
+
+    def run(mode):
+        os.umask(0o077)
+        assert mode in ('contracts', 'lint')
+        cg, values = guard()
+        info = json.loads((ROOT / 'preflight.json').read_text())
+        assert time.monotonic() < info['deadline'] - 10, 'original_job_time_exhausted'
+        resource.setrlimit(resource.RLIMIT_AS, (2 * 1024**3, 2 * 1024**3))
+        resource.setrlimit(resource.RLIMIT_CPU, (300, 300))
+        resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+        golden = json.loads((ROOT / 'payload.json').read_text())
+        payload = golden['payload_sha256']
+        env = clean_environment()
+        record = {'status': 'RUNNING', 'mode': mode, 'source': golden['source'], 'parent_workflow_sha256': golden['parent_workflow_sha256'], 'payload_manifest_sha256': sha(ROOT / 'payload.json'), 'payload_files': len(payload), 'preflight': info, 'guard_after_checkout': values, 'phases': [], 'SQL': 0, 'FMA_provider_calls': 0, 'paid_compute_jobs': 0, 'canonical_public_CI_pip': True, 'custom_image_builds': 0, 'artifact_or_cache_uploads': 0}
+        total_log_bytes = 0
+
+        def save():
+            (ROOT / 'receipt.json').write_text(json.dumps(record, indent=2) + '\n')
+
+        def phase(label, args, environment, must_succeed=True):
+            nonlocal total_log_bytes
+            item = {'name': label, 'command': args, 'started_s': time.monotonic() - info['started']}
+            record['phases'].append(item)
+            save()
+            process = subprocess.Popen(args, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True)
+            poll = selectors.DefaultSelector()
+            poll.register(process.stdout, selectors.EVENT_READ)
+            reason = None
+            try:
+                with (ROOT / (label + '.log')).open('wb') as log:
+                    while poll.get_map() or process.poll() is None:
+                        if time.monotonic() >= info['deadline'] - 5:
+                            reason = 'original_300s_whole_job_including_cleanup'
+                        if reason and process.poll() is None:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        for key, _ in poll.select(timeout=.2):
+                            block = os.read(key.fileobj.fileno(), 32768)
+                            if not block:
+                                poll.unregister(key.fileobj)
+                                continue
+                            room = BYTE_LIMIT - total_log_bytes
+                            log.write(block[:room])
+                            total_log_bytes += min(room, len(block))
+                            if len(block) > room:
+                                reason = 'combined_log_1MiB_cap'
+                code = process.wait(timeout=2)
+            finally:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                if process.poll() is None:
+                    process.wait(timeout=2)
+                poll.close()
+                process.stdout.close()
+            item.update(exit=code, reason=reason, finished_s=time.monotonic() - info['started'])
+            save()
+            if must_succeed:
+                assert code == 0 and reason is None, label + '_failed'
+            return code, reason
+
+        before = {}
+        try:
+            assert len(payload) == 91, 'frozen_payload_count'
+            before = {name: sha(Path(name)) for name in payload}
+            assert before == payload, 'frozen_7bf_payload_mismatch'
+            assert '.'.join(str(x) for x in sys.version_info[:3]) == info['expected_version'], 'Python_version_changed'
+            phase('network-preflight', isolated([sys.executable, '-c', PROBE]), env)
+            if mode == 'lint':
+                phase('canonical-lint-dependencies', [sys.executable, '-m', 'pip', 'install', 'black==23.12.1', 'flake8==7.3.0'], env)
+                record['resolved_dependencies'] = {n: importlib.metadata.version(n) for n in ('black', 'flake8')}
+                phase('canonical-black', isolated([sys.executable, '-m', 'black', '--preview', '--check', '.']), env)
+                phase('canonical-flake8', isolated([sys.executable, '-m', 'flake8', '--max-line-length=88', 'flymyai/agents/_mcp_personal.py', 'tests/test_mcp_personal.py']), env)
+            else:
+                phase('canonical-dependencies', [sys.executable, '-m', 'pip', 'install', '.', 'pytest', 'pytest-asyncio', 'respx'], env)
+                record['resolved_dependencies'] = {n: importlib.metadata.version(n) for n in ('pytest', 'pytest-asyncio', 'respx', 'httpx', 'pydantic')}
+                plugin = ROOT / 'bounded_collection.py'
+                plugin.write_text('import collections,json,os\nfrom pathlib import Path\ndef pytest_collection_finish(session):\n    assert len(session.items)<=4096,"collected_case_cap"\n    rows=[{"nodeid":x.nodeid,"module":str(x.path.relative_to(session.config.rootpath))} for x in session.items]\n    Path(os.environ["SDK_COLLECTION_PATH"]).write_text(json.dumps({"total":len(rows),"modules":dict(collections.Counter(x["module"] for x in rows)),"cases":rows},indent=2)+"\\n")\n')
+                env.update(PYTHONPATH=str(ROOT) + os.pathsep + str(Path.cwd()), SDK_COLLECTION_PATH=str(ROOT / 'collection.json'))
+                args = [sys.executable, '-m', 'pytest', 'tests', '--ignore=tests/test_async_inference.py', '--ignore=tests/test_flymyai_client.py', '--ignore=tests/test_stream.py', '-q', '-p', 'bounded_collection', '-p', 'no:cacheprovider', '--junitxml=' + str(ROOT / 'pytest.xml')]
+                actual_exit, actual_reason = phase('whole-offline-contracts', isolated(args), env, must_succeed=False)
+                assert (ROOT / 'pytest.xml').stat().st_size <= BYTE_LIMIT, 'JUnit_byte_cap'
+                assert (ROOT / 'collection.json').stat().st_size <= BYTE_LIMIT, 'collection_byte_cap'
+                root = ET.fromstring((ROOT / 'pytest.xml').read_bytes())
+                cases = list(root.iter('testcase'))
+                collection = json.loads((ROOT / 'collection.json').read_text())
+                record['actual_collection'] = {'total': collection['total'], 'modules': collection['modules'], 'sha256': sha(ROOT / 'collection.json')}
+                record['JUnit'] = {'bytes': (ROOT / 'pytest.xml').stat().st_size, 'sha256': sha(ROOT / 'pytest.xml'), 'cases': len(cases), 'failures': len(list(root.iter('failure'))), 'errors': len(list(root.iter('error'))), 'skips': len(list(root.iter('skipped')))}
+                assert len(cases) == collection['total'], 'whole_JUnit_collection_mismatch'
+                record['affected_module_results'] = {}
+                for module in ('tests/test_saved_versions.py', 'tests/test_agent_client.py'):
+                    prefix = module[:-3].replace('/', '.')
+                    actual = [x for x in cases if x.get('classname', '') == prefix or x.get('classname', '').startswith(prefix + '.')]
+                    counts = {'cases': len(actual), 'failures': sum(x.find('failure') is not None for x in actual), 'errors': sum(x.find('error') is not None for x in actual), 'skips': sum(x.find('skipped') is not None for x in actual)}
+                    record['affected_module_results'][module] = counts
+                    assert counts['cases'] > 0 and counts['cases'] == collection['modules'].get(module), 'affected_whole_module_not_executed'
+                assert not record['JUnit']['failures'] and not record['JUnit']['errors'] and not record['JUnit']['skips'], 'whole_offline_failure_or_skip'
+                assert actual_exit == 0 and actual_reason is None, 'whole_offline_contracts_failed'
+            record['status'] = 'PASS'
+        except Exception as exc:
+            record.update(status='FAIL', error={'type': type(exc).__name__, 'message': str(exc)[:300]})
+        finally:
+            record['payload_preserved'] = {name: sha(Path(name)) for name in payload} == payload
+            if not record['payload_preserved']:
+                record['status'] = 'FAIL'
+            record['container_elapsed_s'] = time.monotonic() - info['started']
+            if record['container_elapsed_s'] >= 295:
+                record['status'] = 'FAIL'
+            record['cgroup_memory_peak_bytes'] = int((cg / 'memory.peak').read_text())
+            record['cgroup_cpu_after'] = (cg / 'cpu.stat').read_text()
+            record['memory_events_after'] = (cg / 'memory.events').read_text()
+            events = dict(row.split() for row in record['memory_events_after'].splitlines())
+            if int(events['oom']) or int(events['oom_kill']):
+                record['status'] = 'FAIL'
+            record['combined_phase_log_bytes'] = total_log_bytes
+            save()
+            (ROOT / 'finished').touch()
+        return 0 if record['status'] == 'PASS' else 1
+
+
+    def export():
+        # Ordinary bounded CI log records, with no artifact/cache/upload action.
+        files = ['preflight.json', 'receipt.json', 'collection.json', 'pytest.xml', 'samples.jsonl', 'watchdog.json']
+        files += [p.name for p in sorted(ROOT.glob('*.log'))]
+        total = 0
+        for name in files:
+            path = ROOT / name
+            if path.is_file():
+                size = path.stat().st_size
+                assert size <= BYTE_LIMIT, 'receipt_file_byte_cap'
+                total += size
+                assert total <= 3 * BYTE_LIMIT, 'receipt_export_total_cap'
+                print('SDK_BOUNDED_FILE=' + name + ':' + base64.b64encode(path.read_bytes()).decode(), flush=True)
+
+
+    if __name__ == '__main__':
+        command = sys.argv[1]
+        if command == 'initialize':
+            initialize()
+        elif command == 'sample':
+            sample()
+        elif command == 'export':
+            export()
+        elif command == 'network-exec':
+            network_exec(sys.argv[2:])
+        elif command == 'probe-source':
+            network_exec([sys.executable, '-c', PROBE])
+        else:
+            raise SystemExit(run(command))
+  SDK_BOUNDED_PAYLOAD: |
+    {
+      "source": "7bf56712bfee5b4847e810772ed425c06ef117f2",
+      "parent_workflow_sha256": "0026eafabbcb645d475d1cc1acd4c6a7ed254a02271d90d90b74038f4ea9ff67",
+      "excluded_workflow": ".github/workflows/agents-contract.yml",
+      "payload_sha256": {
+        ".github/workflows/tag.yaml": "006418af700507bb8d6900490930106795ce158c58603509919110e78cdcad27",
+        ".github/workflows/test.yaml": "05c68c7f02c6d976700e622c975e497532c7e1c5d22a32b3d65bfbfb87c5e9fe",
+        ".gitignore": "fdab907478f361a52883ad50382d96e4a35551917233a000fb1a93f5abc98d78",
+        "AGENTS.md": "2875eefa61026a91f28417773e84c43e763f7899a09542fb2aaadc85e6197000",
+        "LICENSE": "6f8e6cbff52a947ffdedff47e8c6a24831d4215500c7cc4e95499f96c02ca510",
+        "README.md": "042493fec961e010c8e0a44cc723af490a6edeb4021b4a9dc179582ae27ce945",
+        "assets/flymyai-logo.png": "08ce5c9817f88c241bd83e3358a6bc6dc893d981e930db897c83b555bdd2b5c4",
+        "flymyai/__init__.py": "affb7bf326eb9714687d07f06c437255aeda28cd5e8c83b9101746e343651fae",
+        "flymyai/agents/__init__.py": "c48c5b9ac935223d94d323c5927132d8cfb5aeb79a86762dcb4f033e3c8a5d08",
+        "flymyai/agents/_apps.py": "a4e232ec2bac516b0e0d6931ac24e977c2e300e99995c4fe3d36995e0d6aca56",
+        "flymyai/agents/_artifacts.py": "74c862d177b5eb590aa24da6e22c5fa7a8bf39a0a38021c665231d815a522390",
+        "flymyai/agents/_client.py": "31baadd9465437f37785549b1f5f36ad4f685a6fc366d784bcebef865a55eba5",
+        "flymyai/agents/_mcp_personal.py": "139b19b00b16810ea3d4271972a033457dcf10a464f204707310d35775830629",
+        "flymyai/agents/_mcp_servers.py": "5816d05757de17401c7cc4ed79189382538eeb89002f4d125669cdcfa418157b",
+        "flymyai/agents/_mcp_sharing.py": "478c35ded14017ecdaa242c11b7c2133cd20e930e1d4d05f1e8e24dd4d29983d",
+        "flymyai/agents/_projects.py": "9e2a10777aa99ea3b3af29aef66a88d27f1495ea325271cb1559aa055b022c4d",
+        "flymyai/agents/_resources.py": "49ed66c95ba1c6d8b0e2d66aa219e6fc80a1e67d03855bc1abbae57b77154479",
+        "flymyai/agents/_types.py": "6574c41a6603d607b685b5dfef76d1b261b6bb7c2594850e3db3f996e5232db5",
+        "flymyai/core/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "flymyai/core/_response.py": "c62a8c2da740b60d9ca61e2020386be82d010ac095dedcbe0fcab513b308b05c",
+        "flymyai/core/_streaming.py": "da15f6d05ea1c184aaa8b3732a41f206ba5e5d29e746af7656ac6e656fcb1abc",
+        "flymyai/core/authorizations.py": "67d86f892fee435e8b43b4bbcd6687deedf8dfce1db96124dad7576b3a3839b2",
+        "flymyai/core/client.py": "abf2b7e050bd6979f02f8930bac68444088f45c591905e011b8c1bac340e8849",
+        "flymyai/core/clients/AsyncClient.py": "0d25418fbe38bf4460dfbd1591d52a6ed55dd5f52da1b1d575a8f50f3f7e7890",
+        "flymyai/core/clients/SyncClient.py": "e7d1ada1755041acb001c81e680cda5640ceab67f1fa0c197b7e790ddc139f01",
+        "flymyai/core/clients/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "flymyai/core/clients/base_client.py": "12b2037744fe46af2cf5c66c247eff956c15c0c494c46c70b9fa12f43e812066",
+        "flymyai/core/clients/base_m1_client.py": "0031cc61154dd9b68474662c922afa9be18472ae8d0abccea84ed2f62ba56f55",
+        "flymyai/core/clients/m1AsyncClient.py": "4fb5fc577055d5fd4703b83a920faafd11d30c49efcbba605de1f99b1ff874d1",
+        "flymyai/core/clients/m1Client.py": "b3df36c70df3e28793cb9cf4c2a8a412362b5647415725ad27bc5410dcb7d951",
+        "flymyai/core/exceptions.py": "39fdf5c3d273f947e807274a1c13a9c89a2a3fcc2453f1862de80c0ca47172bc",
+        "flymyai/core/models/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "flymyai/core/models/base.py": "c6122fe25a0b3f429838a8795050ced7dcb6082ecbc61825b883f94c8574b5c2",
+        "flymyai/core/models/error_responses.py": "829e9d51306e58c407dc866da64b3855378bb7177903c2fe1eabd5d9f3c9ffd8",
+        "flymyai/core/models/m1_history.py": "3fb2334d904e3e41620080dd1946729a593ec2cfe40c5e9872ff3bc81bc20270",
+        "flymyai/core/models/successful_responses.py": "9d6bd77da640cebbb217e3e9b4b205e4f7c04ee9f711c4aa568c505a449c18eb",
+        "flymyai/core/response_factory/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "flymyai/core/response_factory/async_task_result_factory.py": "da99d6d161dd963e6df20959a601186c447b38e3992a0ba26eeec63653a6f1c1",
+        "flymyai/core/response_factory/base_response_factory.py": "d3070dc41e13e4bc0ffb231bce9b1765b1c2f57eb6e5e09b7ef4574bdf890c2a",
+        "flymyai/core/response_factory/plain_inference_response_factory.py": "d08f498191441480cf0baa0e38ab134a578374cdafb0d0b7024ce143dc785689",
+        "flymyai/core/stream_iterators/AsyncPredictionStream.py": "53c12055816802be549d41e25eb691510071fb5c6a786509ff2ad9664820251a",
+        "flymyai/core/stream_iterators/PredictionStream.py": "926af3338875e3db67028b6ed26f42775b266c460b390f324f8574680c24652e",
+        "flymyai/core/stream_iterators/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "flymyai/core/stream_iterators/exceptions.py": "4ca241e78b36440237fb9e02968ca47caf3e9d0671f4480af73706d5e2b6684e",
+        "flymyai/core/types/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "flymyai/core/types/event_types.py": "201a4471cfa89cf33fe3c0bc0fbc464871b6c23d759669b0bc42381a7e675365",
+        "flymyai/core/types/m1.py": "4f0b5fda4594db9793c7e9fd87399a55280ee9221ca74a2018aecbadb696d90e",
+        "flymyai/multipart/__init__.py": "7c7d281bb0947a873ae3b1a2789d49638dbbc98eb66f097472f6add355b6b326",
+        "flymyai/multipart/base_field.py": "565025980c1dc8ad9bd351bec7eb0047442d57e917edfc0be6fc994360b6ae29",
+        "flymyai/multipart/binary_field.py": "405c9d991326efa47f1d3f04ddecee8c1fcae6d50c751063cc363deac72cc185",
+        "flymyai/multipart/payload.py": "8f95754cf6725e180a9d2b144f1248316a52e8728b2f462bd4747d250363e221",
+        "flymyai/multipart/simple_field.py": "d16630526e0a2427531d3cea9957cc6fc2210e59eafc46362426a0304ffa8265",
+        "flymyai/utils/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "flymyai/utils/utils.py": "1fdad4881063935a8bead0480183711708ed415ea5ffa501ee7b260088081c85",
+        "pyproject.toml": "961527ec9894cfe9be6bb8261f7155d56bb115a2108f1381747c6a427bcb2362",
+        "pyproject.toml.template": "38b648e11c7f68b0f0bc56a25363c582c134f4e9dcb5a2e27f3f7179ec3c1166",
+        "pyrightconfig.json": "91138d557e887177fdf2915c8cf99aaa76eb14017cbaf17e93164cbd1ad09973",
+        "requirements.txt": "2587b5e14304c9dcd0ab6a3c7bbd15ef5c607ddf0fdaddc5e3171cd4406a3486",
+        "setup.py": "d82ed0063d41651e09db8ef9ffd9642ece470bc80a692d05253df2d46308cc7e",
+        "setup.py.template": "2081002dd12d17a19067c9b4c40e773f05191c69f27023accd23a9a95d263d4a",
+        "tests/FixtureFactory.py": "2ca198d123e732fe5b4ae3553aa9dafc6457bdd05004b1071213eb786584927d",
+        "tests/__init__.py": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tests/fixtures/Untitled.png": "7219a1d69200a1c91bb99d9333efdc5b80f2cbec67b55f0d66a0a0b0f45a6f0f",
+        "tests/fixtures/operation-key-conformance-v1.json": "210b08e0c6707a6fa07eebab5d2a911818a4508705edf4e63cd65f8940aa573b",
+        "tests/fixtures/test_async_inference.json": "4eb4061c76236e2f693801dd6a4653e8849f5d2044555f80732af0494331d659",
+        "tests/fixtures/test_fields.json": "63819a82f645c08c1bf8e6c80d01c66f5c57e67bae2051071511034238df53a4",
+        "tests/fixtures/test_flymyai_client.json": "1207edd29cd448e1dd5dc7ccc162ee2d998ebde0e3de8905dd281ea9a2a9e838",
+        "tests/fixtures/test_flymyai_m1_client.json": "1b031a75c57a64b16c58bd7cb724054e0bef1e4bb5a434cf0f68cf745e775f32",
+        "tests/fixtures/test_stream.json": "c0cea826e46e24eb24d9f9e526accabf51150a976c1d1a140b938eede3e660ed",
+        "tests/test_agent_client.py": "97fdef540c553941ba61a56159cfad94459c3364ba098fbdea1be653e1763ff9",
+        "tests/test_agents_embedded_context.py": "76e279b968e687f9a6a1663c2a44a311a2333c9a0f6be250b4361a736d0c171e",
+        "tests/test_agents_variables.py": "a64c9798524026bd9d0b4162bab86bb3d1323a02c04d0c1702e6329a27848fd5",
+        "tests/test_apps.py": "9c4cf7d17d64445f509bd89d78121d0a7e7048f8cf546704371580da940d5c74",
+        "tests/test_artifacts.py": "5fdcf589155324a39e34e8957d3ded7f6bcd1068507ae5965fbe435a729d2026",
+        "tests/test_async_inference.py": "38cca8e130940bb89427592a8a2f88ea05922c66bf170e80b9d85d66534c82db",
+        "tests/test_async_openapi.py": "bb48ce8d7ecbddec064a794ec7bccf38fce4b3e8824bc47b576177d69ae1bd5b",
+        "tests/test_browser_use.py": "8306e23a59f26455b6d2ea755587f40474e27b655435fed37914cac585ec1586",
+        "tests/test_fields.py": "e18574d91205813e334e5c2b78d4d43c84c23ec4ed900adb599adc157260e2fc",
+        "tests/test_flymyai_client.py": "8296e6c421d28ebd16e969859cc4a311476f8e2116c39283b9da1fe0520e5011",
+        "tests/test_flymyai_m1_client.py": "066eae535e9294eea090588af04ede4150622086931deee31568dddbdcee389b",
+        "tests/test_mcp_personal.py": "209346b58eb036991818a33a9585c4c04fe72f58f25a1bc92109d2e0f87d8ddc",
+        "tests/test_mcp_resource_scopes.py": "df8a0d6e15dbb2e4aa5cd0e70aff2b912175dd8ae43c7ca8e6e20c2d0b377ae7",
+        "tests/test_mcp_servers.py": "e5742289f1ce41cd5fb0d58c4faa3f1a881d0b382cf07d8c067b015a949b2b66",
+        "tests/test_mcp_teams.py": "5e5e6e224c46117f913d81c05b850eb208021004b8e2a884817366306f3bb21b",
+        "tests/test_multipart_payload.py": "c6f43df609d595ba7f3ef8c5096d4fff27ffede48bd2e698c15176d894088614",
+        "tests/test_projects.py": "034e961c4f24739e403a873bb3ce051b2718f27ecf9054f4c59de872290ad17b",
+        "tests/test_release_identity.py": "f2987a78e94605f9c614461e0af82de08d0b789c40ca47e2650434614fb818e1",
+        "tests/test_saved_versions.py": "142fb437ea37bdca0a35777200a3fc0761567dd9333a9788e70b8c9e58bcd641",
+        "tests/test_stream.py": "549375b5ccfa049fadc1a81511a9d2ef6bdce2a35ad3e562ea564703b24c1af6",
+        "tests/test_subagent_limits.py": "ea50ff116ef2ac7151d473a1cef1c0bf3889ddb611ea174fefa26d6770243bda",
+        "tests/test_unknown_error_handle.py": "80053be99eadc5998233f00fe813ac921b90b9f2aad50057872816848aa47e45"
+      }
+    }
 jobs:
   contracts:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 5
     strategy:
+      fail-fast: false
+      max-parallel: 1
       matrix:
-          python-version: ['3.8', '3.12', '3.13']
+        include:
+        - python-version: '3.8'
+          version: 3.8.20
+          image: docker.io/library/python:3.8.20-bookworm@sha256:7aa279fb41dad2962d3c915aa6f6615134baa412ab5aafa9d4384dcaaa0af15d
+        - python-version: '3.12'
+          version: 3.12.10
+          image: docker.io/library/python:3.12.10-bookworm@sha256:8191c572cf979a5dbc7345474ed93d96c56a6ac95c1dae2451132fe1ba633ae3
+        - python-version: '3.13'
+          version: 3.13.3
+          image: docker.io/library/python:3.13.3-bookworm@sha256:091f21ccc2f4d319f220582c4e33801e99029f788d5767f74c8cff5396cf4fa5
+    container:
+      image: ${{ matrix.image }}
+      options: --memory=1536m --memory-swap=1536m --cpus=1 --pids-limit=128 --security-opt=no-new-privileges
+    env:
+      SDK_PHASE: contracts
+      SDK_EXPECTED_VERSION: ${{ matrix.version }}
+      SDK_CONTAINER_IMAGE: ${{ matrix.image }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python-version }}
-      - run: python -m pip install . pytest pytest-asyncio respx
-      # Offline HTTP transports only. Never use production credentials here.
-      - run: >-
-          python -m pytest tests --ignore=tests/test_async_inference.py
-          --ignore=tests/test_flymyai_client.py --ignore=tests/test_stream.py -q
+    - name: Verify whole-job cgroup and Python; start bounded samples before checkout
+      run: |
+        set -eu
+        umask 077
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        Path('/tmp/sdk-bounded-job.py').write_text(os.environ['SDK_BOUNDED_HELPER'])
+        PY
+        python /tmp/sdk-bounded-job.py initialize
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        Path('/tmp/sdk-bounded/payload.json').write_text(os.environ['SDK_BOUNDED_PAYLOAD'])
+        PY
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        fetch-depth: 1
+        ref: ${{ github.sha }}
+    - name: Canonical dependencies and complete offline modules or lint
+      run: python /tmp/sdk-bounded-job.py "$SDK_PHASE"
+    - name: Bounded actual JUnit, collection and resource receipts in ordinary logs
+      if: ${{ always() }}
+      run: python /tmp/sdk-bounded-job.py export
   lint:
+    needs:
+    - contracts
+    if: ${{ always() && !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    container:
+      image: docker.io/library/python:3.13.3-bookworm@sha256:091f21ccc2f4d319f220582c4e33801e99029f788d5767f74c8cff5396cf4fa5
+      options: --memory=1536m --memory-swap=1536m --cpus=1 --pids-limit=128 --security-opt=no-new-privileges
+    env:
+      SDK_PHASE: lint
+      SDK_EXPECTED_VERSION: 3.13.3
+      SDK_CONTAINER_IMAGE: docker.io/library/python:3.13.3-bookworm@sha256:091f21ccc2f4d319f220582c4e33801e99029f788d5767f74c8cff5396cf4fa5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.13'
-      - run: python -m pip install black==23.12.1 flake8==7.3.0
-      - run: python -m black --preview --check .
-      - run: python -m flake8 --max-line-length=88 flymyai/agents/_mcp_personal.py tests/test_mcp_personal.py
+    - name: Verify whole-job cgroup and Python; start bounded samples before checkout
+      run: |
+        set -eu
+        umask 077
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        Path('/tmp/sdk-bounded-job.py').write_text(os.environ['SDK_BOUNDED_HELPER'])
+        PY
+        python /tmp/sdk-bounded-job.py initialize
+        python - <<'PY'
+        import os
+        from pathlib import Path
+        Path('/tmp/sdk-bounded/payload.json').write_text(os.environ['SDK_BOUNDED_PAYLOAD'])
+        PY
+    - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      with:
+        persist-credentials: false
+        fetch-depth: 1
+        ref: ${{ github.sha }}
+    - name: Canonical dependencies and complete offline modules or lint
+      run: python /tmp/sdk-bounded-job.py "$SDK_PHASE"
+    - name: Bounded actual JUnit, collection and resource receipts in ordinary logs
+      if: ${{ always() }}
+      run: python /tmp/sdk-bounded-job.py export
