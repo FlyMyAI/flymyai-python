@@ -59,14 +59,19 @@ class PackageShareList(_Model):
 
 
 class PackagePlan(_Model):
-    """What importing would create, each connection's ``status`` (ready, mapped,
-    platform, missing, ambiguous with ``candidates``, ...), ``blocking`` and the
-    ``plan_token`` that applies exactly this plan. Nothing was created."""
+    """What importing would create - each agent with its prompt (``system``) -, each
+    connection's ``status`` (ready, mapped, platform, missing, ambiguous with
+    ``candidates``, ...), the acceptance cases with their ``inputs``, earlier
+    imports of the same package (``previous_imports``: applying again makes a
+    second copy), ``blocking`` and the ``plan_token`` that applies exactly this
+    plan. Nothing was created. Show the prompts and the inputs before applying:
+    the acceptance runs use the importer's connections."""
 
     package: Dict[str, Any] = {}
     creates: List[Dict[str, Any]] = []
     connections: List[Dict[str, Any]] = []
     acceptance: List[Dict[str, Any]] = []
+    previous_imports: List[Dict[str, Any]] = []
     warnings: List[str] = []
     blocking: bool = False
     plan_token: str = ""
