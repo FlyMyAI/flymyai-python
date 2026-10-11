@@ -261,7 +261,8 @@ class Projects:
 
     def stop(self, project_id: str, *, idempotency_key: str) -> Project:
         """Stop an app or a page: a release with ``runtime.state: stopped``; its
-        servers stop and the rest of their holds is refunded."""
+        servers stop and the rest of their holds is refunded. Retained persistent
+        caches remain billed to the project budget while stopped."""
         data = self._c._request(
             "POST",
             _path(project_id, "stop/", fleets=False),
@@ -356,6 +357,7 @@ class AsyncProjects:
         return ProjectAgent.model_validate(data)
 
     async def stop(self, project_id: str, *, idempotency_key: str) -> Project:
+        """Stop execution. Retained persistent caches remain billed to the project budget."""
         data = await self._c._request(
             "POST",
             _path(project_id, "stop/", fleets=False),
