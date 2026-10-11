@@ -1565,7 +1565,9 @@ class Compilations:
 
     def set_live(self, compilation_id: ResourceID) -> Compilation:
         """Make this version live; an older one rolls back. A schedule on the
-        previous live version follows it."""
+        previous live version follows it, the agent's active private
+        deployments switch to it and its other deployments get it staged for
+        publish (the answer's ``deployments`` lists each)."""
         data = self._c._request(
             "POST", f"/api/v1/agents/compilations/{compilation_id}/set-live/", json={}
         )
@@ -2910,7 +2912,9 @@ class AsyncCompilations:
 
     async def set_live(self, compilation_id: ResourceID) -> Compilation:
         """Make this version live; an older one rolls back. A schedule on the
-        previous live version follows it."""
+        previous live version follows it, the agent's active private
+        deployments switch to it and its other deployments get it staged for
+        publish (the answer's ``deployments`` lists each)."""
         data = await self._c._request(
             "POST", f"/api/v1/agents/compilations/{compilation_id}/set-live/", json={}
         )

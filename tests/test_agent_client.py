@@ -598,9 +598,10 @@ class TestSyncCompilations:
         mock_http = MagicMock()
         agent_id = "7e3621c6-9f78-42b7-9942-3adb964ae17d"
         live = _compilation_payload(id=417, is_live=True, name="forms")
+        switched = [{"public_id": "dep-1", "result": "switched"}]
         mock_http.request.side_effect = [
             _make_response(_compilation_payload(id=417, source_compilation=416)),
-            _make_response(live),
+            _make_response({**live, "deployments": switched}),
             _make_response({"results": [live]}),
             _make_response(_run_payload()),
         ]
@@ -613,7 +614,8 @@ class TestSyncCompilations:
             source_compilation_id=416,
         )
         assert (saved.id, saved.source_compilation, saved.is_live) == (417, 416, False)
-        assert client.compilations.set_live(417).is_live is True
+        made_live = client.compilations.set_live(417)
+        assert (made_live.is_live, made_live.deployments) == (True, switched)
         assert client.compilations.get_live(agent_id).name == "forms"
         client.compilations.run_live(
             agent_id, idempotency_key="live-1", variables={"site_url": "https://a.io"}
