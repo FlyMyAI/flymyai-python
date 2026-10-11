@@ -15,6 +15,8 @@ MAX_RESPONSE_BYTES = 64 * 1024
 
 
 class ComputeLogTail(BaseModel):
+    """Recent logs; optional source=system identifies RunPod image/startup progress."""
+
     model_config = ConfigDict(extra="allow")
     lines: List[str] = Field(default_factory=list)
     bytes: int = 0
