@@ -1544,7 +1544,9 @@ class Compilations:
         ``source_compilation_id`` names the version being edited (default: the
         live one). The new version is live only with ``make_live=True`` or when
         the agent has none yet; otherwise test it with :meth:`run_instruction`
-        and switch with :meth:`set_live`.
+        and switch with :meth:`set_live`. Saving the same text, name and note
+        from the same version again returns that version, so a retry never
+        duplicates it.
         """
         body: Dict[str, Any] = {
             "instruction_md": instruction_md,
@@ -2891,7 +2893,9 @@ class AsyncCompilations:
         ``source_compilation_id`` names the version being edited (default: the
         live one). The new version is live only with ``make_live=True`` or when
         the agent has none yet; otherwise test it with :meth:`run_instruction`
-        and switch with :meth:`set_live`.
+        and switch with :meth:`set_live`. Saving the same text, name and note
+        from the same version again returns that version, so a retry never
+        duplicates it.
         """
         body: Dict[str, Any] = {
             "instruction_md": instruction_md,
