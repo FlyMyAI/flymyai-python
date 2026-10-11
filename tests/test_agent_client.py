@@ -594,6 +594,54 @@ class TestSyncCompilations:
             client.compilations.run(COMPILATION_ID)
         mock_http.request.assert_not_called()
 
+    def test_versions_save_set_live_and_run_live(self):
+        mock_http = MagicMock()
+        agent_id = "7e3621c6-9f78-42b7-9942-3adb964ae17d"
+        live = _compilation_payload(id=417, is_live=True, name="forms")
+        switched = [{"public_id": "dep-1", "result": "switched"}]
+        mock_http.request.side_effect = [
+            _make_response(_compilation_payload(id=417, source_compilation=416)),
+            _make_response({**live, "deployments": switched}),
+            _make_response({"results": [live]}),
+            _make_response(_run_payload()),
+        ]
+        client = _sync_client(mock_http)
+
+        saved = client.compilations.save_instruction(
+            execution_id=RUN_ID,
+            instruction_md="# screenshot every form",
+            name="forms",
+            source_compilation_id=416,
+        )
+        assert (saved.id, saved.source_compilation, saved.is_live) == (417, 416, False)
+        made_live = client.compilations.set_live(417)
+        assert (made_live.is_live, made_live.deployments) == (True, switched)
+        assert client.compilations.get_live(agent_id).name == "forms"
+        client.compilations.run_live(
+            agent_id, idempotency_key="live-1", variables={"site_url": "https://a.io"}
+        )
+
+        calls = [c.args[:2] for c in mock_http.request.call_args_list]
+        assert calls == [
+            ("POST", f"/api/v1/agents/compilations/save-instruction/{RUN_ID}/"),
+            ("POST", "/api/v1/agents/compilations/417/set-live/"),
+            ("GET", "/api/v1/agents/compilations/"),
+            ("POST", f"/api/v1/agents/compilations/live/{agent_id}/run-instruction/"),
+        ]
+        assert mock_http.request.call_args_list[0].kwargs["json"] == {
+            "instruction_md": "# screenshot every form",
+            "make_live": False,
+            "name": "forms",
+            "source_compilation_id": 416,
+        }
+        assert mock_http.request.call_args_list[2].kwargs["params"] == {
+            "task": agent_id,
+            "is_live": "true",
+        }
+        run_kwargs = mock_http.request.call_args_list[3].kwargs
+        assert run_kwargs["headers"]["Idempotency-Key"] == "live-1"
+        assert run_kwargs["json"] == {"variables": {"site_url": "https://a.io"}}
+
 
 @pytest.mark.asyncio
 class TestAsyncAgents:

@@ -1488,15 +1488,114 @@ class AgentGroups:
         )
 
 
+def _compilation_list_params(
+    agent_id: Optional[ResourceID],
+    execution_id: Optional[ResourceID],
+    is_live: Optional[bool],
+) -> Dict[str, str]:
+    params: Dict[str, str] = {}
+    if agent_id is not None:
+        params["task"] = str(agent_id)
+    if execution_id is not None:
+        params["execution"] = str(execution_id)
+    if is_live is not None:
+        params["is_live"] = "true" if is_live else "false"
+    return params
+
+
 class Compilations:
     """Frozen agent instructions. Maps to ``/api/v1/agents/compilations/``."""
 
     def __init__(self, client: SyncAgentClient) -> None:
         self._c = client
 
-    def list(self) -> List[Compilation]:
-        data = self._c._request("GET", "/api/v1/agents/compilations/")
-        return [Compilation(**item) for item in data]
+    def list(
+        self,
+        *,
+        agent_id: Optional[ResourceID] = None,
+        execution_id: Optional[ResourceID] = None,
+        is_live: Optional[bool] = None,
+    ) -> List[Compilation]:
+        """List saved versions; filter by agent, by chat, and ``is_live``."""
+        params = _compilation_list_params(agent_id, execution_id, is_live)
+        data = self._c._request(
+            "GET", "/api/v1/agents/compilations/", params=params or None
+        )
+        items = data["results"] if isinstance(data, dict) else data
+        return [Compilation(**item) for item in items]
+
+    def get_live(self, agent_id: ResourceID) -> Optional[Compilation]:
+        """The agent's live version, or None before its first freeze."""
+        found = self.list(agent_id=agent_id, is_live=True)
+        return found[0] if found else None
+
+    def save_instruction(
+        self,
+        *,
+        execution_id: ResourceID,
+        instruction_md: str,
+        name: Optional[str] = None,
+        note: Optional[str] = None,
+        source_compilation_id: Optional[int] = None,
+        make_live: bool = False,
+    ) -> Compilation:
+        """Save an edited instruction as a NEW version; the edited one is kept.
+
+        ``source_compilation_id`` names the version being edited (default: the
+        live one). The new version is live only with ``make_live=True`` or when
+        the agent has none yet; otherwise test it with :meth:`run_instruction`
+        and switch with :meth:`set_live`. Saving the same text, name and note
+        from the same version again returns that version, so a retry never
+        duplicates it.
+        """
+        body: Dict[str, Any] = {
+            "instruction_md": instruction_md,
+            "make_live": make_live,
+        }
+        if name is not None:
+            body["name"] = name
+        if note is not None:
+            body["note"] = note
+        if source_compilation_id is not None:
+            body["source_compilation_id"] = source_compilation_id
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/compilations/save-instruction/{execution_id}/",
+            json=body,
+        )
+        return Compilation(**data)
+
+    def set_live(self, compilation_id: ResourceID) -> Compilation:
+        """Make this version live; an older one rolls back. A schedule on the
+        previous live version follows it, the agent's active private
+        deployments switch to it and its other deployments get it staged for
+        publish (the answer's ``deployments`` lists each)."""
+        data = self._c._request(
+            "POST", f"/api/v1/agents/compilations/{compilation_id}/set-live/", json={}
+        )
+        return Compilation(**data)
+
+    def run_live(
+        self,
+        agent_id: ResourceID,
+        *,
+        idempotency_key: str,
+        variables: Optional[Dict[str, Any]] = None,
+        subagent_limits: Optional[Dict[str, Any]] = None,
+    ) -> RunDetail:
+        """Run the agent's live version (the version :meth:`set_live` chose)."""
+        body: Dict[str, Any] = {}
+        if variables:
+            body["variables"] = variables
+        if subagent_limits is not None:
+            body["subagent_limits"] = subagent_limits
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/compilations/live/{agent_id}/run-instruction/",
+            json=body or None,
+            headers=_idempotency_headers(idempotency_key),
+        )
+        return RunDetail(**data)
 
     def get(self, compilation_id: ResourceID) -> Compilation:
         data = self._c._request("GET", f"/api/v1/agents/compilations/{compilation_id}/")
@@ -2759,9 +2858,93 @@ class AsyncCompilations:
     def __init__(self, client: AsyncAgentClient) -> None:
         self._c = client
 
-    async def list(self) -> List[Compilation]:
-        data = await self._c._request("GET", "/api/v1/agents/compilations/")
-        return [Compilation(**item) for item in data]
+    async def list(
+        self,
+        *,
+        agent_id: Optional[ResourceID] = None,
+        execution_id: Optional[ResourceID] = None,
+        is_live: Optional[bool] = None,
+    ) -> List[Compilation]:
+        """List saved versions; filter by agent, by chat, and ``is_live``."""
+        params = _compilation_list_params(agent_id, execution_id, is_live)
+        data = await self._c._request(
+            "GET", "/api/v1/agents/compilations/", params=params or None
+        )
+        items = data["results"] if isinstance(data, dict) else data
+        return [Compilation(**item) for item in items]
+
+    async def get_live(self, agent_id: ResourceID) -> Optional[Compilation]:
+        """The agent's live version, or None before its first freeze."""
+        found = await self.list(agent_id=agent_id, is_live=True)
+        return found[0] if found else None
+
+    async def save_instruction(
+        self,
+        *,
+        execution_id: ResourceID,
+        instruction_md: str,
+        name: Optional[str] = None,
+        note: Optional[str] = None,
+        source_compilation_id: Optional[int] = None,
+        make_live: bool = False,
+    ) -> Compilation:
+        """Save an edited instruction as a NEW version; the edited one is kept.
+
+        ``source_compilation_id`` names the version being edited (default: the
+        live one). The new version is live only with ``make_live=True`` or when
+        the agent has none yet; otherwise test it with :meth:`run_instruction`
+        and switch with :meth:`set_live`. Saving the same text, name and note
+        from the same version again returns that version, so a retry never
+        duplicates it.
+        """
+        body: Dict[str, Any] = {
+            "instruction_md": instruction_md,
+            "make_live": make_live,
+        }
+        if name is not None:
+            body["name"] = name
+        if note is not None:
+            body["note"] = note
+        if source_compilation_id is not None:
+            body["source_compilation_id"] = source_compilation_id
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/compilations/save-instruction/{execution_id}/",
+            json=body,
+        )
+        return Compilation(**data)
+
+    async def set_live(self, compilation_id: ResourceID) -> Compilation:
+        """Make this version live; an older one rolls back. A schedule on the
+        previous live version follows it, the agent's active private
+        deployments switch to it and its other deployments get it staged for
+        publish (the answer's ``deployments`` lists each)."""
+        data = await self._c._request(
+            "POST", f"/api/v1/agents/compilations/{compilation_id}/set-live/", json={}
+        )
+        return Compilation(**data)
+
+    async def run_live(
+        self,
+        agent_id: ResourceID,
+        *,
+        idempotency_key: str,
+        variables: Optional[Dict[str, Any]] = None,
+        subagent_limits: Optional[Dict[str, Any]] = None,
+    ) -> RunDetail:
+        """Run the agent's live version (the version :meth:`set_live` chose)."""
+        body: Dict[str, Any] = {}
+        if variables:
+            body["variables"] = variables
+        if subagent_limits is not None:
+            body["subagent_limits"] = subagent_limits
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/compilations/live/{agent_id}/run-instruction/",
+            json=body or None,
+            headers=_idempotency_headers(idempotency_key),
+        )
+        return RunDetail(**data)
 
     async def get(self, compilation_id: ResourceID) -> Compilation:
         data = await self._c._request(
