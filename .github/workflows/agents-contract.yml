@@ -1,6 +1,7 @@
 name: SDK offline contracts
 
 on:
+  workflow_dispatch:
   push:
     branches: ['feat/**']
     paths:
