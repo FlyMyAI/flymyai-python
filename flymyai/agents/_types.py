@@ -376,6 +376,13 @@ class Compilation(BaseModel):
     error: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+    #: True for the agent's live version: what runs when no version is named.
+    is_live: bool = False
+    name: str = ""
+    note: str = ""
+    #: The version this one was edited from (None for a freeze).
+    source_compilation: Optional[int] = None
+    user_agent_task: Optional[str] = None
 
     @property
     def is_ready(self) -> bool:

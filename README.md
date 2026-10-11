@@ -99,7 +99,7 @@ async def main():
 asyncio.run(main())
 ```
 
-Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction). A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
+Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction in place). To keep history, save an edit as a new version with `client.compilations.save_instruction(execution_id=..., instruction_md=...)`, test it with `run_instruction(compilation_id)`, then `set_live(compilation_id)`; `run_live(agent_id, idempotency_key=...)` and the agent's schedule run the live version, `get_live(agent_id)` reads it, and `set_live` on an older version rolls back. A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
 ### Limits for automatic subagents
 
