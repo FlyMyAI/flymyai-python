@@ -80,7 +80,10 @@ class PackagePlan(_Model):
 class PackageImport(_Model):
     """An import's report (``flymy.agent-package-import.v1``): ``status`` (created,
     running, passed, failed), the created ``agents``, per acceptance case its
-    ``run_id``, ``verdict`` and ``failures``, and ``frozen`` on pass."""
+    ``run_id``, ``verdict`` and ``failures``, and ``frozen`` on pass. A frozen
+    entry's ``compilation_id`` means its asynchronous build was requested;
+    read :meth:`Packages.status` until ``ready`` is true or ``error`` is set.
+    Acceptance ``passed`` alone does not mean the saved version is ready."""
 
     id: str
     status: str

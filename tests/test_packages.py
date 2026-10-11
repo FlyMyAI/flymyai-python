@@ -51,6 +51,24 @@ REPORT = {
     "frozen": {},
     "error": None,
 }
+
+
+def test_import_report_keeps_asynchronous_freeze_readiness():
+    pending = PackageImport.model_validate({
+        **REPORT,
+        "status": "passed",
+        "frozen": {"f2d": {"compilation_id": 77, "status": "pending", "ready": False}},
+    })
+    assert pending.status == "passed"
+    assert pending.frozen["f2d"]["ready"] is False
+    ready = PackageImport.model_validate({
+        **REPORT,
+        "status": "passed",
+        "frozen": {"f2d": {"compilation_id": 77, "status": "completed", "ready": True}},
+    })
+    assert ready.frozen["f2d"]["ready"] is True
+
+
 # v1: a frozen agent and a pinned client keep these names
 V1_METHODS = {
     "export",
