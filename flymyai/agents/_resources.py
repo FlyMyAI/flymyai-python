@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 import time
 from typing import (
@@ -32,6 +33,7 @@ from flymyai.agents._types import (
     BrowserUseProfileBinding,
     Compilation,
     CompilationStatus,
+    CompilationSummaryPage,
     McpAccessMode,
     McpResourceSet,
     McpResourceSetAuthorityType,
@@ -1503,11 +1505,96 @@ def _compilation_list_params(
     return params
 
 
+def _saved_version_params(
+    agent_id: str, limit: int, cursor: Optional[str]
+) -> Dict[str, str]:
+    try:
+        task = str(UUID(agent_id))
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise ValueError("agent_id must be one owned agent UUID") from exc
+    if type(limit) is not int or not 1 <= limit <= 50:
+        raise ValueError("limit must be an integer between 1 and 50")
+    params = {"task": task, "limit": str(limit)}
+    if cursor is not None:
+        if (
+            not isinstance(cursor, str)
+            or not cursor.strip()
+            or len(cursor) > 512
+            or not cursor.isprintable()
+        ):
+            raise ValueError(
+                "cursor must be printable, nonblank and at most 512 characters"
+            )
+        params["cursor"] = cursor
+    return params
+
+
+def _saved_version_page(data: Any, params: Dict[str, str]) -> CompilationSummaryPage:
+    # Do not treat an old unbounded array/detail as a discovery page. Preserve
+    # unknown metadata for forward compatibility, within the total byte budget.
+    if (
+        not isinstance(data, dict)
+        or len(
+            json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+        )
+        > 64 * 1024
+    ):
+        raise ValueError("Invalid or oversized saved-version summary page")
+    page = CompilationSummaryPage(**data)
+    if page.next_cursor is not None and (
+        not page.next_cursor.strip() or not page.next_cursor.isprintable()
+    ):
+        raise ValueError("Invalid saved-version continuation cursor")
+    if page.task != params["task"] or len(page.results) > int(params["limit"]):
+        raise ValueError("Saved-version page has the wrong agent or exceeds its limit")
+    previous_id = float("inf")
+    forbidden = {
+        "instruction_md",
+        "script_code",
+        "result",
+        "error",
+        "messages",
+        "display_messages",
+        "agent_result",
+        "freeze_guidance",
+        "example_variables",
+        "schedule_variables",
+        "browser_media_consent",
+        "input_schema",
+        "output_schema",
+    }
+    if forbidden.intersection(data):
+        raise ValueError("Full payload is not saved-version discovery metadata")
+    for item in page.results:
+        if (
+            item.user_agent_task != page.task
+            or item.id >= previous_id
+            or forbidden.intersection(item.model_extra or {})
+        ):
+            raise ValueError("Invalid saved-version summary scope, order or projection")
+        previous_id = item.id
+    return page
+
+
 class Compilations:
     """Frozen agent instructions. Maps to ``/api/v1/agents/compilations/``."""
 
     def __init__(self, client: SyncAgentClient) -> None:
         self._c = client
+
+    def list_versions(
+        self, agent_id: str, *, limit: int = 20, cursor: Optional[str] = None
+    ) -> CompilationSummaryPage:
+        """One agent's metadata page (20 by default, at most 50 / 64 KiB).
+
+        Fetch full instructions explicitly with get(id). This never falls back
+        to list(), counts history, or automatically follows the next cursor.
+        """
+        params = _saved_version_params(agent_id, limit, cursor)
+        data = self._c._get_json_page(
+            "/api/v1/agents/compilations/versions/", params=params, max_bytes=64 * 1024
+        )
+        return _saved_version_page(data, params)
 
     def list(
         self,
@@ -2857,6 +2944,16 @@ class AsyncCompilations:
 
     def __init__(self, client: AsyncAgentClient) -> None:
         self._c = client
+
+    async def list_versions(
+        self, agent_id: str, *, limit: int = 20, cursor: Optional[str] = None
+    ) -> CompilationSummaryPage:
+        """Async single-page summary discovery; see Compilations.list_versions."""
+        params = _saved_version_params(agent_id, limit, cursor)
+        data = await self._c._get_json_page(
+            "/api/v1/agents/compilations/versions/", params=params, max_bytes=64 * 1024
+        )
+        return _saved_version_page(data, params)
 
     async def list(
         self,

@@ -181,6 +181,19 @@ def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
     )
 
 
+def _check_page_headers(response: httpx.Response, max_bytes: int) -> None:
+    # Request identity encoding so an unexpected compressed body cannot expand
+    # without a bound inside the HTTP decoder before our chunk-size check.
+    if (
+        response.headers.get("content-encoding", "identity").strip().lower()
+        != "identity"
+    ):
+        raise ValueError("Unexpected encoding for a bounded saved-version page")
+    length = response.headers.get("content-length", "")
+    if length.isdigit() and int(length) > max_bytes:
+        raise ValueError("Saved-version response exceeds its byte limit")
+
+
 def _raise_for_status(resp: httpx.Response) -> None:
     if resp.is_success:
         return
@@ -317,6 +330,28 @@ class SyncAgentClient:
     def __enter__(self) -> SyncAgentClient:
         return self
 
+    def _get_json_page(
+        self, path: str, *, params: Dict[str, str], max_bytes: int
+    ) -> Any:
+        """Bound an additive metadata read before JSON allocation, no retries."""
+        with self._http.stream(
+            "GET", path, params=params, headers={"Accept-Encoding": "identity"}
+        ) as response:
+            _check_page_headers(response, max_bytes)
+            body = bytearray()
+            for chunk in response.iter_bytes(chunk_size=8192):
+                if len(body) + len(chunk) > max_bytes:
+                    raise ValueError("Saved-version response exceeds its byte limit")
+                body.extend(chunk)
+            buffered = httpx.Response(
+                response.status_code,
+                headers=response.headers,
+                content=bytes(body),
+                request=response.request,
+            )
+            _raise_for_status(buffered)
+            return buffered.json()
+
     def __exit__(self, *exc: Any) -> None:
         self.close()
 
@@ -388,6 +423,28 @@ class AsyncAgentClient:
 
     async def __aenter__(self) -> AsyncAgentClient:
         return self
+
+    async def _get_json_page(
+        self, path: str, *, params: Dict[str, str], max_bytes: int
+    ) -> Any:
+        """Async bounded metadata read; legacy _request remains unchanged."""
+        async with self._http.stream(
+            "GET", path, params=params, headers={"Accept-Encoding": "identity"}
+        ) as response:
+            _check_page_headers(response, max_bytes)
+            body = bytearray()
+            async for chunk in response.aiter_bytes(chunk_size=8192):
+                if len(body) + len(chunk) > max_bytes:
+                    raise ValueError("Saved-version response exceeds its byte limit")
+                body.extend(chunk)
+            buffered = httpx.Response(
+                response.status_code,
+                headers=response.headers,
+                content=bytes(body),
+                request=response.request,
+            )
+            _raise_for_status(buffered)
+            return buffered.json()
 
     async def __aexit__(self, *exc: Any) -> None:
         await self.close()

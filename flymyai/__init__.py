@@ -6,6 +6,8 @@ from flymyai.agents import (
     AgentGroup,
     AgentClient,
     AsyncAgentClient,
+    CompilationSummary,
+    CompilationSummaryPage,
     ConnectionBinding,
     ExternalPrincipal,
     ExternalPrincipalStatus,
@@ -41,6 +43,8 @@ __all__ = [
     # Agent clients
     "AgentClient",
     "AsyncAgentClient",
+    "CompilationSummary",
+    "CompilationSummaryPage",
     "ConnectionBinding",
     "ExternalPrincipal",
     "ExternalPrincipalStatus",
