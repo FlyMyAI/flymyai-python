@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import re
 from typing import Any, Dict, List, Optional
+from urllib.parse import unquote
 
 from pydantic import BaseModel, ConfigDict
 
@@ -32,6 +33,16 @@ _ARTIFACT_ID = re.compile(
 )
 _ID_MAX_CHARS = 200
 _ERRORS_LIMIT_MAX = 200
+# A project's link is its page in the app with the id URI-encoded (":" as %3A, "/" as
+# %2F), as Share copies it: only an app or a fleet, with exactly the id shapes above and
+# no other escape, held to an id's length (backend docs/protocols/SHARING.md).
+_LINK_PREFIX = "https://app.flymy.ai/projects/"
+_LINK = re.compile(
+    r"https://app\.flymy\.ai/projects/"
+    r"(?:app(?::|%3[Aa])[a-z0-9][a-z0-9-]*(?:/|%2[Ff])[a-z0-9][a-z0-9._-]*"
+    r"|fleet(?::|%3[Aa])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/?"
+)
+_NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,39}")
 
 
 class _Model(BaseModel):
@@ -89,6 +100,17 @@ class ProjectErrors(_Model):
     next_before: Optional[str] = None
 
 
+class ProjectCopy(_Model):
+    """A project copied into your account: ``project`` (its ``id``, ``name`` and
+    ``url``), the ``agents`` made, and ``setup`` - ``needs`` (connections, secrets,
+    inputs and schedules the copy still needs) and ``chat``, the execution id of the
+    Transfer agent that finishes the setup with you in its chat."""
+
+    project: Dict[str, Any] = {}
+    agents: List[Dict[str, Any]] = []
+    setup: Dict[str, Any] = {}
+
+
 class ProjectAgent(_Model):
     """The agent in charge of a project, created on first use."""
 
@@ -140,6 +162,48 @@ def _path(project_id: Any, route: str = "", *, fleets: bool = True) -> str:
         "project_id must be an id from list(): app:<owner>/<name>, site:<page id>,"
         " fleet:<lead agent id> or artifact:<artifact id>"
     )
+
+
+def _shared_path(project: Any, route: str) -> str:
+    """The ``public/`` or ``copy/`` route of an app or a fleet, by id or by its link."""
+    value = str(project)
+    if len(value) <= _ID_MAX_CHARS and _LINK.fullmatch(value):
+        value = unquote(value[len(_LINK_PREFIX) :].rstrip("/"))
+    if len(value) <= _ID_MAX_CHARS:
+        app = _APP_ID.fullmatch(value)
+        if app:
+            return f"{_ROOT}app:{app.group(1)}/{app.group(2)}/{route}"
+        fleet = _FLEET_ID.fullmatch(value)
+        if fleet:
+            return f"{_ROOT}fleet:{fleet.group(1)}/{route}"
+        if _SITE_ID.fullmatch(value):
+            raise ValueError(
+                "a page on its own is shared and copied as a site (share, remix)"
+            )
+        if _ARTIFACT_ID.fullmatch(value):
+            raise ValueError("an artifact is shared and copied with client.artifacts")
+    raise ValueError(
+        "project must be an app or a fleet - app:<owner>/<name> or"
+        " fleet:<lead agent id> - or its link https://app.flymy.ai/projects/<id>"
+    )
+
+
+def _share_body(public: Any) -> Dict[str, Any]:
+    if not isinstance(public, bool):
+        raise ValueError("public must be True or False")
+    return {"json": {"public": public}}
+
+
+def _copy_body(name: Optional[str], idempotency_key: str) -> Dict[str, Any]:
+    if name is not None and not (isinstance(name, str) and _NAME.fullmatch(name)):
+        raise ValueError(
+            "name must be 2-40 lowercase letters, digits and dashes,"
+            " starting with a letter or digit"
+        )
+    return {
+        "json": {"name": name} if name is not None else {},
+        "headers": _key(idempotency_key),
+    }
 
 
 def _errors_query(limit: Optional[int], before: Optional[str]) -> Dict[str, Any]:
@@ -289,6 +353,34 @@ class Projects:
             return ProjectPlan.model_validate(data)
         return Project.model_validate(data)
 
+    def share(self, project_id: str, *, public: bool) -> Project:
+        """Make an app or a fleet public or private, as an agent's public flag.
+
+        ``public=True``: anyone with its link, ``https://app.flymy.ai/projects/<id>``,
+        sees what it holds - its agents, pages and what a copy needs to connect, never
+        its data, conversations, money or connections - and copies it with
+        :meth:`copy`. ``public=False``: only you; copies already made stay theirs. A
+        fleet shares through its lead. Safe to repeat."""
+        data = self._c._request(
+            "POST", _shared_path(project_id, "public/"), **_share_body(public)
+        )
+        return Project.model_validate(data)
+
+    def copy(
+        self, project: str, *, idempotency_key: str, name: Optional[str] = None
+    ) -> ProjectCopy:
+        """Copy a public project - by its link or id - or one of yours into your
+        account, as an agent copies: its agents (a lead with all its subagents, all
+        or none), pages and config under your own budget; never its data,
+        conversations, money or connections. ``name`` defaults to the source's (with
+        -2, -3 if you have one). Refused before anything is created: 422
+        ``missing_tools`` (connect them, copy again), 404 (private or gone), 402
+        (balance), 409 ``project_exists`` (only with an explicit ``name``)."""
+        data = self._c._request(
+            "POST", _shared_path(project, "copy/"), **_copy_body(name, idempotency_key)
+        )
+        return ProjectCopy.model_validate(data)
+
 
 class AsyncProjects:
     """``client.projects`` on the async client."""
@@ -379,3 +471,17 @@ class AsyncProjects:
         if plan_token is None:
             return ProjectPlan.model_validate(data)
         return Project.model_validate(data)
+
+    async def share(self, project_id: str, *, public: bool) -> Project:
+        data = await self._c._request(
+            "POST", _shared_path(project_id, "public/"), **_share_body(public)
+        )
+        return Project.model_validate(data)
+
+    async def copy(
+        self, project: str, *, idempotency_key: str, name: Optional[str] = None
+    ) -> ProjectCopy:
+        data = await self._c._request(
+            "POST", _shared_path(project, "copy/"), **_copy_body(name, idempotency_key)
+        )
+        return ProjectCopy.model_validate(data)

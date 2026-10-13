@@ -268,3 +268,108 @@ def test_the_async_client_has_the_same_projects():
     assert listed.projects[0].name == "paint-arena" and plan.plan_token == "plan-1"
     sync = {name for name in dir(Projects) if not name.startswith("_")}
     assert sync == {name for name in dir(AsyncProjects) if not name.startswith("_")}
+
+
+LINK = "https://app.flymy.ai/projects/app%3Adenis%2Fpaint-arena"
+COPIED = {
+    "schema": "flymy.project.v1",
+    "project": {"id": "app:me/paint-arena", "name": "paint-arena"},
+    "agents": [{"uuid": "a1", "name": "lead"}],
+    "setup": {"chat": "abc-defg-hij", "needs": {"connections": ["telegram_bot"]}},
+}
+
+
+def test_share_and_copy_a_project_like_an_agent_by_id_or_link():
+    seen = []
+
+    def handler(request):
+        body = json.loads(request.content) if request.content else None
+        seen.append((request.url.path, request.headers.get("Idempotency-Key"), body))
+        if request.url.path.endswith("/copy/"):
+            return response(COPIED)
+        return response({**PROJECT, "public": True})
+
+    client = client_with(handler)
+    shared = client.projects.share(APP_ID, public=True)
+    assert shared.public is True
+    copy = client.projects.copy(LINK, idempotency_key="copy-1", name="arena-copy")
+    assert copy.project["id"] == "app:me/paint-arena"
+    assert copy.setup["chat"] == "abc-defg-hij"
+    client.projects.copy(FLEET_ID, idempotency_key="copy-2")
+    client.projects.share(
+        "https://app.flymy.ai/projects/fleet%3a" + FLEET_ID[6:] + "/", public=False
+    )
+    assert seen == [
+        ("/api/v1/agents/projects/app:denis/paint-arena/public/", None, {"public": True}),
+        ("/api/v1/agents/projects/app:denis/paint-arena/copy/", "copy-1", {"name": "arena-copy"}),
+        (f"/api/v1/agents/projects/{FLEET_ID}/copy/", "copy-2", {}),
+        (f"/api/v1/agents/projects/{FLEET_ID}/public/", None, {"public": False}),
+    ]
+
+
+@pytest.mark.parametrize(
+    "project",
+    [
+        "https://evil.example/projects/app%3Adenis%2Fpaint-arena",
+        "http://app.flymy.ai/projects/app%3Adenis%2Fpaint-arena",
+        "https://app.flymy.ai/projects/app%3Adenis%2Fpaint-arena%2Fagent",
+        "https://app.flymy.ai/projects/app%3Adenis%2F..%2Fx",
+        "https://app.flymy.ai/projects/app%3Adenis%2Fpaint-arena?x=1",
+        "https://app.flymy.ai/projects/app%253Adenis%252Fpaint-arena",
+        "https://app.flymy.ai/projects/app%3Adenis%2F" + "a" * 170,
+        "app:denis/paint-arena/agent",
+        "site:01a0e5e1-d4b6-bbf5-0168-59a3c984c4fd",
+        ARTIFACT_ID,
+        "",
+    ],
+)
+def test_a_link_or_id_that_is_not_exactly_an_app_or_fleet_never_sends(project):
+    def handler(request):
+        raise AssertionError("no request")
+
+    client = client_with(handler)
+    with pytest.raises(ValueError):
+        client.projects.copy(project, idempotency_key="k")
+    with pytest.raises(ValueError):
+        client.projects.share(project, public=True)
+
+
+def test_share_needs_a_bool_and_copy_a_valid_name():
+    def handler(request):
+        raise AssertionError("no request")
+
+    client = client_with(handler)
+    with pytest.raises(ValueError):
+        client.projects.share(APP_ID, public="yes")
+    with pytest.raises(ValueError):
+        client.projects.copy(APP_ID, idempotency_key="k", name="Bad Name")
+
+
+def test_the_async_client_shares_and_copies():
+    seen = []
+
+    def handler(request):
+        seen.append((request.url.path, request.headers.get("Idempotency-Key")))
+        if request.url.path.endswith("/copy/"):
+            return response(COPIED)
+        return response({**PROJECT, "public": True})
+
+    async def run():
+        client = AsyncAgentClient(api_key="personal-key", base_url="https://example.test")
+        await client._http.aclose()
+        client._http = httpx.AsyncClient(
+            base_url="https://example.test", transport=httpx.MockTransport(handler)
+        )
+        try:
+            assert isinstance(client.projects, AsyncProjects)
+            await client.projects.share(APP_ID, public=True)
+            copy = await client.projects.copy(LINK, idempotency_key="copy-a")
+            assert copy.agents[0]["name"] == "lead"
+        finally:
+            await client._http.aclose()
+
+    asyncio.run(run())
+    assert seen == [
+        ("/api/v1/agents/projects/app:denis/paint-arena/public/", None),
+        ("/api/v1/agents/projects/app:denis/paint-arena/copy/", "copy-a"),
+    ]
