@@ -47,18 +47,22 @@ def test_lists_reads_and_pages_the_journal_with_the_owners_key():
         seen.append((request.method, request.url.path, dict(request.url.params)))
         assert request.headers["X-API-KEY"] == "personal-key"
         if request.url.path == "/api/v1/agents/projects/":
-            return response({
-                "schema": "flymy.project.v1",
-                "modules": ["apps", "pages", "fleets"],
-                "projects": [PROJECT],
-            })
+            return response(
+                {
+                    "schema": "flymy.project.v1",
+                    "modules": ["apps", "pages", "fleets"],
+                    "projects": [PROJECT],
+                }
+            )
         if request.url.path.endswith("/errors/"):
-            return response({
-                "schema": "flymy.project-errors.v1",
-                "project": FLEET_ID,
-                "errors": [{"kind": "agent_run", "code": "timeout", "count": 2}],
-                "next_before": None,
-            })
+            return response(
+                {
+                    "schema": "flymy.project-errors.v1",
+                    "project": FLEET_ID,
+                    "errors": [{"kind": "agent_run", "code": "timeout", "count": 2}],
+                    "next_before": None,
+                }
+            )
         return response({**PROJECT, "graph": {"nodes": []}})
 
     client = client_with(handler)
@@ -149,13 +153,15 @@ def test_stop_and_a_two_step_start():
         body = json.loads(request.content)
         seen.append((request.url.path, request.headers.get("Idempotency-Key"), body))
         if request.url.path.endswith("/start/") and "plan_token" not in body:
-            return response({
-                "schema": "flymy.project-lifecycle.v1",
-                "project": APP_ID,
-                "action": "start",
-                "plan": {"state": "running", "usd_per_hour": "0.050000"},
-                "plan_token": "start-plan-1",
-            })
+            return response(
+                {
+                    "schema": "flymy.project-lifecycle.v1",
+                    "project": APP_ID,
+                    "action": "start",
+                    "plan": {"state": "running", "usd_per_hour": "0.050000"},
+                    "plan_token": "start-plan-1",
+                }
+            )
         return response({**PROJECT, "status": "stopped"})
 
     client = client_with(handler)
@@ -183,14 +189,16 @@ def test_the_project_agent_keeps_or_picks_its_model():
     def handler(request):
         body = json.loads(request.content) if request.content else None
         seen.append((request.method, request.url.path, body))
-        return response({
-            "schema": "flymy.project-agent.v1",
-            "project": APP_ID,
-            "agent": "4c1f2e7a-0000-4000-8000-000000000001",
-            "name": "paint-arena agent",
-            "model": (body or {}).get("model", "claude-opus-5-5"),
-            "created": False,
-        })
+        return response(
+            {
+                "schema": "flymy.project-agent.v1",
+                "project": APP_ID,
+                "agent": "4c1f2e7a-0000-4000-8000-000000000001",
+                "name": "paint-arena agent",
+                "model": (body or {}).get("model", "claude-opus-5-5"),
+                "created": False,
+            }
+        )
 
     client = client_with(handler)
     kept = client.projects.agent(APP_ID)
@@ -300,8 +308,16 @@ def test_share_and_copy_a_project_like_an_agent_by_id_or_link():
         "https://app.flymy.ai/projects/fleet%3a" + FLEET_ID[6:] + "/", public=False
     )
     assert seen == [
-        ("/api/v1/agents/projects/app:denis/paint-arena/public/", None, {"public": True}),
-        ("/api/v1/agents/projects/app:denis/paint-arena/copy/", "copy-1", {"name": "arena-copy"}),
+        (
+            "/api/v1/agents/projects/app:denis/paint-arena/public/",
+            None,
+            {"public": True},
+        ),
+        (
+            "/api/v1/agents/projects/app:denis/paint-arena/copy/",
+            "copy-1",
+            {"name": "arena-copy"},
+        ),
         (f"/api/v1/agents/projects/{FLEET_ID}/copy/", "copy-2", {}),
         (f"/api/v1/agents/projects/{FLEET_ID}/public/", None, {"public": False}),
     ]
@@ -355,7 +371,9 @@ def test_the_async_client_shares_and_copies():
         return response({**PROJECT, "public": True})
 
     async def run():
-        client = AsyncAgentClient(api_key="personal-key", base_url="https://example.test")
+        client = AsyncAgentClient(
+            api_key="personal-key", base_url="https://example.test"
+        )
         await client._http.aclose()
         client._http = httpx.AsyncClient(
             base_url="https://example.test", transport=httpx.MockTransport(handler)
