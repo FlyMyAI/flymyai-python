@@ -232,3 +232,30 @@ def test_the_async_client_imports_the_same_way():
         ("POST", "/api/v1/agents/packages/plan/"),
         ("POST", "/api/v1/agents/packages/apply/"),
     ]
+
+
+def test_plan_and_apply_carry_the_receivers_own_inputs():
+    seen = []
+    own = {"reports to my chat": {"telegram_chat_id": "-1001"}}
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        if request.url.path.endswith("/plan/"):
+            return response(PLAN)
+        return response(REPORT, 201)
+
+    client = client_with(handler)
+    client.packages.plan(share_token=TOKEN, acceptance_inputs=own)
+    client.packages.apply(
+        plan_token=PLAN_TOKEN,
+        idempotency_key="apply-own",
+        share_token=TOKEN,
+        acceptance_inputs=own,
+    )
+
+    assert seen[0] == {"source": {"share_token": TOKEN}, "acceptance_inputs": own}
+    assert seen[1] == {
+        "source": {"share_token": TOKEN},
+        "plan_token": PLAN_TOKEN,
+        "acceptance_inputs": own,
+    }

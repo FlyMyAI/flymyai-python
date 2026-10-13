@@ -49,6 +49,7 @@ class PackageShare(_Model):
 
     id: int
     token: Optional[str] = None
+    url: Optional[str] = None
     name: Optional[str] = None
     recipient_email: Optional[str] = None
     expires_at: Optional[str] = None
@@ -98,7 +99,9 @@ class PackageImports(_Model):
 
 
 class FleetInstaller(_Model):
-    """The account's Fleet installer agent, created on first use."""
+    """The account's Agent transfer agent (formerly Fleet installer), created on
+    first use: in its app chat it sends your agents (a private link) and installs
+    a package someone sent you."""
 
     agent: str
     name: Optional[str] = None
@@ -154,6 +157,7 @@ def _apply_body(
     mappings: Optional[Dict[str, int]],
     run_acceptance: Optional[bool],
     freeze_on_pass: Optional[bool],
+    acceptance_inputs: Optional[Dict[str, Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     if not plan_token:
         raise ValueError("apply() takes the plan_token of the plan the user confirmed")
@@ -161,6 +165,7 @@ def _apply_body(
         source=_source(document, share_token, url),
         plan_token=plan_token,
         mappings=mappings,
+        acceptance_inputs=acceptance_inputs,
         run_acceptance=run_acceptance,
         freeze_on_pass=freeze_on_pass,
     )
@@ -238,11 +243,16 @@ class Packages:
         share_token: Optional[str] = None,
         url: Optional[str] = None,
         mappings: Optional[Dict[str, int]] = None,
+        acceptance_inputs: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> PackagePlan:
         """What importing would create and which connections it needs; changes
         nothing. ``document`` is the package (a dict, its YAML/JSON text or a
         :class:`Package`)."""
-        body = _body(source=_source(document, share_token, url), mappings=mappings)
+        body = _body(
+            source=_source(document, share_token, url),
+            mappings=mappings,
+            acceptance_inputs=acceptance_inputs,
+        )
         return PackagePlan.model_validate(
             self._c._request("POST", f"{_ROOT}plan/", json=body)
         )
@@ -256,12 +266,13 @@ class Packages:
         share_token: Optional[str] = None,
         url: Optional[str] = None,
         mappings: Optional[Dict[str, int]] = None,
+        acceptance_inputs: Optional[Dict[str, Dict[str, Any]]] = None,
         run_acceptance: Optional[bool] = None,
         freeze_on_pass: Optional[bool] = None,
     ) -> PackageImport:
-        """Import exactly the plan the user confirmed: the same source and mappings
-        plus its ``plan_token``. 409 ``stale_plan`` carries the new plan in
-        ``response_body["data"]``."""
+        """Import exactly the plan the user confirmed: the same source, mappings and
+        ``acceptance_inputs`` plus its ``plan_token``. 409 ``stale_plan`` carries the
+        new plan in ``response_body["data"]``."""
         body = _apply_body(
             document,
             share_token,
@@ -270,6 +281,7 @@ class Packages:
             mappings,
             run_acceptance,
             freeze_on_pass,
+            acceptance_inputs,
         )
         data = self._c._request(
             "POST", f"{_ROOT}apply/", json=body, headers=_key(idempotency_key)
@@ -354,8 +366,13 @@ class AsyncPackages:
         share_token: Optional[str] = None,
         url: Optional[str] = None,
         mappings: Optional[Dict[str, int]] = None,
+        acceptance_inputs: Optional[Dict[str, Dict[str, Any]]] = None,
     ) -> PackagePlan:
-        body = _body(source=_source(document, share_token, url), mappings=mappings)
+        body = _body(
+            source=_source(document, share_token, url),
+            mappings=mappings,
+            acceptance_inputs=acceptance_inputs,
+        )
         data = await self._c._request("POST", f"{_ROOT}plan/", json=body)
         return PackagePlan.model_validate(data)
 
@@ -368,6 +385,7 @@ class AsyncPackages:
         share_token: Optional[str] = None,
         url: Optional[str] = None,
         mappings: Optional[Dict[str, int]] = None,
+        acceptance_inputs: Optional[Dict[str, Dict[str, Any]]] = None,
         run_acceptance: Optional[bool] = None,
         freeze_on_pass: Optional[bool] = None,
     ) -> PackageImport:
@@ -379,6 +397,7 @@ class AsyncPackages:
             mappings,
             run_acceptance,
             freeze_on_pass,
+            acceptance_inputs,
         )
         data = await self._c._request(
             "POST", f"{_ROOT}apply/", json=body, headers=_key(idempotency_key)
