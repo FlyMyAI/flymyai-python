@@ -43,7 +43,7 @@ _DEFAULT_TIMEOUT = 60.0
 
 
 class FlyMyAIAgentError(Exception):
-    """Raised when the Agents API returns a non-2xx response."""
+    """Raised when the Agents API returns an error or an unexpected status."""
 
     def __init__(
         self,
@@ -309,9 +309,22 @@ class SyncAgentClient:
         self.projects = Projects(self)
         self.apps = Apps(self)
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        expected_status: Optional[int] = None,
+        **kwargs: Any,
+    ) -> Any:
         resp = self._http.request(method, path, **kwargs)
         _raise_for_status(resp)
+        if expected_status is not None and resp.status_code != expected_status:
+            raise FlyMyAIAgentError(
+                "Write outcome unknown: unexpected API response status. Retry with the"
+                " same idempotency key.",
+                status_code=resp.status_code,
+            )
         if resp.status_code == 204:
             return None
         return resp.json()
@@ -382,9 +395,22 @@ class AsyncAgentClient:
         self.projects = AsyncProjects(self)
         self.apps = AsyncApps(self)
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        expected_status: Optional[int] = None,
+        **kwargs: Any,
+    ) -> Any:
         resp = await self._http.request(method, path, **kwargs)
         _raise_for_status(resp)
+        if expected_status is not None and resp.status_code != expected_status:
+            raise FlyMyAIAgentError(
+                "Write outcome unknown: unexpected API response status. Retry with the"
+                " same idempotency key.",
+                status_code=resp.status_code,
+            )
         if resp.status_code == 204:
             return None
         return resp.json()

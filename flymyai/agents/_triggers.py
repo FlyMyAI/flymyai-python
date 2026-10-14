@@ -161,7 +161,10 @@ class TriggersV1:
     def delete(self, trigger_id: Any, *, idempotency_key: str) -> None:
         """Delete the binding and private receipts; admitted runs continue."""
         self._c._request(
-            "DELETE", _path(trigger_id), headers=_idempotency_headers(idempotency_key)
+            "DELETE",
+            _path(trigger_id),
+            headers=_idempotency_headers(idempotency_key),
+            expected_status=204,
         )
 
     def events(self, trigger_id: Any) -> List[TriggerEventV1]:
@@ -250,7 +253,10 @@ class AsyncTriggersV1:
 
     async def delete(self, trigger_id: Any, *, idempotency_key: str) -> None:
         await self._c._request(
-            "DELETE", _path(trigger_id), headers=_idempotency_headers(idempotency_key)
+            "DELETE",
+            _path(trigger_id),
+            headers=_idempotency_headers(idempotency_key),
+            expected_status=204,
         )
 
     async def events(self, trigger_id: Any) -> List[TriggerEventV1]:

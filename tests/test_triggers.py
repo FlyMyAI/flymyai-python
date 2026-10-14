@@ -5,7 +5,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from flymyai.agents import AsyncAgentClient, TriggerV1
+from flymyai.agents import AsyncAgentClient, FlyMyAIAgentError, TriggerV1
 from tests.test_mcp_teams import client_with, response
 
 AGENT = "22222222-2222-4222-8222-222222222222"
@@ -150,3 +150,34 @@ def test_lost_response_does_not_automatically_repeat_write():
             )
     assert len(seen) == 1
     assert seen[0].headers["Idempotency-Key"] == "stable"
+
+
+@pytest.mark.parametrize("status", [200, 202])
+def test_delete_requires_204_for_sync_and_async(status):
+    seen = []
+
+    def ambiguous(request):
+        seen.append(request)
+        return httpx.Response(status, json={"private": "must-not-be-disclosed"})
+
+    with client_with(ambiguous) as client:
+        with pytest.raises(FlyMyAIAgentError, match="outcome unknown") as caught:
+            client.triggers_v1.delete(TRIGGER, idempotency_key="same-delete")
+        assert caught.value.response_body is None
+        assert "must-not-be-disclosed" not in str(caught.value)
+
+    async def run():
+        async with AsyncAgentClient(
+            api_key="test", base_url="https://example.test"
+        ) as client:
+            await client._http.aclose()
+            client._http = httpx.AsyncClient(
+                base_url="https://example.test",
+                transport=httpx.MockTransport(ambiguous),
+            )
+            with pytest.raises(FlyMyAIAgentError, match="outcome unknown"):
+                await client.triggers_v1.delete(TRIGGER, idempotency_key="same-delete")
+
+    asyncio.run(run())
+    assert len(seen) == 2
+    assert all(r.headers["Idempotency-Key"] == "same-delete" for r in seen)
