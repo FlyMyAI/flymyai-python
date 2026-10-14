@@ -842,3 +842,13 @@ suggestion = await client.runs.suggest_schema(
     outputs_prompt="A short summary",
 )
 ```
+
+
+### Apply reconciliation (unreleased candidate)
+
+`client.apps.apply_status(original_idempotency_key)` (also async) makes one GET
+to read the caller's apply reservation. A `recorded` result names `release_id`
+for `client.apps.status()`. `pending` is not worker liveness and `not_found` does
+not prove no effect; neither permits retry or a new key. Unknown fields are kept.
+No automatic polling, apply, account listing or fallback is performed. This
+method requires the coordinated backend candidate and is not yet published.

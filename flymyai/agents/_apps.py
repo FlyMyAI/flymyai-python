@@ -49,6 +49,20 @@ class AppRelease(_Model):
     number: Optional[int] = None
 
 
+class AppOperationStatus(_Model):
+    """An owned apply receipt, without retrying apply. ``recorded`` names a
+    release; ``pending`` and ``not_found`` never prove no effect or permit retry.
+    ``updated_at`` is a reservation timestamp, not worker liveness."""
+
+    operation_key: str
+    state: str
+    retryable: bool
+    release_id: Optional[str] = None
+    response_status: Optional[int] = None
+    updated_at: Optional[str] = None
+    guidance: Optional[str] = None
+
+
 class AppFiles(_Model):
     """An applied app's template (``flymy.app-files.v1``): every file with its bytes,
     sha256 and whether it is text, the release and the template's digest."""
@@ -196,6 +210,17 @@ class Apps:
         data = self._c._request("GET", f"{_ROOT}releases/{UUID(str(release_id))}/")
         return AppRelease.model_validate(data)
 
+    def apply_status(self, idempotency_key: str) -> AppOperationStatus:
+        """Read the original apply key, even when its first answer was lost.
+        One GET only. Follow a recorded release with :meth:`status`; never
+        turn pending/not_found into a new apply or a new idempotency key."""
+        data = self._c._request(
+            "GET",
+            f"{_ROOT}apply/",
+            params={"operation_key": _key(idempotency_key)["Idempotency-Key"]},
+        )
+        return AppOperationStatus.model_validate(data)
+
 
 class AsyncApps:
     """``client.apps`` on the async client."""
@@ -254,3 +279,12 @@ class AsyncApps:
             "GET", f"{_ROOT}releases/{UUID(str(release_id))}/"
         )
         return AppRelease.model_validate(data)
+
+    async def apply_status(self, idempotency_key: str) -> AppOperationStatus:
+        """Read an apply reservation without dispatching or polling apply."""
+        data = await self._c._request(
+            "GET",
+            f"{_ROOT}apply/",
+            params={"operation_key": _key(idempotency_key)["Idempotency-Key"]},
+        )
+        return AppOperationStatus.model_validate(data)
