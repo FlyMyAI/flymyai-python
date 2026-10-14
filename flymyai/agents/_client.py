@@ -7,6 +7,7 @@ import httpx
 
 from flymyai.agents._apps import Apps, AsyncApps
 from flymyai.agents._artifacts import Artifacts, AsyncArtifacts
+from flymyai.agents._triggers import TriggersV1, AsyncTriggersV1
 from flymyai.agents._projects import AsyncProjects, Projects
 from flymyai.agents._mcp_sharing import McpTeams, AsyncMcpTeams
 from flymyai.agents._mcp_personal import McpShares, AsyncMcpShares
@@ -304,6 +305,7 @@ class SyncAgentClient:
         self.shares = McpShares(self)
         self.mcp_servers = McpServers(self)
         self.artifacts = Artifacts(self)
+        self.triggers_v1 = TriggersV1(self)
         self.projects = Projects(self)
         self.apps = Apps(self)
 
@@ -376,6 +378,7 @@ class AsyncAgentClient:
         self.shares = AsyncMcpShares(self)
         self.mcp_servers = AsyncMcpServers(self)
         self.artifacts = AsyncArtifacts(self)
+        self.triggers_v1 = AsyncTriggersV1(self)
         self.projects = AsyncProjects(self)
         self.apps = AsyncApps(self)
 

@@ -842,3 +842,35 @@ suggestion = await client.runs.suggest_schema(
     outputs_prompt="A short summary",
 )
 ```
+
+
+### Webhook triggers v1 (next release)
+
+`AgentClient.triggers_v1` and `AsyncAgentClient.triggers_v1` manage signed
+webhooks for the owner's Live frozen agent version. Methods: `list`, `get`,
+`create`, `update`, `pause`, `activate`, `delete`, `events`.
+
+```python
+import secrets
+from uuid import uuid4
+
+operation_key = str(uuid4())  # Persist for retries of this logical create.
+secret = secrets.token_urlsafe(32)  # Store securely in the sender, never log it.
+trigger = client.triggers_v1.create(
+    agent_id,
+    secret=secret,
+    idempotency_key=operation_key,
+)
+events = client.triggers_v1.events(trigger.uuid)
+```
+
+The API never returns the signing secret. Every SDK write requires a stable
+`idempotency_key`; keep the identical key and arguments after a lost response.
+`config` replaces the previous config, while omitted fields stay unchanged.
+An empty signing secret is rejected. Paused deliveries are acknowledged and
+discarded. Deleting a webhook removes its receipts; already admitted runs continue.
+`execution_public_id` in a receipt can be passed to `client.runs.get`.
+Acceptance/admission is not agent completion. Only generic webhooks are supported.
+See [Webhook Triggers v1](https://docs.flymy.ai/agents/guides/webhook-triggers)
+for the exact HMAC format, limits and versioned REST contract. This namespace
+ships with the trigger release; capability-detect older installed packages.
