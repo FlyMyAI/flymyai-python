@@ -69,6 +69,11 @@ class VariablesValidationError(FlyMyAIAgentError):
     ``{"variables": ["'foo' is required", ...]}`` - those messages are
     exposed here as :attr:`messages`, and the field-to-message mapping
     (best-effort parse) as :attr:`field_errors`.
+
+    A backend with the optional ``flymy.input-validation.v1`` diagnostic keeps
+    its compact first-error explanation in ``response_body['input_validation']``.
+    Missing diagnostics on older backends do not imply a valid input. The
+    legacy messages, exception class and retry behavior are unchanged.
     """
 
     def __init__(

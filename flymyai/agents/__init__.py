@@ -227,6 +227,7 @@ __all__ += [
 ]
 
 from flymyai.agents._apps import (
+    AppOperationStatus,
     AppFile,
     AppFiles,
     AppPlan,
@@ -240,6 +241,7 @@ __all__ += [
     "AppFiles",
     "AppPlan",
     "AppRelease",
+    "AppOperationStatus",
     "Apps",
     "AsyncApps",
 ]
