@@ -842,3 +842,15 @@ suggestion = await client.runs.suggest_schema(
     outputs_prompt="A short summary",
 )
 ```
+
+### Candidate GPU diagnostics
+
+The UAT candidate adds `client.compute.logs(server_id, lines=100, max_bytes=8192)`
+and the equivalent awaited `AsyncAgentClient` method. It returns typed
+`ComputeLogs` and `ComputeLogTail` and preserves unknown fields within
+`flymy.compute-logs.v1`. The client requests identity encoding, refuses compressed
+responses and closes responses over 64 KiB before parsing.
+
+Only the allocation owner can read this snapshot. Reading does not wake a GPU
+or create billing activity. A sleeping server can return provider backfill
+without live health. This change does not publish a new PyPI version.
