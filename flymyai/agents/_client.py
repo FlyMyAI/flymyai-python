@@ -7,6 +7,7 @@ import httpx
 
 from flymyai.agents._apps import Apps, AsyncApps
 from flymyai.agents._artifacts import Artifacts, AsyncArtifacts
+from flymyai.agents._triggers import TriggersV1, AsyncTriggersV1
 from flymyai.agents._projects import AsyncProjects, Projects
 from flymyai.agents._mcp_sharing import McpTeams, AsyncMcpTeams
 from flymyai.agents._mcp_personal import McpShares, AsyncMcpShares
@@ -42,7 +43,7 @@ _DEFAULT_TIMEOUT = 60.0
 
 
 class FlyMyAIAgentError(Exception):
-    """Raised when the Agents API returns a non-2xx response."""
+    """Raised when the Agents API returns an error or an unexpected status."""
 
     def __init__(
         self,
@@ -304,12 +305,26 @@ class SyncAgentClient:
         self.shares = McpShares(self)
         self.mcp_servers = McpServers(self)
         self.artifacts = Artifacts(self)
+        self.triggers_v1 = TriggersV1(self)
         self.projects = Projects(self)
         self.apps = Apps(self)
 
-    def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        expected_status: Optional[int] = None,
+        **kwargs: Any,
+    ) -> Any:
         resp = self._http.request(method, path, **kwargs)
         _raise_for_status(resp)
+        if expected_status is not None and resp.status_code != expected_status:
+            raise FlyMyAIAgentError(
+                "Write outcome unknown: unexpected API response status. Retry with the"
+                " same idempotency key.",
+                status_code=resp.status_code,
+            )
         if resp.status_code == 204:
             return None
         return resp.json()
@@ -376,12 +391,26 @@ class AsyncAgentClient:
         self.shares = AsyncMcpShares(self)
         self.mcp_servers = AsyncMcpServers(self)
         self.artifacts = AsyncArtifacts(self)
+        self.triggers_v1 = AsyncTriggersV1(self)
         self.projects = AsyncProjects(self)
         self.apps = AsyncApps(self)
 
-    async def _request(self, method: str, path: str, **kwargs: Any) -> Any:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        expected_status: Optional[int] = None,
+        **kwargs: Any,
+    ) -> Any:
         resp = await self._http.request(method, path, **kwargs)
         _raise_for_status(resp)
+        if expected_status is not None and resp.status_code != expected_status:
+            raise FlyMyAIAgentError(
+                "Write outcome unknown: unexpected API response status. Retry with the"
+                " same idempotency key.",
+                status_code=resp.status_code,
+            )
         if resp.status_code == 204:
             return None
         return resp.json()

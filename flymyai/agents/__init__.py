@@ -50,9 +50,20 @@ from flymyai.agents._types import (
     Tool,
 )
 
+from flymyai.agents._triggers import (
+    TriggersV1,
+    AsyncTriggersV1,
+    TriggerV1,
+    TriggerEventV1,
+)
+
 AgentClient = SyncAgentClient
 
 __all__ = [
+    "TriggersV1",
+    "AsyncTriggersV1",
+    "TriggerV1",
+    "TriggerEventV1",
     # Clients
     "AgentClient",
     "SyncAgentClient",
