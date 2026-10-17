@@ -844,7 +844,7 @@ suggestion = await client.runs.suggest_schema(
 ```
 
 
-### Webhook triggers v1 (next release)
+### Webhook triggers v1
 
 `AgentClient.triggers_v1` and `AsyncAgentClient.triggers_v1` manage signed
 webhooks for the owner's Live frozen agent version. Methods: `list`, `get`,
@@ -872,5 +872,8 @@ discarded. Deleting a webhook removes its receipts; already admitted runs contin
 `execution_public_id` in a receipt can be passed to `client.runs.get`.
 Acceptance/admission is not agent completion. Only generic webhooks are supported.
 See [Webhook Triggers v1](https://docs.flymy.ai/agents/guides/webhook-triggers)
-for the exact HMAC format, limits and versioned REST contract. This namespace
-ships with the trigger release; capability-detect older installed packages.
+for the exact HMAC format, limits and versioned REST contract. The namespace is
+in `flymyai` 1.2.0rc15 and later (released 2026-10-16 with the backend, the Agents
+MCP `triggers_v1_*` tools and the app's Webhooks panel); older packages do not
+have it, so require `flymyai>=1.2.0rc15`. `tests/test_triggers.py` pins the v1
+methods, arguments and answer fields (`V1_METHODS`); keep them when a v2 is added.
