@@ -1,11 +1,19 @@
 import asyncio
+import inspect
 import json
 
 import httpx
 import pytest
 from pydantic import ValidationError
 
-from flymyai.agents import AsyncAgentClient, FlyMyAIAgentError, TriggerV1
+from flymyai.agents import (
+    AsyncAgentClient,
+    AsyncTriggersV1,
+    FlyMyAIAgentError,
+    TriggerEventV1,
+    TriggersV1,
+    TriggerV1,
+)
 from tests.test_mcp_teams import client_with, response
 
 AGENT = "22222222-2222-4222-8222-222222222222"
@@ -181,3 +189,145 @@ def test_delete_requires_204_for_sync_and_async(status):
     asyncio.run(run())
     assert len(seen) == 2
     assert all(r.headers["Idempotency-Key"] == "same-delete" for r in seen)
+
+
+# flymy.trigger.v1, released 2026-10-16 in flymyai 1.2.0rc15. Callers keep these
+# names and arguments when a v2 namespace is added: within v1 only optional
+# arguments and fields may be added (backend ADDING_A_NEW_TRIGGER.md).
+V1_METHODS = {
+    "list": {"agent_id": False},
+    "get": {"trigger_id": True},
+    "create": {
+        "agent_id": True,
+        "idempotency_key": True,
+        "secret": True,
+        "rate_limit_per_hour": False,
+        "config": False,
+    },
+    "update": {
+        "trigger_id": True,
+        "idempotency_key": True,
+        "secret": False,
+        "rate_limit_per_hour": False,
+        "config": False,
+    },
+    "pause": {"trigger_id": True, "idempotency_key": True},
+    "activate": {"trigger_id": True, "idempotency_key": True},
+    "delete": {"trigger_id": True, "idempotency_key": True},
+    "events": {"trigger_id": True},
+}
+V1_POSITIONAL = {
+    "list": [],
+    "get": ["trigger_id"],
+    "create": ["agent_id"],
+    "update": ["trigger_id"],
+    "pause": ["trigger_id"],
+    "activate": ["trigger_id"],
+    "delete": ["trigger_id"],
+    "events": ["trigger_id"],
+}
+# Every field of the answers the backend sends, as production returned them.
+V1_RECORD = {
+    "schema": "flymy.trigger.v1",
+    "uuid": TRIGGER,
+    "agent_task": AGENT,
+    "compilation": None,
+    "kind": "webhook",
+    "config": {"filters": {"contains": "order"}},
+    "status": "active",
+    "rate_limit_per_hour": 30,
+    "webhook_url": "https://example.test/api/v1/hooks/w/private-route/",
+    "signature_required": True,
+    "event_count": 0,
+    "dispatch_count": 0,
+    "last_event_at": None,
+    "last_dispatch_at": None,
+    "created_at": "2026-10-16T12:54:03.123456Z",
+}
+V1_EVENT = {
+    "schema": "flymy.trigger-event.v1",
+    "uuid": TRIGGER,
+    "provider": "webhook",
+    "status": "filtered",
+    "detail": "filtered by config",
+    "execution": None,
+    "execution_public_id": None,
+    "received_at": "2026-10-16T12:56:48.123456Z",
+    "processed_at": None,
+}
+
+
+@pytest.mark.parametrize("resource", [TriggersV1, AsyncTriggersV1])
+def test_the_v1_methods_and_arguments_stay(resource):
+    for name, pinned in V1_METHODS.items():
+        method = getattr(resource, name)
+        assert inspect.iscoroutinefunction(method) == (resource is AsyncTriggersV1)
+        params = dict(list(inspect.signature(method).parameters.items())[1:])
+        for argument, required in pinned.items():
+            assert argument in params, f"{name} lost {argument}"
+            assert (params[argument].default is inspect.Parameter.empty) == required
+        for argument, param in params.items():
+            if argument not in pinned:
+                assert param.default is not inspect.Parameter.empty, argument
+        positional = [
+            argument
+            for argument, param in params.items()
+            if param.kind is inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ]
+        assert positional == V1_POSITIONAL[name], name
+
+
+def test_both_clients_expose_the_v1_namespace():
+    with client_with(handler([])) as client:
+        assert isinstance(client.triggers_v1, TriggersV1)
+
+    async def run():
+        async with AsyncAgentClient(
+            api_key="test", base_url="https://example.test"
+        ) as client:
+            assert isinstance(client.triggers_v1, AsyncTriggersV1)
+
+    asyncio.run(run())
+
+
+def test_the_v1_answer_models_know_every_field_and_require_no_more():
+    def aliases(model):
+        return {field.alias or name for name, field in model.model_fields.items()}
+
+    def required(model):
+        return {
+            field.alias or name
+            for name, field in model.model_fields.items()
+            if field.is_required()
+        }
+
+    assert aliases(TriggerV1) == set(V1_RECORD)
+    assert aliases(TriggerEventV1) == set(V1_EVENT)
+    assert required(TriggerV1) == {
+        "schema",
+        "uuid",
+        "agent_task",
+        "kind",
+        "status",
+        "config",
+        "rate_limit_per_hour",
+        "signature_required",
+        "created_at",
+    }
+    assert required(TriggerEventV1) == {
+        "schema",
+        "uuid",
+        "provider",
+        "status",
+        "detail",
+        "received_at",
+    }
+    trigger = TriggerV1.model_validate(V1_RECORD)
+    assert trigger.compilation is None and trigger.last_event_at is None
+    assert (
+        trigger.model_dump(mode="json", by_alias=True)["schema"] == "flymy.trigger.v1"
+    )
+    event = TriggerEventV1.model_validate(V1_EVENT)
+    assert event.execution is None and event.execution_public_id is None
+    with pytest.raises(ValidationError):
+        TriggerEventV1.model_validate({**V1_EVENT, "schema": "flymy.trigger.v1"})
