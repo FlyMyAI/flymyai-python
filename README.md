@@ -125,6 +125,9 @@ both = client.runs.list_prices(ids=[run.id, other_run.id])
 ### Limits for automatic subagents
 
 Ordinary `client.agents.run(...)` calls use the same delegation runtime as chat.
+Pass `message="..."` to send the first user request atomically with the start;
+`client.runs.create(...)` and both async methods accept it too. Keep the same
+message, variables and `idempotency_key` when retrying the same logical run.
 Pass `subagent_limits={"cap_usd": "3", "max_children": 6, "max_parallel": 3}`
 alongside the required `idempotency_key` to pin owner limits for a new run.
 `cap_usd=0` disables helpers. The cap covers subagents and their tools; lead
@@ -321,6 +324,21 @@ Python methods such as `client.agents.create()`,
 surface with its own discovered tool names. Do not translate a REST SDK method
 into an invented MCP-only lifecycle call, and do not treat an MCP tool name as
 a Python method.
+
+## First messages and instruction files
+
+For an ordinary owner run, `client.agents.run(agent_id, message="Build the report",
+idempotency_key="report-job-42")` stores the first user message before execution.
+The same option exists on async clients and `client.runs.create`. Its value is
+part of the idempotent request, so a changed message requires a new logical job.
+
+Create an agent from uploaded instructions with
+`client.agents.create(name="Report worker", user_prompt_source={"agent_file_id": 123})`.
+Use `user_prompt_source` instead of `goal`; exact artifact references are also
+accepted. The backend pins and attaches the instruction file for later runs.
+Large files stay accessible by reference independently of their model preview.
+Inside agent code, `flymy.iter_payload(source)` is the command SDK's streaming
+reader; it is separate from this owner REST client.
 
 ## Embedded customer agents
 

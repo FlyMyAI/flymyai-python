@@ -103,6 +103,7 @@ class Agent(BaseModel):
     # (it dominates list bytes); only the detail row carries it. A default keeps
     # one Agent model valid for both row shapes.
     user_prompt: str = ""
+    user_prompt_source: Optional[Dict[str, Any]] = None
     available_tools: Any = Field(default_factory=list)
     available_custom_mcp_servers: List[int] = Field(default_factory=list)
     mcp_resource_set_ids: List[str] = Field(default_factory=list)
