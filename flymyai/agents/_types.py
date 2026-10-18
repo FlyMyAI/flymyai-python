@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, cast
 
@@ -178,6 +179,67 @@ class RunDetail(Run):
 
     logs: List[ExecutionLog] = Field(default_factory=list)
     user_agent_task_uuid: Optional[str] = None
+
+
+class RunToolCallPrice(BaseModel):
+    """One tool call of a run: its price in USD and whether it is charged."""
+
+    model_config = ConfigDict(extra="allow")
+
+    action_name: str
+    price: Decimal
+    settled: bool = False
+
+
+class RunLLMUsagePrice(BaseModel):
+    """One model answer of a run. ``purpose`` is None for the run's own model;
+    ``reasoning_tokens`` are inside ``output_tokens`` and billed there."""
+
+    model_config = ConfigDict(extra="allow")
+
+    provider: str
+    model: str
+    purpose: Optional[str] = None
+    input_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
+    total_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    price: Decimal
+    settled: bool = False
+
+
+class RunInferencePrice(BaseModel):
+    """A generation the run started through ``run_model``, charged on its own."""
+
+    model_config = ConfigDict(extra="allow")
+
+    prediction_id: str
+    model: Optional[str] = None
+    price: Optional[Decimal] = None
+    settled: bool = False
+
+
+class RunPrice(BaseModel):
+    """What one run used and what it costs, in USD.
+
+    A row's ``price`` is what the ledger debited once ``settled`` is true, and the
+    estimate the charge will use before that. ``billing_settled`` is true when the
+    run has ended and every row is charged: ``total_price`` is then final.
+    ``total_with_inference`` adds the run's settled ``run_model`` generations.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    id: str
+    run_seq: int = 0
+    billing_settled: bool = False
+    tool_calls: List[RunToolCallPrice] = Field(default_factory=list)
+    llm_usage: List[RunLLMUsagePrice] = Field(default_factory=list)
+    total_price: Decimal
+    model_inference: List[RunInferencePrice] = Field(default_factory=list)
+    total_with_inference: Optional[Decimal] = None
 
 
 class AppendMessageResponse(BaseModel):

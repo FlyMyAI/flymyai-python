@@ -101,6 +101,27 @@ asyncio.run(main())
 
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction in place). To keep history, save an edit as a new version with `client.compilations.save_instruction(execution_id=..., instruction_md=...)`, test it with `run_instruction(compilation_id)`, then `set_live(compilation_id)`; `run_live(agent_id, idempotency_key=...)` and the agent's schedule run the live version, `get_live(agent_id)` reads it, and `set_live` on an older version rolls back. A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
+### What a run used and costs
+
+`client.runs.prices(run_id)` lists every tool call and model answer of a run with its
+price in USD (`Decimal`). A row with `settled=True` shows what was charged; before the
+charge (within about 10 minutes of the call) it shows the estimate the charge will use.
+`billing_settled` turns true when the run has ended and everything is charged.
+`llm_usage` rows split the prompt into fresh and cached tokens, and
+`reasoning_tokens` explain part of `output_tokens`. A helper started by the agent is
+its own run; a trigger event names its run in `execution_public_id`.
+
+```python
+price = client.runs.prices(run.id)
+print(price.total_price, price.billing_settled)
+for row in price.llm_usage:
+    print(row.model, row.purpose, row.total_input_tokens, row.output_tokens, row.price)
+
+# your newest runs, or the runs you name (up to 200)
+spent = sum(p.total_price for p in client.runs.list_prices(limit=50))
+both = client.runs.list_prices(ids=[run.id, other_run.id])
+```
+
 ### Limits for automatic subagents
 
 Ordinary `client.agents.run(...)` calls use the same delegation runtime as chat.
