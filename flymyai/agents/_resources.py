@@ -44,6 +44,7 @@ from flymyai.agents._types import (
     RuntimeConnections,
     Run,
     RunDetail,
+    RunPrice,
     SchemaSuggestion,
     Tool,
 )
@@ -779,6 +780,26 @@ class Agents:
         return comp
 
 
+_MAX_PRICE_RUNS = 200
+
+
+def _price_list_params(
+    ids: Optional[Sequence[ResourceID]], limit: Optional[int]
+) -> Optional[Dict[str, str]]:
+    if ids is not None:
+        if isinstance(ids, (str, bytes)):
+            raise ValueError("ids must be a sequence of run ids, not one string.")
+        values = [str(value) for value in ids]
+        if not values or len(values) > _MAX_PRICE_RUNS or not all(values):
+            raise ValueError(f"ids must name 1 to {_MAX_PRICE_RUNS} runs.")
+        return {"ids": ",".join(values)}
+    if limit is not None:
+        if type(limit) is not int or not 1 <= limit <= _MAX_PRICE_RUNS:
+            raise ValueError(f"limit must be an integer from 1 to {_MAX_PRICE_RUNS}.")
+        return {"limit": str(limit)}
+    return None
+
+
 class Runs:
     """Manage agent executions (runs). Maps to ``/api/v1/agents/executions/``."""
 
@@ -834,6 +855,33 @@ class Runs:
     def cancel(self, run_id: ResourceID) -> None:
         """Cancel a running execution."""
         self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
+
+    def prices(self, run_id: ResourceID) -> RunPrice:
+        """What one run used and costs: each tool call and model answer with its
+        price in USD and whether it is charged yet.
+
+        Calls ``GET /api/v1/agents/executions/{id}/prices/``.
+        """
+        data = self._c._request("GET", f"/api/v1/agents/executions/{run_id}/prices/")
+        return RunPrice(**data)
+
+    def list_prices(
+        self,
+        *,
+        ids: Optional[Sequence[ResourceID]] = None,
+        limit: Optional[int] = None,
+    ) -> List[RunPrice]:
+        """Prices of the runs named in ``ids`` (1-200), or of your newest runs
+        (``limit`` 1-200, the server's default 100). Sum ``total_price`` for usage.
+
+        Calls ``GET /api/v1/agents/executions/prices/``.
+        """
+        data = self._c._request(
+            "GET",
+            "/api/v1/agents/executions/prices/",
+            params=_price_list_params(ids, limit),
+        )
+        return [RunPrice(**item) for item in _list_results(data)]
 
     def append_message(
         self,
@@ -2280,6 +2328,27 @@ class AsyncRuns:
 
     async def cancel(self, run_id: ResourceID) -> None:
         await self._c._request("POST", f"/api/v1/agents/executions/{run_id}/cancel/")
+
+    async def prices(self, run_id: ResourceID) -> RunPrice:
+        """Async variant of :meth:`Runs.prices`."""
+        data = await self._c._request(
+            "GET", f"/api/v1/agents/executions/{run_id}/prices/"
+        )
+        return RunPrice(**data)
+
+    async def list_prices(
+        self,
+        *,
+        ids: Optional[Sequence[ResourceID]] = None,
+        limit: Optional[int] = None,
+    ) -> List[RunPrice]:
+        """Async variant of :meth:`Runs.list_prices`."""
+        data = await self._c._request(
+            "GET",
+            "/api/v1/agents/executions/prices/",
+            params=_price_list_params(ids, limit),
+        )
+        return [RunPrice(**item) for item in _list_results(data)]
 
     async def append_message(
         self,
