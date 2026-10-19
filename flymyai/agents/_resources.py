@@ -512,7 +512,8 @@ class Agents:
         self,
         *,
         name: str,
-        goal: str,
+        goal: Optional[str] = None,
+        user_prompt_source: Optional[Dict[str, Any]] = None,
         tools: Optional[List[int]] = None,
         mcp_servers: Optional[List[int]] = None,
         mcp_resource_set_ids: Optional[List[str]] = None,
@@ -534,6 +535,10 @@ class Agents:
             May contain Jinja2 placeholders like ``{{ topic }}`` - provide
             matching ``input_schema`` so the backend can validate runtime
             ``variables``.
+        user_prompt_source:
+            Exact artifact reference or ``{"agent_file_id": id}`` containing
+            the full instructions. Use instead of ``goal``; the backend pins
+            and attaches the source for later runs.
         tools:
             List of ``UserMcpTool`` IDs to attach.
         mcp_servers:
@@ -560,7 +565,13 @@ class Agents:
         status:
             Initial status (default ``draft``).
         """
-        body: Dict[str, Any] = {"name": name, "user_prompt": goal}
+        if (goal is None) == (user_prompt_source is None):
+            raise ValueError("Provide exactly one of goal or user_prompt_source")
+        body: Dict[str, Any] = {"name": name}
+        if goal is not None:
+            body["user_prompt"] = goal
+        if user_prompt_source is not None:
+            body["user_prompt_source"] = user_prompt_source
         if tools is not None:
             body["available_tools"] = tools
         if mcp_servers is not None:
@@ -658,6 +669,7 @@ class Agents:
         agent_id: str,
         *,
         idempotency_key: str,
+        message: Optional[str] = None,
         variables: Optional[Dict[str, Any]] = None,
         subagent_limits: Optional[Dict[str, Any]] = None,
     ) -> RunDetail:
@@ -670,6 +682,9 @@ class Agents:
         idempotency_key:
             Caller-owned durable operation key. Reuse it only for an identical
             retry of this logical run.
+        message:
+            First user request, persisted before execution starts. Send it here
+            instead of starting an empty run and appending the task afterward.
         variables:
             Runtime values to substitute into the ``goal`` Jinja2 template.
             Must match the agent's ``input_schema`` when one is set.
@@ -683,6 +698,8 @@ class Agents:
             Newly created run (status will be ``pending``/``running``).
         """
         body: Dict[str, Any] = {"variables": variables or {}}
+        if message is not None:
+            body["message"] = message
         if subagent_limits is not None:
             body["subagent_limits"] = subagent_limits
         data = self._c._request(
@@ -811,6 +828,7 @@ class Runs:
         *,
         agent_id: str,
         idempotency_key: str,
+        message: Optional[str] = None,
         variables: Optional[Dict[str, Any]] = None,
     ) -> RunDetail:
         """Create a new run for the given agent.
@@ -820,6 +838,7 @@ class Runs:
         return self._c.agents.run(
             agent_id,
             idempotency_key=idempotency_key,
+            message=message,
             variables=variables,
         )
 
@@ -2111,7 +2130,8 @@ class AsyncAgents:
         self,
         *,
         name: str,
-        goal: str,
+        goal: Optional[str] = None,
+        user_prompt_source: Optional[Dict[str, Any]] = None,
         tools: Optional[List[int]] = None,
         mcp_servers: Optional[List[int]] = None,
         mcp_resource_set_ids: Optional[List[str]] = None,
@@ -2123,7 +2143,13 @@ class AsyncAgents:
         status: Optional[str] = None,
     ) -> Agent:
         """Async variant of :meth:`Agents.create`. Same parameters."""
-        body: Dict[str, Any] = {"name": name, "user_prompt": goal}
+        if (goal is None) == (user_prompt_source is None):
+            raise ValueError("Provide exactly one of goal or user_prompt_source")
+        body: Dict[str, Any] = {"name": name}
+        if goal is not None:
+            body["user_prompt"] = goal
+        if user_prompt_source is not None:
+            body["user_prompt_source"] = user_prompt_source
         if tools is not None:
             body["available_tools"] = tools
         if mcp_servers is not None:
@@ -2213,10 +2239,13 @@ class AsyncAgents:
         agent_id: str,
         *,
         idempotency_key: str,
+        message: Optional[str] = None,
         variables: Optional[Dict[str, Any]] = None,
         subagent_limits: Optional[Dict[str, Any]] = None,
     ) -> RunDetail:
         body: Dict[str, Any] = {"variables": variables or {}}
+        if message is not None:
+            body["message"] = message
         if subagent_limits is not None:
             body["subagent_limits"] = subagent_limits
         data = await self._c._request(
@@ -2290,12 +2319,14 @@ class AsyncRuns:
         *,
         agent_id: str,
         idempotency_key: str,
+        message: Optional[str] = None,
         variables: Optional[Dict[str, Any]] = None,
     ) -> RunDetail:
         """Create a new run for the given agent (async)."""
         return await self._c.agents.run(
             agent_id,
             idempotency_key=idempotency_key,
+            message=message,
             variables=variables,
         )
 
