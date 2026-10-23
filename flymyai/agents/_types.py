@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, cast
+from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Union, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -462,6 +462,44 @@ class Compilation(BaseModel):
             CompilationStatus.RUNNING,
             CompilationStatus.FAILED,
         )
+
+
+class CompilationSummary(BaseModel):
+    """Saved-version metadata, without instruction, code, schemas or results."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: int = Field(gt=0)
+    execution: str = Field(max_length=16)
+    user_agent_task: str
+    status: str = Field(max_length=255)
+    last_run_status: Optional[str] = Field(max_length=255)
+    name: str = Field(max_length=200)
+    note: str = Field(max_length=240)
+    note_truncated: bool
+    is_live: bool
+    has_instruction: bool
+    cron_schedule: str = Field(max_length=128)
+    timezone: str = Field(max_length=64)
+    schedule_active: bool
+    schedule_paused: bool
+    schedule_paused_reason: str = Field(max_length=240)
+    schedule_paused_reason_truncated: bool
+    schedule_ready: bool
+    source_compilation: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+
+class CompilationSummaryPage(BaseModel):
+    """One bounded page. Pass next_cursor explicitly; no implicit traversal."""
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
+
+    schema_version: Literal["flymy.saved-versions.v1"] = Field(alias="schema")
+    task: str
+    results: List[CompilationSummary] = Field(max_length=50)
+    next_cursor: Optional[str] = Field(min_length=1, max_length=512)
 
 
 class AgentVersion(BaseModel):
