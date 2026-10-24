@@ -523,6 +523,7 @@ class Agents:
         output_schema: Optional[Dict[str, Any]] = None,
         output_description: Optional[str] = None,
         status: Optional[str] = None,
+        preview: Optional[str] = None,
     ) -> Agent:
         """Create a new agent.
 
@@ -564,6 +565,10 @@ class Agents:
             with ``output_schema`` to bound the canonical pipeline.
         status:
             Initial status (default ``draft``).
+        preview:
+            What the agent does in one or two sentences (at most 280
+            characters), shown where people copy it. Your own text is pinned;
+            without it FlyMyAI writes one after each freeze.
         """
         if (goal is None) == (user_prompt_source is None):
             raise ValueError("Provide exactly one of goal or user_prompt_source")
@@ -590,6 +595,8 @@ class Agents:
             body["output_description"] = output_description
         if status is not None:
             body["status"] = status
+        if preview is not None:
+            body["preview"] = preview
         data = self._c._request("POST", "/api/v1/agents/tasks/", json=body)
         return Agent(**data)
 
@@ -647,7 +654,10 @@ class Agents:
     ) -> Agent:
         """Partial update (PATCH).
 
-        Use ``goal=`` to update ``user_prompt``.
+        Use ``goal=`` to update ``user_prompt``. ``preview=`` sets what the
+        agent does in one or two sentences (at most 280 characters) and pins
+        it, so later freezes keep it; ``preview=""`` hands it back to FlyMyAI,
+        which writes it again from the live version.
         """
         if "goal" in kwargs:
             kwargs["user_prompt"] = kwargs.pop("goal")
@@ -2141,6 +2151,7 @@ class AsyncAgents:
         output_schema: Optional[Dict[str, Any]] = None,
         output_description: Optional[str] = None,
         status: Optional[str] = None,
+        preview: Optional[str] = None,
     ) -> Agent:
         """Async variant of :meth:`Agents.create`. Same parameters."""
         if (goal is None) == (user_prompt_source is None):
@@ -2168,6 +2179,8 @@ class AsyncAgents:
             body["output_description"] = output_description
         if status is not None:
             body["status"] = status
+        if preview is not None:
+            body["preview"] = preview
         data = await self._c._request("POST", "/api/v1/agents/tasks/", json=body)
         return Agent(**data)
 
@@ -2222,6 +2235,7 @@ class AsyncAgents:
         mcp_access_mode: Optional[_McpAccessModeLike] = None,
         **kwargs: Any,
     ) -> Agent:
+        """Async variant of :meth:`Agents.update`, ``preview=`` included."""
         if "goal" in kwargs:
             kwargs["user_prompt"] = kwargs.pop("goal")
         if mcp_access_mode is not None:
