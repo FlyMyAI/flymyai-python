@@ -340,6 +340,21 @@ Large files stay accessible by reference independently of their model preview.
 Inside agent code, `flymy.iter_payload(source)` is the command SDK's streaming
 reader; it is separate from this owner REST client.
 
+## An agent's preview
+
+`agent.preview` says what the agent does in one or two sentences (at most 280
+characters); it is shown where people copy the agent - its public page and its
+project link. FlyMyAI writes it after each freeze. Your own text is pinned
+(`agent.preview_pinned`) and stays through later freezes:
+
+```python
+client.agents.update(agent_id, preview="Scores each creator's posts and sends a daily digest.")
+client.agents.update(agent_id, preview="")  # hand it back to FlyMyAI
+```
+
+`client.agents.create(..., preview="...")` and the async clients take it too.
+It is in `flymyai` 1.2.0rc18 and later; an older SDK drops the field on read.
+
 ## Embedded customer agents
 
 An embedded deployment publishes one immutable frozen version while each

@@ -118,6 +118,10 @@ class Agent(BaseModel):
     status: AgentStatus = AgentStatus.DRAFT
     cron_schedule: str = ""
     webhook_url: Optional[str] = None
+    # What the agent does in one or two sentences, shown where people copy it.
+    # FlyMyAI writes it after each freeze; an owner's own text is pinned.
+    preview: str = ""
+    preview_pinned: bool = False
     created_at: datetime
     updated_at: datetime
 
