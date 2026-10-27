@@ -103,8 +103,10 @@ class ProjectErrors(_Model):
 class ProjectCopy(_Model):
     """A project copied into your account: ``project`` (its ``id``, ``name`` and
     ``url``), the ``agents`` made, and ``setup`` - ``needs`` (connections, secrets,
-    inputs and schedules the copy still needs) and ``chat``, the execution id of the
-    Transfer agent that finishes the setup with you in its chat."""
+    inputs and schedules the copy still needs; with ``connect_later``, ``to_connect``:
+    each service still to connect with its ``connect_url``) and ``chat``, the execution
+    id of the chat that finishes the setup with you (the Transfer agent's, or an
+    official template's welcome chat)."""
 
     project: Dict[str, Any] = {}
     agents: List[Dict[str, Any]] = []
@@ -194,16 +196,20 @@ def _share_body(public: Any) -> Dict[str, Any]:
     return {"json": {"public": public}}
 
 
-def _copy_body(name: Optional[str], idempotency_key: str) -> Dict[str, Any]:
+def _copy_body(
+    name: Optional[str], idempotency_key: str, connect_later: bool = False
+) -> Dict[str, Any]:
     if name is not None and not (isinstance(name, str) and _NAME.fullmatch(name)):
         raise ValueError(
             "name must be 2-40 lowercase letters, digits and dashes,"
             " starting with a letter or digit"
         )
-    return {
-        "json": {"name": name} if name is not None else {},
-        "headers": _key(idempotency_key),
-    }
+    if not isinstance(connect_later, bool):
+        raise ValueError("connect_later must be True or False")
+    body: Dict[str, Any] = {"name": name} if name is not None else {}
+    if connect_later:
+        body["connect_later"] = True
+    return {"json": body, "headers": _key(idempotency_key)}
 
 
 def _errors_query(limit: Optional[int], before: Optional[str]) -> Dict[str, Any]:
@@ -367,17 +373,28 @@ class Projects:
         return Project.model_validate(data)
 
     def copy(
-        self, project: str, *, idempotency_key: str, name: Optional[str] = None
+        self,
+        project: str,
+        *,
+        idempotency_key: str,
+        name: Optional[str] = None,
+        connect_later: bool = False,
     ) -> ProjectCopy:
         """Copy a public project - by its link or id - or one of yours into your
         account, as an agent copies: its agents (a lead with all its subagents, all
         or none), pages and config under your own budget; never its data,
         conversations, money or connections. ``name`` defaults to the source's (with
-        -2, -3 if you have one). Refused before anything is created: 422
-        ``missing_tools`` (connect them, copy again), 404 (private or gone), 402
-        (balance), 409 ``project_exists`` (only with an explicit ``name``)."""
+        -2, -3 if you have one). ``connect_later=True``: a toolkit you have not
+        connected becomes your own connection to set up instead of a 422 - listed in
+        ``setup["needs"]["to_connect"]`` with its ``connect_url``, and the setup chat
+        asks for it first. Refused before anything is created: 422 ``missing_tools``
+        (without ``connect_later``, or a toolkit it cannot add), 404 (private or
+        gone), 402 (balance), 409 ``project_exists`` (only with an explicit
+        ``name``)."""
         data = self._c._request(
-            "POST", _shared_path(project, "copy/"), **_copy_body(name, idempotency_key)
+            "POST",
+            _shared_path(project, "copy/"),
+            **_copy_body(name, idempotency_key, connect_later),
         )
         return ProjectCopy.model_validate(data)
 
@@ -479,9 +496,16 @@ class AsyncProjects:
         return Project.model_validate(data)
 
     async def copy(
-        self, project: str, *, idempotency_key: str, name: Optional[str] = None
+        self,
+        project: str,
+        *,
+        idempotency_key: str,
+        name: Optional[str] = None,
+        connect_later: bool = False,
     ) -> ProjectCopy:
         data = await self._c._request(
-            "POST", _shared_path(project, "copy/"), **_copy_body(name, idempotency_key)
+            "POST",
+            _shared_path(project, "copy/"),
+            **_copy_body(name, idempotency_key, connect_later),
         )
         return ProjectCopy.model_validate(data)

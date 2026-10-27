@@ -25,6 +25,7 @@ from flymyai.agents._types import (
     AgentDeployment,
     AgentDeploymentAccess,
     AgentDeploymentPreflight,
+    AgentCopy,
     AgentDetail,
     AgentVersion,
     AppendMessageResponse,
@@ -502,6 +503,13 @@ def _guarded_next_list_params(
     return params
 
 
+def _copy_agent_body(connect_later: bool) -> Dict[str, Any]:
+    """The agent copy request: ``{}`` as before, or ``{"connect_later": true}``."""
+    if not isinstance(connect_later, bool):
+        raise ValueError("connect_later must be True or False")
+    return {"connect_later": True} if connect_later else {}
+
+
 class Agents:
     """CRUD for agents. Maps to ``/api/v1/agents/tasks/``."""
 
@@ -671,6 +679,24 @@ class Agents:
     def delete(self, agent_id: str) -> None:
         """Soft-delete (archive) an agent."""
         self._c._request("DELETE", f"/api/v1/agents/tasks/{agent_id}/")
+
+    def copy(self, agent_id: str, *, connect_later: bool = False) -> AgentCopy:
+        """Copy an agent - yours or another account's public one - into your account.
+
+        A lead comes with the agents it runs as subagents, all or none. While a
+        toolkit it uses is not connected on your account the copy is refused with
+        422 ``missing_tools``. ``connect_later=True`` makes it anyway: each such
+        toolkit becomes your own connection to set up (never the author's), listed
+        in ``setup["needs"]["to_connect"]`` with its ``connect_url``, and
+        ``setup["chat"]`` is the chat that asks for them; nothing that uses one
+        runs until it is connected (backend ``docs/protocols/SHARING.md`` 1, 2.3).
+        """
+        data = self._c._request(
+            "POST",
+            f"/api/v1/agents/tasks/{agent_id}/copy/",
+            json=_copy_agent_body(connect_later),
+        )
+        return AgentCopy(**data)
 
     # -- run -------------------------------------------------------------------
 
@@ -2247,6 +2273,15 @@ class AsyncAgents:
 
     async def delete(self, agent_id: str) -> None:
         await self._c._request("DELETE", f"/api/v1/agents/tasks/{agent_id}/")
+
+    async def copy(self, agent_id: str, *, connect_later: bool = False) -> AgentCopy:
+        """Async variant of :meth:`Agents.copy`."""
+        data = await self._c._request(
+            "POST",
+            f"/api/v1/agents/tasks/{agent_id}/copy/",
+            json=_copy_agent_body(connect_later),
+        )
+        return AgentCopy(**data)
 
     async def run(
         self,
