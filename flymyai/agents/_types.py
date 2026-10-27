@@ -140,6 +140,21 @@ class AgentDetail(Agent):
     available_tools: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class AgentCopy(AgentDetail):
+    """An agent copied into your account: the copy's detail, ``execution_id`` - the
+    chat it opens with (an official template's welcome chat, else its latest copied
+    chat) - the official ``template`` it came from, and, for a copy made with
+    ``connect_later``, ``setup``: ``needs["to_connect"]`` (each service still to
+    connect, with the ``connect_url`` that connects exactly that connection) and
+    ``chat``, the chat that asks for them (null when nothing is left to connect)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    execution_id: Optional[str] = None
+    template: Optional[Dict[str, Any]] = None
+    setup: Optional[Dict[str, Any]] = None
+
+
 class ExecutionLog(BaseModel):
     id: int
     created_at: datetime
