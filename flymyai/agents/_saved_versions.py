@@ -36,7 +36,7 @@ _FORBIDDEN = frozenset(
 class SavedVersionSummary(BaseModel):
     """Metadata for one saved compilation. Use ``compilations.get(id)`` for details."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
 
     id: int = Field(strict=True, ge=1)
     execution: str = Field(strict=True, max_length=16)
@@ -63,7 +63,7 @@ class SavedVersionSummary(BaseModel):
 class SavedVersionPage(BaseModel):
     """A single page; pass ``next_cursor`` explicitly to read the next page."""
 
-    model_config = ConfigDict(extra="ignore")
+    model_config = ConfigDict(extra="ignore", hide_input_in_errors=True)
 
     schema_version: Literal["flymy.saved-versions.v1"] = Field(alias="schema")
     task: str

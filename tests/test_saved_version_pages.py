@@ -168,3 +168,21 @@ def test_json_escaping_counts_toward_response_limit():
     client._request.return_value = payload
     with pytest.raises(ValueError, match="64 KiB"):
         Compilations(client).list_versions(AGENT, limit=50)
+
+
+@pytest.mark.asyncio
+async def test_validation_errors_do_not_echo_private_summary_content():
+    marker = "private saved-version note"
+    payload = page()
+    payload["results"][0]["note"] = marker * 30
+    sync = Mock()
+    sync._request.return_value = payload
+    async_client = Mock(_request=AsyncMock(return_value=payload))
+    with pytest.raises(ValueError) as sync_error:
+        Compilations(sync).list_versions(AGENT)
+    with pytest.raises(ValueError) as async_error:
+        await AsyncCompilations(async_client).list_versions(AGENT)
+    with pytest.raises(ValueError) as summary_error:
+        SavedVersionSummary(**payload["results"][0])
+    for error in (sync_error.value, async_error.value, summary_error.value):
+        assert marker not in str(error)
