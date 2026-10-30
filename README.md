@@ -104,6 +104,24 @@ async def main():
 asyncio.run(main())
 ```
 
+Browse one agent's saved versions without loading every instruction:
+
+```python
+page = client.compilations.list_versions(agent_id, limit=20)
+for version in page.results:
+    print(version.id, version.name, version.is_live)
+# Read older versions only when needed; the cursor is scoped and expires in 24h.
+if page.next_cursor:
+    older = client.compilations.list_versions(agent_id, cursor=page.next_cursor)
+# Open a selected version explicitly.
+# selected = client.compilations.get(version_id)
+```
+
+`list_versions` returns a `SavedVersionPage` with summary metadata, never full
+instructions, code, schemas or results. It fetches one page, defaults to 20 rows
+and accepts at most 50, within a 64 KiB JSON response. The async client exposes
+the same method with `await`. `compilations.list()` retains its full-data contract.
+
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction in place). To keep history, save an edit as a new version with `client.compilations.save_instruction(execution_id=..., instruction_md=...)`, test it with `run_instruction(compilation_id)`, then `set_live(compilation_id)`; `run_live(agent_id, idempotency_key=...)` and the agent's schedule run the live version, `get_live(agent_id)` reads it, and `set_live` on an older version rolls back. A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
 ### What a run used and costs
