@@ -789,6 +789,13 @@ servers, storage and budgets), a page published on its own, a fleet (a lead agen
 and the agents it starts) or a frontend artifact. A project is its config: creating, stopping and
 starting it are a plan and an apply of that config, and each leaves a release.
 
+Both `projects.plan` and `projects.create` accept optional `brief` and `model`.
+A brief queues the first task before the project agent's first model turn;
+creation returns `made.agent` and `made.chat`. Preview starts nothing. Send the
+same fields at both steps and reuse the idempotency key when retrying creation.
+The brief is limited to 65,536 UTF-8 bytes and needs a positive balance. Pick
+the model from the current agent model catalog.
+
 ```python
 from flymyai import AgentClient
 
