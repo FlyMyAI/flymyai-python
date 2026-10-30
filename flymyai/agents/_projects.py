@@ -33,14 +33,16 @@ _ARTIFACT_ID = re.compile(
 )
 _ID_MAX_CHARS = 200
 _ERRORS_LIMIT_MAX = 200
-# A project's link is its page in the app with the id URI-encoded (":" as %3A, "/" as
-# %2F), as Share copies it: only an app or a fleet, with exactly the id shapes above and
-# no other escape, held to an id's length (backend docs/protocols/SHARING.md).
+# Share links use /projects/<owner>/<name> for apps and /projects/<lead uuid> for
+# fleets. Accept the earlier URI-encoded ids too, with no other path or escape
+# (backend docs/protocols/SHARING.md).
 _LINK_PREFIX = "https://app.flymy.ai/projects/"
 _LINK = re.compile(
     r"https://app\.flymy\.ai/projects/"
     r"(?:app(?::|%3[Aa])[a-z0-9][a-z0-9-]*(?:/|%2[Ff])[a-z0-9][a-z0-9._-]*"
-    r"|fleet(?::|%3[Aa])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/?"
+    r"|[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*"
+    r"|(?:fleet(?::|%3[Aa]))?"
+    r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/?"
 )
 _NAME = re.compile(r"[a-z0-9][a-z0-9-]{1,39}")
 
@@ -171,6 +173,8 @@ def _shared_path(project: Any, route: str) -> str:
     value = str(project)
     if len(value) <= _ID_MAX_CHARS and _LINK.fullmatch(value):
         value = unquote(value[len(_LINK_PREFIX) :].rstrip("/"))
+        if not value.startswith(("app:", "fleet:")):
+            value = ("app:" if "/" in value else "fleet:") + value
     if len(value) <= _ID_MAX_CHARS:
         app = _APP_ID.fullmatch(value)
         if app:
