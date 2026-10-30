@@ -83,8 +83,13 @@ async def main():
         result = await client.runs.wait(run.id)
         print(result.output)
 
-        # 4. Chat: append a follow-up message and continue the same run
-        await client.runs.append_message(run.id, text="Make it punchier.")
+        # 4. Chat: append a follow-up message and continue the same run (the key makes
+        #    a retry after a lost answer return the first answer, not a second message)
+        await client.runs.append_message(
+            run.id,
+            text="Make it punchier.",
+            idempotency_key="news-brief-tesla-2026-05-21-v1:punchier",
+        )
         await client.runs.wait(run.id)
 
         # 5. Freeze into a reusable instruction, re-run with fresh variables - your API
