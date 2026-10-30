@@ -823,7 +823,33 @@ journal = client.projects.errors("app:me/paint-arena", limit=20)
 # another from GET /api/v1/agents/llm-models/ - it stays the agent's model
 agent = client.projects.agent("app:me/paint-arena", model="gpt-6-luna")
 print(agent.agent, agent.model)
+
+# rename it, change its budget (None removes a period, a period left out stays) and
+# delete it: each is a release of its flymy.yaml, answered once per key
+client.projects.rename(
+    "app:me/paint-arena", title="Paint Arena", idempotency_key="paint-arena-title-1"
+)
+edit = client.projects.set_budget(
+    "app:me/paint-arena",
+    {"per_day_usd": "10", "per_week_usd": None},
+    idempotency_key="paint-arena-budget-1",
+)
+print(edit.budget["day"]["left_usd"], edit.release)  # release is None when unchanged
+gone = client.projects.delete("app:me/paint-arena", idempotency_key="paint-arena-del-1")
+print(gone.deleted)  # removed (no history) or archived
 ```
+
+`rename`, `set_budget` and `delete` (`flymy.project-edit.v1`) change a project after it
+is created. A rename sets an app's `metadata.title`, the name it lists under, while its
+id keeps its name; a page on its own takes the title as its name. A budget change sets
+`billing.budgets.project`: money spent and held stays, and only the caps change. A
+deletion removes a project with no history for good, and its name is free again. A
+project with history is archived instead: it stops as `stop` does, its agents are
+archived and it leaves the lists, while its runs, ledger entries, releases, storages and
+name stay. Before anything changes, a change can be refused with 409 `busy` (a release
+is applying) or `project_stopped` (start it first). A fleet is renamed through its lead
+(`agents.update`) and an artifact through `client.artifacts`; both are refused before a
+request.
 
 Change an app by applying its `flymy.yaml` again with `AgentClient.apps`: `plan`
 shows what it would create, change or stop and its price, and `apply` applies
