@@ -601,3 +601,55 @@ def test_the_async_client_renames_sets_the_budget_and_deletes():
         ("DELETE", root, None),
     ]
     assert isinstance(deleted, ProjectEdit) and deleted.deleted == "archived"
+
+
+def test_project_creation_brief_and_model_on_both_clients():
+    seen = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        seen.append((request.headers.get("Idempotency-Key"), body))
+        if "plan_token" in body:
+            return response(
+                {
+                    "project": APP_ID,
+                    "release": {"status": "succeeded"},
+                    "agent": "agent-1",
+                    "chat": "chat-1",
+                },
+                202,
+            )
+        return response(PLAN)
+
+    fields = {"name": "notes-app", "brief": "Build my notes app", "model": "gpt-6-sol"}
+    client = client_with(handler)
+    preview = client.projects.plan(**fields)
+    made = client.projects.create(
+        **fields, plan_token=preview.plan_token, idempotency_key="brief-sync"
+    )
+    assert (made.agent, made.chat) == ("agent-1", "chat-1")
+
+    async def run():
+        client = AsyncAgentClient(
+            api_key="personal-key", base_url="https://example.test"
+        )
+        await client._http.aclose()
+        client._http = httpx.AsyncClient(
+            base_url="https://example.test", transport=httpx.MockTransport(handler)
+        )
+        try:
+            preview = await client.projects.plan(**fields)
+            made = await client.projects.create(
+                **fields, plan_token=preview.plan_token, idempotency_key="brief-async"
+            )
+            assert (made.agent, made.chat) == ("agent-1", "chat-1")
+        finally:
+            await client.close()
+
+    asyncio.run(run())
+    assert seen == [
+        (None, fields),
+        ("brief-sync", {**fields, "plan_token": "plan-1"}),
+        (None, fields),
+        ("brief-async", {**fields, "plan_token": "plan-1"}),
+    ]
