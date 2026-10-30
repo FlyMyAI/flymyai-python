@@ -2,12 +2,14 @@
 from one ``flymy.yaml``, a page published on its own, a fleet (a lead agent and the
 agents it starts) or a frontend artifact.
 
-A project is its config: creating it, stopping and starting it are a plan and an apply
-of its ``flymy.yaml``, and each leaves a release. A plan creates nothing and returns a
-``plan_token``; show its price to the user, then create or start with that token and an
-idempotency key. The routes live on the agents host under ``/api/v1/agents/projects/``
-(backend ``docs/protocols/PROJECTS_API.md``). Unknown answer fields are kept on the
-models (``extra="allow"``).
+A project is its config: creating it, stopping and starting it, renaming it and
+changing its budget are a plan and an apply of its ``flymy.yaml``, and each leaves a
+release. A plan creates nothing and returns a ``plan_token``; show its price to the
+user, then create or start with that token and an idempotency key. Deleting it removes
+a project with no history and archives one with history (``flymy.project-edit.v1``).
+The routes live on the agents host under ``/api/v1/agents/projects/`` (backend
+``docs/protocols/PROJECTS_API.md``). Unknown answer fields are kept on the models
+(``extra="allow"``).
 """
 
 from __future__ import annotations
@@ -121,6 +123,21 @@ class ProjectAgent(_Model):
     name: Optional[str] = None
     model: Optional[str] = None
     created: Optional[bool] = None
+
+
+class ProjectEdit(_Model):
+    """A project changed (``flymy.project-edit.v1``): what changed - ``title`` (the
+    name it lists under), ``budget`` (the project budget after it: ``active`` and
+    ``day``, ``week``, ``month`` with ``cap_usd``, ``spent_usd``, ``held_usd`` and
+    ``left_usd``) or ``deleted`` (``removed`` or ``archived``) with ``at`` - and the
+    ``release`` that made it, ``None`` when nothing had to change."""
+
+    project: str
+    release: Optional[Dict[str, Any]] = None
+    title: Optional[str] = None
+    budget: Optional[Dict[str, Any]] = None
+    deleted: Optional[str] = None
+    at: Optional[str] = None
 
 
 def _agent_body(model: Optional[str]) -> Dict[str, Any]:
@@ -252,6 +269,81 @@ def _start_body(
     if not plan_token or idempotency_key is None:
         raise ValueError("start() with a plan_token needs an idempotency_key")
     return {"json": {"plan_token": plan_token}, "headers": _key(idempotency_key)}
+
+
+_PERIODS = ("per_day_usd", "per_week_usd", "per_month_usd")
+# What each change takes (backend PROJECTS_API.md, "Change a project"): an app, and
+# for a rename a page on its own too; any other kind is refused with where it changes
+# instead.
+_EDIT_REFUSALS = {
+    "rename": {
+        "fleet": (
+            "a fleet lists under its lead's name: rename the lead with agents.update"
+        ),
+        "artifact": "an artifact is renamed with client.artifacts.update",
+        "invalid": (
+            "project_id must be an id from list(): app:<owner>/<name> or site:<page id>"
+        ),
+    },
+    "budget": {
+        "site": (
+            "a page on its own has no project budget: only an app (app:<owner>/<name>)"
+            " has one"
+        ),
+        "fleet": (
+            "a fleet has no project budget: its lead starts its agents within a Team's"
+            " run cap or a chat's subagent limits"
+        ),
+        "artifact": "an artifact has no project budget",
+        "invalid": "project_id must be an app id from list(): app:<owner>/<name>",
+    },
+    "delete": {
+        "site": "a page on its own is not deleted here: stop it with stop()",
+        "fleet": (
+            "a fleet is not deleted as a whole: delete its agents with agents.delete"
+        ),
+        "artifact": "an artifact is deleted with client.artifacts.delete",
+        "invalid": "project_id must be an app id from list(): app:<owner>/<name>",
+    },
+}
+
+
+def _edit_path(project_id: Any, edit: str) -> str:
+    """The route of a change: an app's, and for a rename a page's on its own too."""
+    refusals = _EDIT_REFUSALS[edit]
+    value = str(project_id)
+    if len(value) <= _ID_MAX_CHARS:
+        if _APP_ID.fullmatch(value) or (
+            "site" not in refusals and _SITE_ID.fullmatch(value)
+        ):
+            return _path(value, "budget/" if edit == "budget" else "")
+        for kind, shape in (
+            ("site", _SITE_ID),
+            ("fleet", _FLEET_ID),
+            ("artifact", _ARTIFACT_ID),
+        ):
+            if kind in refusals and shape.fullmatch(value):
+                raise ValueError(refusals[kind])
+    raise ValueError(refusals["invalid"])
+
+
+def _title_body(title: Optional[str], idempotency_key: str) -> Dict[str, Any]:
+    if title is not None and not isinstance(title, str):
+        raise ValueError(
+            "title must be a string of 1 to 80 characters, or None to drop it"
+        )
+    return {"json": {"title": title}, "headers": _key(idempotency_key)}
+
+
+def _budget_body(
+    budget: Dict[str, Optional[str]], idempotency_key: str
+) -> Dict[str, Any]:
+    if not isinstance(budget, dict) or not budget or set(budget) - set(_PERIODS):
+        raise ValueError(
+            "budget is {per_day_usd, per_week_usd, per_month_usd}: an amount sets that"
+            " period, None removes it, a period left out stays"
+        )
+    return {"json": dict(budget), "headers": _key(idempotency_key)}
 
 
 class Projects:
@@ -398,6 +490,58 @@ class Projects:
         )
         return ProjectCopy.model_validate(data)
 
+    def rename(
+        self, project_id: str, *, title: Optional[str], idempotency_key: str
+    ) -> ProjectEdit:
+        """Rename an app or a page on its own: ``title`` is the name it lists under, 1
+        to 80 characters (runs of spaces fold into one); ``None`` drops it, and it lists
+        by its name again. An app's ``metadata.title`` changes by a release planned and
+        applied at once - its id keeps its name, and ``release`` is ``None`` when the
+        title already is so; a page takes it as its name, with no release. Refused
+        before anything changed: 400 ``bad_value``, 409 ``busy`` (a release is
+        applying) or ``project_stopped`` (start it first)."""
+        data = self._c._request(
+            "PATCH",
+            _edit_path(project_id, "rename"),
+            **_title_body(title, idempotency_key),
+        )
+        return ProjectEdit.model_validate(data)
+
+    def set_budget(
+        self,
+        project_id: str,
+        budget: Dict[str, Optional[str]],
+        *,
+        idempotency_key: str,
+    ) -> ProjectEdit:
+        """Change an app's project budget (``billing.budgets.project``). In ``budget``
+        an amount in USD (above 0, at most 10000) sets ``per_day_usd``,
+        ``per_week_usd`` or ``per_month_usd``, ``None`` removes that period, and a
+        period left out stays; at least one stays. A release planned and applied at
+        once: money spent and held stays, only the caps change. Returns the budget
+        after it; ``release`` is ``None`` when it already is so. Refused before
+        anything changed: 400 ``invalid_budget``, 409 ``busy`` or ``project_stopped``.
+        """
+        data = self._c._request(
+            "PATCH",
+            _edit_path(project_id, "budget"),
+            **_budget_body(budget, idempotency_key),
+        )
+        return ProjectEdit.model_validate(data)
+
+    def delete(self, project_id: str, *, idempotency_key: str) -> ProjectEdit:
+        """Delete an app. One with no history - nothing ran, was charged, called or
+        stored - is removed for good: its releases, budgets, pages and links go and
+        its name is free again. One with history is archived: it stops as
+        :meth:`stop` does, its agents are archived (their schedules and triggers go
+        off), its public link closes and it leaves the lists; its runs, ledger
+        entries, releases, storages and name stay. ``deleted`` says which; the same
+        key answers the same again. 409 ``busy`` while a release applies."""
+        data = self._c._request(
+            "DELETE", _edit_path(project_id, "delete"), headers=_key(idempotency_key)
+        )
+        return ProjectEdit.model_validate(data)
+
 
 class AsyncProjects:
     """``client.projects`` on the async client."""
@@ -509,3 +653,33 @@ class AsyncProjects:
             **_copy_body(name, idempotency_key, connect_later),
         )
         return ProjectCopy.model_validate(data)
+
+    async def rename(
+        self, project_id: str, *, title: Optional[str], idempotency_key: str
+    ) -> ProjectEdit:
+        data = await self._c._request(
+            "PATCH",
+            _edit_path(project_id, "rename"),
+            **_title_body(title, idempotency_key),
+        )
+        return ProjectEdit.model_validate(data)
+
+    async def set_budget(
+        self,
+        project_id: str,
+        budget: Dict[str, Optional[str]],
+        *,
+        idempotency_key: str,
+    ) -> ProjectEdit:
+        data = await self._c._request(
+            "PATCH",
+            _edit_path(project_id, "budget"),
+            **_budget_body(budget, idempotency_key),
+        )
+        return ProjectEdit.model_validate(data)
+
+    async def delete(self, project_id: str, *, idempotency_key: str) -> ProjectEdit:
+        data = await self._c._request(
+            "DELETE", _edit_path(project_id, "delete"), headers=_key(idempotency_key)
+        )
+        return ProjectEdit.model_validate(data)
