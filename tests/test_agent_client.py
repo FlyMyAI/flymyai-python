@@ -421,6 +421,21 @@ class TestSyncRuns:
             "effort": "high",
             "model": "gpt-5.6",
         }
+        assert "headers" not in call_kwargs
+
+    def test_append_message_sends_its_idempotency_key(self):
+        mock_http = MagicMock()
+        mock_http.request.return_value = _make_response(_append_message_payload())
+        client = _sync_client(mock_http)
+        client.runs.append_message(RUN_ID, text="go on", idempotency_key="append-1")
+        _, call_kwargs = mock_http.request.call_args
+        assert call_kwargs["json"] == {"text": "go on"}
+        assert call_kwargs["headers"]["Idempotency-Key"] == "append-1"
+        with pytest.raises(ValueError):
+            client.runs.append_message(
+                RUN_ID, text="go on", idempotency_key=" append-1"
+            )
+        assert mock_http.request.call_count == 1
 
     def test_wait_returns_on_completed(self):
         mock_http = MagicMock()
@@ -761,6 +776,15 @@ class TestAsyncRuns:
         result = await client.runs.append_message(RUN_ID, text="go on")
         assert isinstance(result, AppendMessageResponse)
         assert mock_http.request.await_count == 1
+        assert "headers" not in mock_http.request.await_args.kwargs
+
+        await client.runs.append_message(
+            RUN_ID, text="go on", idempotency_key="append-1"
+        )
+        assert (
+            mock_http.request.await_args.kwargs["headers"]["Idempotency-Key"]
+            == "append-1"
+        )
 
 
 @pytest.mark.asyncio

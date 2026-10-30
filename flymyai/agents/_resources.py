@@ -945,17 +945,27 @@ class Runs:
         text: str,
         effort: Optional[str] = None,
         model: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> AppendMessageResponse:
-        """Append a message and return the backend's bounded acknowledgement."""
+        """Append a message and return the backend's bounded acknowledgement.
+
+        An append restarts a settled run, and that run is paid. With ``idempotency_key``
+        a retry of the same call after a lost answer returns the first answer for 30
+        days instead of appending the message again; another message under the key is
+        refused (409). Without it every call is a new message.
+        """
         body: Dict[str, Any] = {"text": text}
         if effort is not None:
             body["effort"] = effort
         if model is not None:
             body["model"] = model
+        request_kwargs: Dict[str, Any] = {"json": body}
+        if idempotency_key is not None:
+            request_kwargs["headers"] = _idempotency_headers(idempotency_key)
         data = self._c._request(
             "POST",
             f"/api/v1/agents/executions/{run_id}/append-message/",
-            json=body,
+            **request_kwargs,
         )
         return AppendMessageResponse(**data)
 
@@ -2437,16 +2447,20 @@ class AsyncRuns:
         text: str,
         effort: Optional[str] = None,
         model: Optional[str] = None,
+        idempotency_key: Optional[str] = None,
     ) -> AppendMessageResponse:
         body: Dict[str, Any] = {"text": text}
         if effort is not None:
             body["effort"] = effort
         if model is not None:
             body["model"] = model
+        request_kwargs: Dict[str, Any] = {"json": body}
+        if idempotency_key is not None:
+            request_kwargs["headers"] = _idempotency_headers(idempotency_key)
         data = await self._c._request(
             "POST",
             f"/api/v1/agents/executions/{run_id}/append-message/",
-            json=body,
+            **request_kwargs,
         )
         return AppendMessageResponse(**data)
 
