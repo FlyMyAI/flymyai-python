@@ -872,9 +872,10 @@ deletion removes a project with no history for good, and its name is free again.
 project with history is archived instead: it stops as `stop` does, its agents are
 archived and it leaves the lists, while its runs, ledger entries, releases, storages and
 name stay. Before anything changes, a change can be refused with 409 `busy` (a release
-is applying) or `project_stopped` (start it first). A fleet is renamed through its lead
-(`agents.update`) and an artifact through `client.artifacts`; both are refused before a
-request.
+is applying) or `project_stopped` (start it first). A fleet without a named AgentTeam
+takes its title from its lead (`agents.update`); a named AgentTeam keeps its own title
+and has no rename endpoint. An artifact changes through `client.artifacts`. These
+project kinds are refused before a request.
 
 Change an app by applying its `flymy.yaml` again with `AgentClient.apps`: `plan`
 shows what it would create, change or stop and its price, and `apply` applies

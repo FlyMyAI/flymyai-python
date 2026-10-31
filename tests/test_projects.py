@@ -432,6 +432,13 @@ def test_rename_set_budget_and_delete_send_their_routes_with_the_callers_key():
                 "budget": {"active": True, "day": {"cap_usd": "7.000000"}},
                 "release": None,
             })
+        if request.url.path.endswith(f"/{SITE_ID}/"):
+            return response({
+                **EDITED,
+                "project": SITE_ID,
+                "title": body["title"] or "Page",
+                "release": None,
+            })
         release = {"number": 2, "status": "applying"}
         title = body["title"] or "paint-arena"
         return response({**EDITED, "title": title, "release": release}, status=202)
@@ -465,7 +472,8 @@ def test_rename_set_budget_and_delete_send_their_routes_with_the_callers_key():
     ]
     assert isinstance(renamed, ProjectEdit) and renamed.title == "Paint Arena"
     assert renamed.release == {"number": 2, "status": "applying"}
-    assert dropped.title == "paint-arena"
+    assert dropped.project == SITE_ID and dropped.title == "Page"
+    assert dropped.release is None
     assert budget.budget["day"] == {"cap_usd": "7.000000"} and budget.release is None
     assert deleted.deleted == "removed" and deleted.release is None
     assert deleted.at == "2026-10-30T11:00:00.123456+00:00"
@@ -478,7 +486,10 @@ def test_rename_set_budget_and_delete_send_their_routes_with_the_callers_key():
     [
         (
             lambda c: c.projects.rename(FLEET_ID, title="x", idempotency_key="k"),
-            "a fleet lists under its lead's name: rename the lead with agents.update",
+            (
+                "a fleet without a named AgentTeam uses its lead's name: rename the"
+                " lead with agents.update; a named AgentTeam has no rename endpoint"
+            ),
         ),
         (
             lambda c: c.projects.rename(ARTIFACT_ID, title="x", idempotency_key="k"),
