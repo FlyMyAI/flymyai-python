@@ -14,23 +14,21 @@ _UUID = re.compile(
 )
 _SCHEMA = "flymy.saved-versions.v1"
 _MAX_BYTES = 64 * 1024
-_FORBIDDEN = frozenset(
-    {
-        "instruction_md",
-        "script_code",
-        "result",
-        "error",
-        "messages",
-        "display_messages",
-        "agent_result",
-        "freeze_guidance",
-        "example_variables",
-        "schedule_variables",
-        "browser_media_consent",
-        "input_schema",
-        "output_schema",
-    }
-)
+_FORBIDDEN = frozenset({
+    "instruction_md",
+    "script_code",
+    "result",
+    "error",
+    "messages",
+    "display_messages",
+    "agent_result",
+    "freeze_guidance",
+    "example_variables",
+    "schedule_variables",
+    "browser_media_consent",
+    "input_schema",
+    "output_schema",
+})
 
 
 class SavedVersionSummary(BaseModel):
