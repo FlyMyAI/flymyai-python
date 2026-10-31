@@ -7,6 +7,12 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      run_live_inference:
+        description: Run real inference using the configured test account (separate authorization required)
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   lint:
@@ -87,6 +93,7 @@ jobs:
         run: pytest tests/test_unknown_error_handle.py --tb=short
 
   test_flymyai_client:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_inference == true }}
     needs:
       - lint
       - test_unknown_error_handle
@@ -141,6 +148,7 @@ jobs:
   #       run: pytest tests/test_stream.py --tb=short
 
   test_async_inference:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_live_inference == true }}
     needs:
       - lint
       - test_unknown_error_handle
