@@ -255,6 +255,7 @@ def _project_body(
     *,
     brief: Optional[str] = None,
     model: Optional[str] = None,
+    effort: Optional[str] = None,
 ) -> Dict[str, Any]:
     return _body(
         name=name,
@@ -264,6 +265,7 @@ def _project_body(
         plan_token=plan_token,
         brief=brief,
         model=model,
+        effort=effort,
     )
 
 
@@ -400,10 +402,11 @@ class Projects:
         budget: Optional[Dict[str, str]] = None,
         brief: Optional[str] = None,
         model: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> ProjectPlan:
         """What creating this project would make and cost; creates nothing."""
         body = _project_body(
-            name, template, description, budget, brief=brief, model=model
+            name, template, description, budget, brief=brief, model=model, effort=effort
         )
         return ProjectPlan.model_validate(self._c._request("POST", _ROOT, json=body))
 
@@ -418,14 +421,24 @@ class Projects:
         budget: Optional[Dict[str, str]] = None,
         brief: Optional[str] = None,
         model: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> ProjectCreated:
         """Create exactly the plan the user confirmed: send the same fields as
         :meth:`plan` plus its ``plan_token``. Returns the project id and its first
         release. Optional ``brief`` queues its first task before the first model
         turn and returns ``agent`` and ``chat`` IDs. ``model`` selects an enabled
-        agent model. Send both fields in the preview too."""
+        agent model. Optional ``effort`` selects one of that model's current
+        effort options before the first run. Send all selected fields in the
+        preview too; omitted or ``None`` effort keeps the existing default."""
         body = _project_body(
-            name, template, description, budget, plan_token, brief=brief, model=model
+            name,
+            template,
+            description,
+            budget,
+            plan_token,
+            brief=brief,
+            model=model,
+            effort=effort,
         )
         data = self._c._request("POST", _ROOT, json=body, headers=_key(idempotency_key))
         return ProjectCreated.model_validate(data)
@@ -603,9 +616,10 @@ class AsyncProjects:
         budget: Optional[Dict[str, str]] = None,
         brief: Optional[str] = None,
         model: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> ProjectPlan:
         body = _project_body(
-            name, template, description, budget, brief=brief, model=model
+            name, template, description, budget, brief=brief, model=model, effort=effort
         )
         data = await self._c._request("POST", _ROOT, json=body)
         return ProjectPlan.model_validate(data)
@@ -621,9 +635,17 @@ class AsyncProjects:
         budget: Optional[Dict[str, str]] = None,
         brief: Optional[str] = None,
         model: Optional[str] = None,
+        effort: Optional[str] = None,
     ) -> ProjectCreated:
         body = _project_body(
-            name, template, description, budget, plan_token, brief=brief, model=model
+            name,
+            template,
+            description,
+            budget,
+            plan_token,
+            brief=brief,
+            model=model,
+            effort=effort,
         )
         data = await self._c._request(
             "POST", _ROOT, json=body, headers=_key(idempotency_key)

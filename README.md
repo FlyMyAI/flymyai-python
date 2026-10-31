@@ -807,12 +807,21 @@ servers, storage and budgets), a page published on its own, a fleet (a lead agen
 and the agents it starts) or a frontend artifact. A project is its config: creating, stopping and
 starting it are a plan and an apply of that config, and each leaves a release.
 
-Both `projects.plan` and `projects.create` accept optional `brief` and `model`.
+Both `projects.plan` and `projects.create` accept optional `brief`, `model` and `effort`.
 A brief queues the first task before the project agent's first model turn;
 creation returns `made.agent` and `made.chat`. Preview starts nothing. Send the
 same fields at both steps and reuse the idempotency key when retrying creation.
 The brief is limited to 65,536 UTF-8 bytes and needs a positive balance. Pick
 the model from the current agent model catalog.
+Pick `effort` from that model's current `effort_options`; omit it when the list
+is empty. The backend saves it before the first execution. Use the same fields
+in preview and creation. Omitted or `None` effort is left out of the request,
+preserving the existing default and request identity; the backend also treats
+blank text as default and normalizes explicit text to lowercase. An explicit
+level without a model binds the current project default model to the plan.
+Changing that selection requires a new plan, and a changed nonempty effort
+under the same creation key is refused. This option needs the backend effort
+contract before SDK publication.
 
 ```python
 from flymyai import AgentClient
