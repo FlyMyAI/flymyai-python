@@ -104,6 +104,24 @@ async def main():
 asyncio.run(main())
 ```
 
+Browse one agent's saved versions without loading every instruction:
+
+```python
+page = client.compilations.list_versions(agent_id, limit=20)
+for version in page.results:
+    print(version.id, version.name, version.is_live)
+# Read older versions only when needed; the cursor is scoped and expires in 24h.
+if page.next_cursor:
+    older = client.compilations.list_versions(agent_id, cursor=page.next_cursor)
+# Open a selected version explicitly.
+# selected = client.compilations.get(version_id)
+```
+
+`list_versions` returns a `SavedVersionPage` with summary metadata, never full
+instructions, code, schemas or results. It fetches one page, defaults to 20 rows
+and accepts at most 50, within a 64 KiB JSON response. The async client exposes
+the same method with `await`. `compilations.list()` retains its full-data contract.
+
 Other agent methods: `client.tools.available()` / `provide_config()` / `call()`, `client.runs.get()` / `list()` / `cancel()`, `client.agents.update()` / `suggest_schema()`, `client.compilations.update()` (edit a frozen instruction in place). To keep history, save an edit as a new version with `client.compilations.save_instruction(execution_id=..., instruction_md=...)`, test it with `run_instruction(compilation_id)`, then `set_live(compilation_id)`; `run_live(agent_id, idempotency_key=...)` and the agent's schedule run the live version, `get_live(agent_id)` reads it, and `set_live` on an older version rolls back. A synchronous `AgentClient` with the same method names (no `await`) is also available. Full reference: [docs.flymy.ai/agents](https://docs.flymy.ai/agents).
 
 ### What a run used and costs
@@ -789,6 +807,13 @@ servers, storage and budgets), a page published on its own, a fleet (a lead agen
 and the agents it starts) or a frontend artifact. A project is its config: creating, stopping and
 starting it are a plan and an apply of that config, and each leaves a release.
 
+Both `projects.plan` and `projects.create` accept optional `brief` and `model`.
+A brief queues the first task before the project agent's first model turn;
+creation returns `made.agent` and `made.chat`. Preview starts nothing. Send the
+same fields at both steps and reuse the idempotency key when retrying creation.
+The brief is limited to 65,536 UTF-8 bytes and needs a positive balance. Pick
+the model from the current agent model catalog.
+
 ```python
 from flymyai import AgentClient
 
@@ -823,7 +848,34 @@ journal = client.projects.errors("app:me/paint-arena", limit=20)
 # another from GET /api/v1/agents/llm-models/ - it stays the agent's model
 agent = client.projects.agent("app:me/paint-arena", model="gpt-6-luna")
 print(agent.agent, agent.model)
+
+# rename it, change its budget (None removes a period, a period left out stays) and
+# delete it: each is a release of its flymy.yaml, answered once per key
+client.projects.rename(
+    "app:me/paint-arena", title="Paint Arena", idempotency_key="paint-arena-title-1"
+)
+edit = client.projects.set_budget(
+    "app:me/paint-arena",
+    {"per_day_usd": "10", "per_week_usd": None},
+    idempotency_key="paint-arena-budget-1",
+)
+print(edit.budget["day"]["left_usd"], edit.release)  # release is None when unchanged
+gone = client.projects.delete("app:me/paint-arena", idempotency_key="paint-arena-del-1")
+print(gone.deleted)  # removed (no history) or archived
 ```
+
+`rename`, `set_budget` and `delete` (`flymy.project-edit.v1`) change a project after it
+is created. A rename sets an app's `metadata.title`, the name it lists under, while its
+id keeps its name; a page on its own takes the title as its name. A budget change sets
+`billing.budgets.project`: money spent and held stays, and only the caps change. A
+deletion removes a project with no history for good, and its name is free again. A
+project with history is archived instead: it stops as `stop` does, its agents are
+archived and it leaves the lists, while its runs, ledger entries, releases, storages and
+name stay. Before anything changes, a change can be refused with 409 `busy` (a release
+is applying) or `project_stopped` (start it first). A fleet without a named AgentTeam
+takes its title from its lead (`agents.update`); a named AgentTeam keeps its own title
+and has no rename endpoint. An artifact changes through `client.artifacts`. These
+project kinds are refused before a request.
 
 Change an app by applying its `flymy.yaml` again with `AgentClient.apps`: `plan`
 shows what it would create, change or stop and its price, and `apply` applies

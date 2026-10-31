@@ -227,6 +227,7 @@ from flymyai.agents._projects import (
     ProjectAgent,
     ProjectCopy,
     ProjectCreated,
+    ProjectEdit,
     ProjectErrors,
     ProjectList,
     ProjectPlan,
@@ -240,6 +241,7 @@ __all__ += [
     "ProjectAgent",
     "ProjectCopy",
     "ProjectCreated",
+    "ProjectEdit",
     "ProjectErrors",
     "ProjectList",
     "ProjectPlan",
@@ -290,3 +292,7 @@ __all__ += [
     "McpServerOAuth",
     "McpServers",
 ]
+
+from flymyai.agents._saved_versions import SavedVersionPage, SavedVersionSummary
+
+__all__ += ["SavedVersionPage", "SavedVersionSummary"]
