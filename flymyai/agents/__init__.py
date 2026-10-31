@@ -282,3 +282,7 @@ __all__ += [
     "McpServerOAuth",
     "McpServers",
 ]
+
+from flymyai.agents._saved_versions import SavedVersionPage, SavedVersionSummary
+
+__all__ += ["SavedVersionPage", "SavedVersionSummary"]

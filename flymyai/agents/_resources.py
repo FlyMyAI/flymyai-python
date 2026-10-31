@@ -18,6 +18,11 @@ from typing import (
 from urllib.parse import parse_qsl, urlsplit
 from uuid import UUID
 
+from flymyai.agents._saved_versions import (
+    SavedVersionPage,
+    saved_version_page,
+    saved_version_query,
+)
 from flymyai.agents._types import (
     Agent,
     AgentGroup,
@@ -1637,6 +1642,25 @@ class Compilations:
         items = data["results"] if isinstance(data, dict) else data
         return [Compilation(**item) for item in items]
 
+    def list_versions(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+    ) -> SavedVersionPage:
+        """Read one bounded page of metadata for an owned agent's saved versions.
+
+        Pass ``next_cursor`` explicitly to continue; it expires after 24 hours.
+        Full instructions, schemas and results remain on :meth:`get`.
+        The legacy :meth:`list` contract is unchanged.
+        """
+        query = saved_version_query(agent_id, limit, cursor)
+        data = self._c._request(
+            "GET", "/api/v1/agents/compilations/versions/", params=query
+        )
+        return saved_version_page(data, query)
+
     def get_live(self, agent_id: ResourceID) -> Optional[Compilation]:
         """The agent's live version, or None before its first freeze."""
         found = self.list(agent_id=agent_id, is_live=True)
@@ -3035,6 +3059,25 @@ class AsyncCompilations:
         )
         items = data["results"] if isinstance(data, dict) else data
         return [Compilation(**item) for item in items]
+
+    async def list_versions(
+        self,
+        agent_id: str,
+        *,
+        limit: int = 20,
+        cursor: Optional[str] = None,
+    ) -> SavedVersionPage:
+        """Read one bounded page of metadata for an owned agent's saved versions.
+
+        Pass ``next_cursor`` explicitly to continue; it expires after 24 hours.
+        Full instructions, schemas and results remain on :meth:`get`.
+        The legacy :meth:`list` contract is unchanged.
+        """
+        query = saved_version_query(agent_id, limit, cursor)
+        data = await self._c._request(
+            "GET", "/api/v1/agents/compilations/versions/", params=query
+        )
+        return saved_version_page(data, query)
 
     async def get_live(self, agent_id: ResourceID) -> Optional[Compilation]:
         """The agent's live version, or None before its first freeze."""
