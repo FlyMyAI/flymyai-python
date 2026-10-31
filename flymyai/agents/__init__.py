@@ -253,8 +253,13 @@ from flymyai.agents._apps import (
     AppPlan,
     AppRelease,
     Apps,
+    AppSecret,
+    AppSecretList,
+    AppSecrets,
     AsyncApps,
+    AsyncAppSecrets,
 )
+from flymyai.agents._client import AppSecretLimitError
 
 __all__ += [
     "AppFile",
@@ -262,7 +267,12 @@ __all__ += [
     "AppPlan",
     "AppRelease",
     "Apps",
+    "AppSecret",
+    "AppSecretLimitError",
+    "AppSecretList",
+    "AppSecrets",
     "AsyncApps",
+    "AsyncAppSecrets",
 ]
 
 from flymyai.agents._mcp_servers import (

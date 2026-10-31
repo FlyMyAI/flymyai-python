@@ -5,8 +5,9 @@ storages and budgets.
 ``plan`` shows what applying the files would create, change, keep or stop and what it
 costs, and returns a ``plan_token``; nothing is spent. ``apply`` applies exactly that
 plan as a release. ``files`` reads an applied app's template back to change it, and
-``status`` follows a release. The routes live on the agents host under
-``/api/v1/agents/apps/``. Unknown answer fields are kept on the models
+``status`` follows a release. ``secrets`` sets the values of the app's ``secrets:``,
+which only its rented servers get, and never reads one back. The routes live on the
+agents host under ``/api/v1/agents/apps/``. Unknown answer fields are kept on the models
 (``extra="allow"``).
 """
 
@@ -16,13 +17,17 @@ import re
 from typing import Any, Dict, List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from flymyai.agents._artifacts import _body, _key
 
 _ROOT = "/api/v1/agents/apps/"
 _APP = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*")
 _FILE_PAGE_MAX_BYTES = 200_000
+_SECRETS = f"{_ROOT}secrets/"
+_SECRET_APP = re.compile(r"[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9._-]*")
+_SECRET_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,63}")
+_SECRET_MAX_BYTES = 8 * 1024
 
 
 class _Model(BaseModel):
@@ -64,6 +69,85 @@ class AppFile(_Model):
     content: Optional[str] = None
     content_base64: Optional[str] = None
     next_offset: Optional[int] = None
+
+
+class AppSecret(_Model):
+    """One secret of an app (``flymy.app-secret.v1``): whether it has a value, its
+    ``version`` (every new value is one) and whether the platform ``generated`` it; in a
+    listing also whether the applied release ``declared`` it and the server env entries
+    that use it (``used_by``). Never its value."""
+
+    # Only the declared metadata contract may leave this resource, even if an
+    # upstream response accidentally adds a value-bearing field.
+    model_config = ConfigDict(extra="ignore")
+
+    name: str
+    input_url: Optional[str] = None
+    set: bool = True
+    version: Optional[int] = None
+    generated: Optional[bool] = None
+    updated_at: Optional[str] = None
+    declared: Optional[bool] = None
+    used_by: List[str] = Field(default_factory=list)
+    app: Optional[str] = None
+    schema_: Optional[str] = Field(default=None, alias="schema")
+
+
+class AppSecretList(_Model):
+    """The app's secrets (``flymy.app-secrets.v1``): the ones with a value and the ones
+    its applied release declares, by name."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    app: str
+    secrets: List[AppSecret] = Field(default_factory=list)
+    input_url: Optional[str] = None
+    schema_: Optional[str] = Field(default=None, alias="schema")
+
+
+def _secret_app(app: str) -> str:
+    if not isinstance(app, str) or len(app) > 160 or not _SECRET_APP.fullmatch(app):
+        raise ValueError("app must be a lowercase owner/name of at most 160 characters")
+    return app
+
+
+def _secret_name(name: str) -> str:
+    if not isinstance(name, str) or not _SECRET_NAME.fullmatch(name):
+        raise ValueError(
+            "name must be an env variable's name: letters, digits and _, at most 64,"
+            " not starting with a digit"
+        )
+    return name
+
+
+def _secret_value(value: str) -> str:
+    # The message never repeats the value, including malformed Unicode input.
+    try:
+        size = len(value.encode("utf-8")) if isinstance(value, str) else 0
+    except UnicodeEncodeError:
+        raise ValueError("value must be valid UTF-8 text") from None
+    if (
+        not isinstance(value, str)
+        or not value
+        or "\x00" in value
+        or size > _SECRET_MAX_BYTES
+    ):
+        raise ValueError(
+            f"value must be text of 1 to {_SECRET_MAX_BYTES} bytes, without NUL"
+        )
+    return value
+
+
+def _generate(length: Optional[int]) -> Any:
+    if length is None:
+        return True
+    if (
+        isinstance(length, bool)
+        or not isinstance(length, int)
+        or not 16 <= length <= 128
+    ):
+        raise ValueError("length must be 16-128")
+    return {"length": length}
 
 
 def _app(app: str) -> str:
@@ -129,12 +213,102 @@ def _files_query(
     return params
 
 
-class Apps:
-    """``client.apps``: plan and apply a ``flymy.yaml``, read it back, follow a
-    release."""
+class AppSecrets:
+    """``client.apps.secrets``: the values of an app's ``secrets:``. A value goes in and
+    never comes out; only the app's rented servers get it, in their env at start
+    (``env: {KEY: ${secrets.NAME}}``). Values may be set before the app's first apply:
+    its plan asks for the ones it uses (``needs_secret``). ``set`` is for trusted owner
+    code only: read from your own environment or secret store, never from an agent
+    prompt or chat. Assistants use ``list().input_url`` to direct the owner to the
+    authenticated write-only form, or ``generate`` to make a value server-side."""
 
     def __init__(self, client: Any) -> None:
         self._c = client
+
+    def list(self, app: str) -> AppSecretList:
+        """The app's secrets, names and state only."""
+        data = self._c._request("GET", _SECRETS, params={"app": _secret_app(app)})
+        return AppSecretList.model_validate(data)
+
+    def set(self, app: str, name: str, value: str) -> AppSecret:
+        """Set a secret's value. A new value is a new version, the same value changes
+        nothing; a running server gets it at its next start. Trusted owner code only;
+        never pass a credential through an assistant's arguments or transcript."""
+        body = {
+            "app": _secret_app(app),
+            "name": _secret_name(name),
+            "value": _secret_value(value),
+        }
+        return AppSecret.model_validate(self._c._request("PUT", _SECRETS, json=body))
+
+    def generate(self, app: str, name: str, length: Optional[int] = None) -> AppSecret:
+        """Have the platform make a value (letters and digits, 32 or ``length`` 16-128)
+        when the secret has none; a repeated call answers the same secret. To make a new
+        value, :meth:`delete` it first."""
+        body = {
+            "app": _secret_app(app),
+            "name": _secret_name(name),
+            "generate": _generate(length),
+        }
+        return AppSecret.model_validate(self._c._request("PUT", _SECRETS, json=body))
+
+    def delete(self, app: str, name: str) -> bool:
+        """Delete a secret's value; True when there was one. A server that uses it fails
+        its next start until a new value is set."""
+        data = self._c._request(
+            "DELETE",
+            _SECRETS,
+            params={"app": _secret_app(app), "name": _secret_name(name)},
+        )
+        return bool((data or {}).get("deleted"))
+
+
+class AsyncAppSecrets:
+    """``client.apps.secrets`` on the async client."""
+
+    def __init__(self, client: Any) -> None:
+        self._c = client
+
+    async def list(self, app: str) -> AppSecretList:
+        data = await self._c._request("GET", _SECRETS, params={"app": _secret_app(app)})
+        return AppSecretList.model_validate(data)
+
+    async def set(self, app: str, name: str, value: str) -> AppSecret:
+        body = {
+            "app": _secret_app(app),
+            "name": _secret_name(name),
+            "value": _secret_value(value),
+        }
+        data = await self._c._request("PUT", _SECRETS, json=body)
+        return AppSecret.model_validate(data)
+
+    async def generate(
+        self, app: str, name: str, length: Optional[int] = None
+    ) -> AppSecret:
+        body = {
+            "app": _secret_app(app),
+            "name": _secret_name(name),
+            "generate": _generate(length),
+        }
+        data = await self._c._request("PUT", _SECRETS, json=body)
+        return AppSecret.model_validate(data)
+
+    async def delete(self, app: str, name: str) -> bool:
+        data = await self._c._request(
+            "DELETE",
+            _SECRETS,
+            params={"app": _secret_app(app), "name": _secret_name(name)},
+        )
+        return bool((data or {}).get("deleted"))
+
+
+class Apps:
+    """``client.apps``: plan and apply a ``flymy.yaml``, read it back, follow a
+    release; ``client.apps.secrets`` sets the values of its secrets."""
+
+    def __init__(self, client: Any) -> None:
+        self._c = client
+        self.secrets = AppSecrets(client)
 
     def plan(
         self,
@@ -202,6 +376,7 @@ class AsyncApps:
 
     def __init__(self, client: Any) -> None:
         self._c = client
+        self.secrets = AsyncAppSecrets(client)
 
     async def plan(
         self,
