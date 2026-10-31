@@ -150,6 +150,11 @@ class ArtifactStaleBaseVersionError(FlyMyAIAgentError):
         self.live_version = live_version
 
 
+class AppSecretLimitError(FlyMyAIAgentError):
+    """An app holds at most 32 secrets and an owner 1024 (HTTP 409 ``too_many_secrets``):
+    delete one with ``client.apps.secrets.delete`` first."""
+
+
 def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
     """Return a :class:`VariablesValidationError` if ``body`` looks like one."""
     if not isinstance(body, dict):
@@ -208,6 +213,17 @@ def _raise_for_status(resp: httpx.Response) -> None:
             current_revision=(
                 current_revision if isinstance(current_revision, int) else None
             ),
+        )
+
+    if (
+        resp.status_code == 409
+        and isinstance(body, dict)
+        and body.get("code") == "too_many_secrets"
+    ):
+        raise AppSecretLimitError(
+            str(body.get("message", "Too many app secrets.")),
+            status_code=409,
+            response_body=body,
         )
 
     if (
