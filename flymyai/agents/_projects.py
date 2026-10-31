@@ -278,7 +278,8 @@ _PERIODS = ("per_day_usd", "per_week_usd", "per_month_usd")
 _EDIT_REFUSALS = {
     "rename": {
         "fleet": (
-            "a fleet lists under its lead's name: rename the lead with agents.update"
+            "a fleet without a named AgentTeam uses its lead's name: rename the lead"
+            " with agents.update; a named AgentTeam has no rename endpoint"
         ),
         "artifact": "an artifact is renamed with client.artifacts.update",
         "invalid": (
