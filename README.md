@@ -898,7 +898,31 @@ while client.apps.status(release.release).status == "applying":
 
 `client.apps.files("me/paint-arena")` reads the applied template back; `plan` and
 `apply` also take `app="me/paint-arena"` with `overrides` to replace some files and
-keep the rest. `get`, `errors`, `templates` and `agent` (the project's own agent,
+keep the rest.
+
+An app's `secrets:` (a Stripe key, a session signing key) reach only its rented
+servers, as `env: {STRIPE_KEY: ${secrets.STRIPE_KEY}}`. Set the values with
+`client.apps.secrets`, before the first `plan` (it asks for the ones a server uses,
+`needs_secret`). A value goes in and never comes out: `list` shows names, `set`,
+`version`, who uses them and an authenticated `input_url`. `set` is for trusted
+owner code only: read the value from your own environment or secret store. Never
+put a secret into an assistant prompt, transcript or tool arguments. An assistant
+can give the owner `client.apps.secrets.list("me/shop").input_url` to enter it
+in the write-only web form, or call `generate` without anyone seeing the value.
+
+```python
+import os
+
+client.apps.secrets.set("me/shop", "STRIPE_KEY", os.environ["STRIPE_KEY"])
+client.apps.secrets.generate("me/shop", "SESSION_KEY")  # made once by the platform
+for secret in client.apps.secrets.list("me/shop").secrets:
+    print(secret.name, secret.set, secret.version, secret.used_by)
+```
+
+A new value reaches a server at its next start. `delete` removes a value;
+`generate` makes a new one only for a secret without a value.
+
+`get`, `errors`, `templates` and `agent` (the project's own agent,
 created on first use) complete the projects set. A fleet (`fleet:<lead agent id>`) and a frontend artifact
 (`artifact:<artifact id>`) are read with `get` and `errors`; they have no project
 agent and are not stopped or started (an artifact changes through
