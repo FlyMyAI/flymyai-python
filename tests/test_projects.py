@@ -330,6 +330,17 @@ def test_share_and_copy_a_project_like_an_agent_by_id_or_link():
         "https://app.flymy.ai/projects/app%3Adenis%2Fpaint-arena?x=1",
         "https://app.flymy.ai/projects/app%253Adenis%252Fpaint-arena",
         "https://app.flymy.ai/projects/app%3Adenis%2F" + "a" * 170,
+        "https://app.flymy.ai/projects/denis/paint-arena?x=1",
+        "https://app.flymy.ai/projects/denis/paint-arena#agent",
+        "https://app.flymy.ai/projects/denis/paint-arena/agent",
+        "https://app.flymy.ai/projects/denis/../paint-arena",
+        "https://app.flymy.ai/projects/denis/%2e%2e",
+        "https://app.flymy.ai/projects/denis%2Fpaint-arena",
+        "https://app.flymy.ai.evil.example/projects/denis/paint-arena",
+        "https://app.flymy.ai@evil.example/projects/denis/paint-arena",
+        "http://app.flymy.ai/projects/denis/paint-arena",
+        "https://app.flymy.ai/projects/" + FLEET_ID[6:] + "/agent/run",
+        "https://app.flymy.ai/projects/" + FLEET_ID[6:] + "?x=1",
         "app:denis/paint-arena/agent",
         "site:01a0e5e1-d4b6-bbf5-0168-59a3c984c4fd",
         ARTIFACT_ID,
@@ -653,3 +664,52 @@ def test_project_creation_brief_and_model_on_both_clients():
         (None, fields),
         ("brief-async", {**fields, "plan_token": "plan-1"}),
     ]
+
+
+@pytest.mark.parametrize(
+    "link,project_id",
+    [
+        ("https://app.flymy.ai/projects/denis/paint-arena", APP_ID),
+        ("https://app.flymy.ai/projects/denis/paint-arena/", APP_ID),
+        ("https://app.flymy.ai/projects/" + FLEET_ID[6:], FLEET_ID),
+        ("https://app.flymy.ai/projects/" + FLEET_ID[6:] + "/", FLEET_ID),
+        (LINK, APP_ID),
+        ("https://app.flymy.ai/projects/app:denis/paint-arena", APP_ID),
+        ("https://app.flymy.ai/projects/fleet%3A" + FLEET_ID[6:], FLEET_ID),
+    ],
+)
+def test_current_and_legacy_share_links_use_the_same_routes_on_both_clients(
+    link, project_id
+):
+    seen = []
+
+    def handler(request):
+        body = json.loads(request.content) if request.content else None
+        seen.append((request.url.path, request.headers.get("Idempotency-Key"), body))
+        return response(COPIED if request.url.path.endswith("/copy/") else PROJECT)
+
+    client = client_with(handler)
+    client.projects.share(link, public=True)
+    client.projects.copy(link, idempotency_key="copy-current")
+    client._http.close()
+
+    async def run():
+        client = AsyncAgentClient(
+            api_key="personal-key", base_url="https://example.test"
+        )
+        await client._http.aclose()
+        client._http = httpx.AsyncClient(
+            base_url="https://example.test", transport=httpx.MockTransport(handler)
+        )
+        try:
+            await client.projects.share(link, public=True)
+            await client.projects.copy(link, idempotency_key="copy-current")
+        finally:
+            await client._http.aclose()
+
+    asyncio.run(run())
+    expected = [
+        (f"/api/v1/agents/projects/{project_id}/public/", None, {"public": True}),
+        (f"/api/v1/agents/projects/{project_id}/copy/", "copy-current", {}),
+    ]
+    assert seen == expected * 2
