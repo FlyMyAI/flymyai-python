@@ -3,6 +3,8 @@
 import asyncio
 import inspect
 import json
+import subprocess
+import sys
 import time
 from contextlib import contextmanager
 
@@ -712,3 +714,122 @@ async def test_account_switch_during_admission_cannot_deliver_stale_result(
             await client.model_proxy.get(OPERATION, contract_revision=REVISION)
         assert reread.value.code == "client_identity_changed"
     assert route.call_count == 1 and len(isolated_http.calls) == 1
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("case", ["positive", "negative", "aggregate"])
+def test_integer_input_bound_precedes_decimal_encoder(
+    mode, case, monkeypatch, isolated_http
+):
+    inputs = {"counter": 10**4096}
+    if case == "negative":
+        inputs["counter"] = -inputs["counter"]
+    elif case == "aggregate":
+        # Individual integers fit, but their total decimal text exceeds the
+        # input budget. Reject before building that JSON string.
+        inputs = {"counters": [10**3000] * 100}
+    with native_client(mode) as (_, call):
+
+        def forbidden_encoder(*args, **kwargs):
+            raise AssertionError("decimal JSON encoder reached before integer bound")
+
+        monkeypatch.setattr(json, "dumps", forbidden_encoder)
+        with pytest.raises(ValueError):
+            call("create", REVISION, inputs, idempotency_key=KEY)
+    assert len(isolated_http.calls) == 0
+
+
+@pytest.mark.parametrize("method", ["get", "create"])
+def test_integer_response_bound_without_interpreter_guard(method):
+    # Python3.8 has no interpreter digit guard. Disable the newer guard only in
+    # this bounded, isolated subprocess and feed a 5000-digit mock response.
+    # No process-global setting in the SDK or parent test process is changed.
+    program = r"""
+import json
+import sys
+import httpx
+import respx
+from flymyai.agents import AgentClient, ModelProxyError
+
+if hasattr(sys, "set_int_max_str_digits"):
+    sys.set_int_max_str_digits(0)
+method = sys.argv[1]
+revision = "a" * 64
+operation_id = "aaaaaaaa-1234-4321-abcd-123456789012"
+key = "original-integer-bound-intent"
+op = {"operation_id": operation_id, "prediction_id": operation_id,
+      "contract_revision": revision, "status": "succeeded", "stage": "submit",
+      "cancel_requested": False, "output": {"counter": "INTEGER_MARKER"}}
+payload = {"operation": op}
+if method == "create":
+    payload["created"] = True
+raw = json.dumps(payload).replace('"INTEGER_MARKER"', "9" * 5000).encode()
+assert len(raw) < 6000
+class Body(httpx.AsyncByteStream):
+    async def __aiter__(self):
+        yield raw
+
+origin = "https://integer-bound.invalid"
+suffix = "/api/v1/model-proxy/operations/" + (operation_id + "/" if method == "get" else "")
+with respx.mock(assert_all_mocked=True, assert_all_called=True) as router:
+    route = router.request("GET" if method == "get" else "POST", origin + suffix).mock(
+        return_value=httpx.Response(200 if method == "get" else 202, stream=Body()))
+    with AgentClient(api_key="synthetic-key", base_url=origin) as client:
+        try:
+            if method == "get":
+                client.model_proxy.get(operation_id, contract_revision=revision)
+            else:
+                client.model_proxy.create(revision, {}, idempotency_key=key)
+        except ModelProxyError as error:
+            assert error.code == "invalid_response"
+            assert error.contract_revision == revision
+            assert error.outcome_unknown is (method == "create")
+            if method == "get":
+                assert error.operation_id == operation_id
+            else:
+                assert error.idempotency_key == key
+        else:
+            raise AssertionError("oversized integer accepted without explicit SDK digit bound")
+    assert route.call_count == 1
+if hasattr(sys, "get_int_max_str_digits"):
+    assert sys.get_int_max_str_digits() == 0
+print("bounded integer response refused once; recovery identity retained")
+"""
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", program, method],
+        capture_output=True,
+        text=True,
+        timeout=10,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout[-1000:] + result.stderr[-2000:]
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("sign", [-1, 1])
+def test_integer_4096_digit_boundary_is_exact_both_directions(
+    mode, sign, isolated_http
+):
+    # Keep the interpreter's own stricter setting, if configured, untouched.
+    if hasattr(sys, "get_int_max_str_digits"):
+        configured = sys.get_int_max_str_digits()
+        if 0 < configured < 4096:
+            pytest.skip(
+                "interpreter digit setting is stricter than this boundary fixture"
+            )
+    value = sign * (10**4096 - 1)
+    native = {"counter": value, "above_2_to_53": 2**100 + 17, "zero": 0}
+    route = isolated_http.post(ROOT + "operations/").mock(
+        return_value=response(
+            {
+                "operation": operation(status="succeeded", output=native),
+                "created": True,
+            },
+            status=202,
+        )
+    )
+    with native_client(mode) as (_, call):
+        result = call("create", REVISION, native, idempotency_key=KEY)
+    assert result.operation.output == native
+    assert json.loads(route.calls[0].request.content)["inputs"] == native
+    assert route.call_count == 1

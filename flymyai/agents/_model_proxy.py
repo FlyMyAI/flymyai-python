@@ -7,6 +7,7 @@ revision; an unknown outcome never authorizes another key or automatic POST.
 
 The catalog does not imply that a particular model is published or ready. Native
 inputs/outputs are JSON, without text/media projection, defaults or price guesses.
+Integers remain exact up to 4096 decimal digits; larger values are refused.
 No OAuth, alternate payer, private worker-control or provider API is exposed.
 """
 
@@ -36,6 +37,9 @@ _ROOT = "/api/v1/model-proxy/"
 _MAX_INPUT_BYTES = 262_144
 _MAX_BODY_BYTES = 270_336
 _MAX_RESPONSE_BYTES = 2_097_152
+_MAX_INTEGER_DIGITS = 4096
+_INTEGER_LIMIT = 10**_MAX_INTEGER_DIGITS
+_MAX_INTEGER_BITS = _INTEGER_LIMIT.bit_length()
 _REQUEST_SECONDS = 10.0
 _MAX_WAIT_SECONDS = 7_200.0
 _MAX_POLLS = 900
@@ -136,10 +140,22 @@ def _json_shape(value: Any, byte_limit: int) -> None:
             pending.extend((child, depth + 1) for child in item)
         elif kind is str:
             characters += len(item)
+        elif kind is int:
+            # Check magnitude before ANY decimal conversion, including on
+            # Python3.8 without an interpreter-wide integer digit guard.
+            if (
+                item.bit_length() > _MAX_INTEGER_BITS
+                or item >= _INTEGER_LIMIT
+                or item <= -_INTEGER_LIMIT
+            ):
+                raise ValueError("JSON integer exceeds the 4096-digit bound")
+            # Count numeric text too: many individually valid integers must not
+            # build a huge JSON string before the aggregate byte check.
+            characters += len(str(item))
         elif kind is float:
             if not math.isfinite(item):
                 raise ValueError("JSON numbers must be finite")
-        elif item is not None and kind not in (bool, int):
+        elif item is not None and kind is not bool:
             raise ValueError("Native input must contain only JSON values")
         if characters > byte_limit or len(pending) > maximum:
             raise ValueError("JSON text exceeds the bounded contract")
@@ -170,11 +186,21 @@ def _decode(raw: bytes) -> Dict[str, Any]:
     def nonfinite(value):
         raise ValueError()
 
+    def bounded_integer(token):
+        # JSON supplies one decimal token, with at most a leading minus. Bound
+        # its length before int(), not after parsing or converting to float.
+        if len(token) - token.startswith("-") > _MAX_INTEGER_DIGITS:
+            raise ValueError()
+        return int(token)
+
     try:
         if len(raw) > _MAX_RESPONSE_BYTES:
             raise ValueError()
         value = json.loads(
-            raw.decode("utf-8"), object_pairs_hook=pairs, parse_constant=nonfinite
+            raw.decode("utf-8"),
+            object_pairs_hook=pairs,
+            parse_constant=nonfinite,
+            parse_int=bounded_integer,
         )
         _json_shape(value, _MAX_RESPONSE_BYTES)
         if type(value) is not dict:
