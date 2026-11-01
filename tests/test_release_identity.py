@@ -9,7 +9,7 @@ except ModuleNotFoundError:  # Python < 3.11: pytest installs the tomli backport
     import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_VERSION = "1.2.0rc7"
+EXPECTED_VERSION = "1.2.0rc22"
 
 
 def test_python_sdk_build_metadata_uses_one_unreleased_rc_identity():

@@ -807,12 +807,21 @@ servers, storage and budgets), a page published on its own, a fleet (a lead agen
 and the agents it starts) or a frontend artifact. A project is its config: creating, stopping and
 starting it are a plan and an apply of that config, and each leaves a release.
 
-Both `projects.plan` and `projects.create` accept optional `brief` and `model`.
+Both `projects.plan` and `projects.create` accept optional `brief`, `model` and `effort`.
 A brief queues the first task before the project agent's first model turn;
 creation returns `made.agent` and `made.chat`. Preview starts nothing. Send the
 same fields at both steps and reuse the idempotency key when retrying creation.
 The brief is limited to 65,536 UTF-8 bytes and needs a positive balance. Pick
 the model from the current agent model catalog.
+Pick `effort` from that model's current `effort_options`; omit it when the list
+is empty. The backend saves it before the first execution. Use the same fields
+in preview and creation. Omitted or `None` effort is left out of the request,
+preserving the existing default and request identity; the backend also treats
+blank text as default and normalizes explicit text to lowercase. An explicit
+level without a model binds the current project default model to the plan.
+Changing that selection requires a new plan, and a changed nonempty effort
+under the same creation key is refused. This option needs the backend effort
+contract before SDK publication.
 
 ```python
 from flymyai import AgentClient
@@ -898,7 +907,31 @@ while client.apps.status(release.release).status == "applying":
 
 `client.apps.files("me/paint-arena")` reads the applied template back; `plan` and
 `apply` also take `app="me/paint-arena"` with `overrides` to replace some files and
-keep the rest. `get`, `errors`, `templates` and `agent` (the project's own agent,
+keep the rest.
+
+An app's `secrets:` (a Stripe key, a session signing key) reach only its rented
+servers, as `env: {STRIPE_KEY: ${secrets.STRIPE_KEY}}`. Set the values with
+`client.apps.secrets`, before the first `plan` (it asks for the ones a server uses,
+`needs_secret`). A value goes in and never comes out: `list` shows names, `set`,
+`version`, who uses them and an authenticated `input_url`. `set` is for trusted
+owner code only: read the value from your own environment or secret store. Never
+put a secret into an assistant prompt, transcript or tool arguments. An assistant
+can give the owner `client.apps.secrets.list("me/shop").input_url` to enter it
+in the write-only web form, or call `generate` without anyone seeing the value.
+
+```python
+import os
+
+client.apps.secrets.set("me/shop", "STRIPE_KEY", os.environ["STRIPE_KEY"])
+client.apps.secrets.generate("me/shop", "SESSION_KEY")  # made once by the platform
+for secret in client.apps.secrets.list("me/shop").secrets:
+    print(secret.name, secret.set, secret.version, secret.used_by)
+```
+
+A new value reaches a server at its next start. `delete` removes a value;
+`generate` makes a new one only for a secret without a value.
+
+`get`, `errors`, `templates` and `agent` (the project's own agent,
 created on first use) complete the projects set. A fleet (`fleet:<lead agent id>`) and a frontend artifact
 (`artifact:<artifact id>`) are read with `get` and `errors`; they have no project
 agent and are not stopped or started (an artifact changes through

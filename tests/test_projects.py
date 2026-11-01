@@ -625,7 +625,11 @@ def test_the_async_client_renames_sets_the_budget_and_deletes():
     assert isinstance(deleted, ProjectEdit) and deleted.deleted == "archived"
 
 
-def test_project_creation_brief_and_model_on_both_clients():
+@pytest.mark.parametrize(
+    "effort_fields",
+    [{}, {"effort": None}, {"effort": "high"}, {"effort": " HIGH "}, {"effort": ""}],
+)
+def test_project_creation_brief_model_and_effort_on_both_clients(effort_fields):
     seen = []
 
     def handler(request):
@@ -643,7 +647,13 @@ def test_project_creation_brief_and_model_on_both_clients():
             )
         return response(PLAN)
 
-    fields = {"name": "notes-app", "brief": "Build my notes app", "model": "gpt-6-sol"}
+    fields = {
+        "name": "notes-app",
+        "brief": "Build my notes app",
+        "model": "claude-opus-5-5",
+        **effort_fields,
+    }
+    expected = {key: value for key, value in fields.items() if value is not None}
     client = client_with(handler)
     preview = client.projects.plan(**fields)
     made = client.projects.create(
@@ -670,10 +680,10 @@ def test_project_creation_brief_and_model_on_both_clients():
 
     asyncio.run(run())
     assert seen == [
-        (None, fields),
-        ("brief-sync", {**fields, "plan_token": "plan-1"}),
-        (None, fields),
-        ("brief-async", {**fields, "plan_token": "plan-1"}),
+        (None, expected),
+        ("brief-sync", {**expected, "plan_token": "plan-1"}),
+        (None, expected),
+        ("brief-async", {**expected, "plan_token": "plan-1"}),
     ]
 
 
