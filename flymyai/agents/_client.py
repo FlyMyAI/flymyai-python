@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import asyncio
+import math
 import os
+import time
 from typing import Any, Dict, Optional
 
 import httpx
@@ -12,6 +15,12 @@ from flymyai.agents._projects import AsyncProjects, Projects
 from flymyai.agents._mcp_sharing import McpTeams, AsyncMcpTeams
 from flymyai.agents._mcp_personal import McpShares, AsyncMcpShares
 from flymyai.agents._mcp_servers import McpServers, AsyncMcpServers
+from flymyai.agents._model_proxy import (
+    AsyncModelProxy,
+    ModelProxy,
+    ModelProxyError,
+    _MAX_RESPONSE_BYTES,
+)
 
 from flymyai.agents._resources import (
     AgentGroups,
@@ -271,6 +280,148 @@ def _raise_for_status(resp: httpx.Response) -> None:
     )
 
 
+def _model_proxy_budget(client, requested):
+    """Native calls cannot outlive the caller's configured request timeout."""
+    if client._http.is_closed:
+        raise ModelProxyError("client_closed")
+    values = [requested]
+    values.extend(
+        value for value in client._http.timeout.as_dict().values() if value is not None
+    )
+    if any(
+        isinstance(v, bool)
+        or not isinstance(v, (int, float))
+        or not math.isfinite(v)
+        or v <= 0
+        for v in values
+    ):
+        raise ModelProxyError("invalid_timeout")
+    return min(10.0, *values)
+
+
+async def _model_proxy_exchange(client, method, path, *, timeout, query, body, key):
+    """One streamed exchange, independent of legacy reconnect/retry clients.
+
+    The wall clock includes response headers and body, not just HTTPX's per-read
+    inactivity timeout. Async cancellation closes this exchange; it does not
+    cancel or resubmit a server operation. OS scheduling/cleanup can overrun the
+    deadline. No response body, credential or underlying exception is logged.
+    """
+    budget = _model_proxy_budget(client, timeout)
+    deadline = time.monotonic() + budget
+    dispatched = False
+    try:
+        base_url = client._http.base_url
+        if (
+            base_url.scheme not in {"http", "https"}
+            or base_url.userinfo
+            or base_url.query
+            or base_url.fragment
+        ):
+            raise ModelProxyError("invalid_base_url")
+        identity = (client._api_key, base_url)
+        headers = {
+            "X-API-KEY": identity[0],
+            "Accept": "application/json",
+            "Accept-Encoding": "identity",
+            "Content-Type": "application/json",
+        }
+        if key is not None:
+            headers["Idempotency-Key"] = key
+
+        async def exchange():
+            nonlocal dispatched
+            # No ambient proxy credentials, redirects, HTTP retries or pool
+            # reuse/reconnect after an ambiguous POST. This opt-in transport
+            # exists only for the new model_proxy resource.
+            async with httpx.AsyncClient(
+                base_url=base_url,
+                headers=headers,
+                timeout=budget,
+                follow_redirects=False,
+                trust_env=False,
+            ) as http:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ModelProxyError("request_timeout")
+                _model_proxy_budget(client, remaining)
+                if (client._api_key, client._http.base_url) != identity:
+                    raise ModelProxyError("client_identity_changed")
+                dispatched = True
+                async with http.stream(
+                    method,
+                    path,
+                    params=query,
+                    content=body,
+                    timeout=min(budget, remaining),
+                ) as response:
+                    status = response.status_code
+                    allowed = (
+                        {200, 202}
+                        if path.endswith("/operations/") and method == "POST"
+                        else {200}
+                    )
+                    if status not in allowed:
+                        raise ModelProxyError(
+                            "http_status",
+                            status_code=status,
+                            outcome_unknown=method == "POST",
+                        )
+                    if (
+                        response.headers.get("content-encoding", "identity").lower()
+                        != "identity"
+                    ):
+                        raise ModelProxyError(
+                            "encoded_response",
+                            status_code=status,
+                            outcome_unknown=method == "POST",
+                        )
+                    length = response.headers.get("content-length")
+                    if length is not None and (
+                        not length.isascii()
+                        or not length.isdigit()
+                        or len(length) > 10
+                        or int(length) > _MAX_RESPONSE_BYTES
+                    ):
+                        raise ModelProxyError(
+                            "response_too_large",
+                            status_code=status,
+                            outcome_unknown=method == "POST",
+                        )
+                    data = bytearray()
+                    async for chunk in response.aiter_raw():
+                        if len(chunk) > _MAX_RESPONSE_BYTES - len(data):
+                            raise ModelProxyError(
+                                "response_too_large",
+                                status_code=status,
+                                outcome_unknown=method == "POST",
+                            )
+                        data.extend(chunk)
+                    return status, bytes(data)
+
+        try:
+            result = await asyncio.wait_for(exchange(), timeout=budget)
+            if time.monotonic() > deadline:
+                raise ModelProxyError(
+                    "request_timeout", outcome_unknown=dispatched and method == "POST"
+                )
+            return result
+        except (asyncio.TimeoutError, httpx.TimeoutException):
+            raise ModelProxyError(
+                "request_timeout", outcome_unknown=dispatched and method == "POST"
+            ) from None
+        except httpx.HTTPError:
+            raise ModelProxyError(
+                "transport_error", outcome_unknown=dispatched and method == "POST"
+            ) from None
+    except ModelProxyError:
+        raise
+    except (ValueError, TypeError, UnicodeError, OSError):
+        raise ModelProxyError(
+            "transport_configuration", outcome_unknown=dispatched and method == "POST"
+        ) from None
+
+
 class SyncAgentClient:
     """Synchronous client for the FlyMyAI Agents API.
 
@@ -324,6 +475,23 @@ class SyncAgentClient:
         self.triggers_v1 = TriggersV1(self)
         self.projects = Projects(self)
         self.apps = Apps(self)
+        self.model_proxy = ModelProxy(self)
+
+    def _model_proxy_request(
+        self, method, path, *, timeout, query=None, body=None, key=None
+    ):
+        _model_proxy_budget(self, timeout)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise ModelProxyError("use_async_client")
+        return asyncio.run(
+            _model_proxy_exchange(
+                self, method, path, timeout=timeout, query=query, body=body, key=key
+            )
+        )
 
     def _request(
         self,
@@ -410,6 +578,14 @@ class AsyncAgentClient:
         self.triggers_v1 = AsyncTriggersV1(self)
         self.projects = AsyncProjects(self)
         self.apps = AsyncApps(self)
+        self.model_proxy = AsyncModelProxy(self)
+
+    async def _model_proxy_request(
+        self, method, path, *, timeout, query=None, body=None, key=None
+    ):
+        return await _model_proxy_exchange(
+            self, method, path, timeout=timeout, query=query, body=body, key=key
+        )
 
     async def _request(
         self,

@@ -707,3 +707,49 @@ class SchemaSuggestion(BaseModel):
     output_schema: Dict[str, Any]
     input_description: Optional[str] = None
     output_description: Optional[str] = None
+
+
+class _ModelProxyMetadata(BaseModel):
+    # Unknown envelope metadata is not authority. Native artifact/output JSON is
+    # retained separately, without coercing integers, tool calls or usage.
+    model_config = ConfigDict(strict=True, frozen=True, hide_input_in_errors=True)
+
+
+class ModelProxySummary(_ModelProxyMetadata):
+    contract_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    route_key: str = Field(min_length=1, max_length=200)
+    model_version: str = Field(min_length=1, max_length=200)
+    operation: str = Field(min_length=1, max_length=48)
+    profile: str = Field(min_length=1, max_length=200)
+
+
+class ModelProxyCatalogPage(_ModelProxyMetadata):
+    """One page of the current catalog, not a model availability guarantee."""
+
+    release: Optional[str]
+    items: List[ModelProxySummary]
+    next_cursor: Optional[str] = Field(max_length=2048)
+
+
+class ModelProxyContract(_ModelProxyMetadata):
+    contract_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    artifact: Dict[str, Any] = Field(repr=False)
+    execution_constraints: Dict[str, Any] = Field(repr=False)
+
+
+class ModelProxyOperation(_ModelProxyMetadata):
+    """Durable identity plus unprojected native JSON; UNKNOWN is not success."""
+
+    operation_id: str
+    prediction_id: str
+    status: str
+    stage: str
+    contract_revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+    cancel_requested: bool
+    output: Any = Field(default=None, repr=False)
+    error: Optional[Dict[str, Any]] = Field(default=None, repr=False)
+
+
+class ModelProxyCreated(_ModelProxyMetadata):
+    operation: ModelProxyOperation
+    created: bool
