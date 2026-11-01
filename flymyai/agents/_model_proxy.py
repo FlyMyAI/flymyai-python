@@ -101,7 +101,8 @@ def _key(value: str) -> str:
         or not _KEY.fullmatch(value)
     ):
         raise ValueError(
-            "idempotency_key must be caller-owned printable ASCII (1-255), without edge spaces"
+            "idempotency_key must be caller-owned printable ASCII (1-255), without edge"
+            " spaces"
         )
     return value
 

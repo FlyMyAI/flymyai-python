@@ -148,26 +148,22 @@ def native_output():
         "id": "synthetic-completion",
         "object": "chat.completion",
         "model": "synthetic-native-model",
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": None,
-                    "reasoning": "пример 🐈",
-                    "tool_calls": [
-                        {
-                            "id": "call-1",
-                            "function": {
-                                "name": "lookup",
-                                "arguments": '{"x":9007199254740993}',
-                            },
-                        }
-                    ],
-                },
-                "finish_reason": "tool_calls",
-            }
-        ],
+        "choices": [{
+            "index": 0,
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "reasoning": "пример 🐈",
+                "tool_calls": [{
+                    "id": "call-1",
+                    "function": {
+                        "name": "lookup",
+                        "arguments": '{"x":9007199254740993}',
+                    },
+                }],
+            },
+            "finish_reason": "tool_calls",
+        }],
         "usage": {
             "prompt_tokens": 12,
             "completion_tokens": 7,
