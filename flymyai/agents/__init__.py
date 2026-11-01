@@ -296,3 +296,23 @@ __all__ += [
 from flymyai.agents._saved_versions import SavedVersionPage, SavedVersionSummary
 
 __all__ += ["SavedVersionPage", "SavedVersionSummary"]
+
+from flymyai.agents._model_proxy import AsyncModelProxy, ModelProxy, ModelProxyError
+from flymyai.agents._types import (
+    ModelProxyCatalogPage,
+    ModelProxyContract,
+    ModelProxyCreated,
+    ModelProxyOperation,
+    ModelProxySummary,
+)
+
+__all__ += [
+    "AsyncModelProxy",
+    "ModelProxy",
+    "ModelProxyCatalogPage",
+    "ModelProxyContract",
+    "ModelProxyCreated",
+    "ModelProxyError",
+    "ModelProxyOperation",
+    "ModelProxySummary",
+]
