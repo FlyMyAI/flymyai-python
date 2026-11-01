@@ -22,7 +22,8 @@ permissions:
 
 jobs:
   contracts:
-    runs-on: ubuntu-latest
+    # Python 3.8 stays supported, and ubuntu-latest (26.04) no longer provides it.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     strategy:
       matrix:
