@@ -543,6 +543,75 @@ logical execution. This is an intentional compatibility break for keyless
 effect calls because a lost response must not create a second execution that
 repeats external writes.
 
+## Native models: MiniMax-H3
+
+`client.model_proxy` runs native models on the agents host. MiniMax-H3 makes one video with
+stereo audio from a prompt and your own files. It is not the older
+`flymyai/minimax-h3-t2v` and `flymyai/minimax-h3-i2v` endpoints, and it does not run from text
+alone. A model is usable only after the backend publishes its route.
+
+```python
+from flymyai.agents import AgentClient
+
+with AgentClient(api_key="fly-secret-key") as client:
+    # Find the model, by its profile or with endpoint_id="owner/name".
+    page = client.model_proxy.catalog(limit=100)
+    h3 = next(row for row in page.items if row.profile == "broker.h3-ref2va.v1")
+
+    # Store your file. This takes a path, bytes or a stream.
+    photo = client.model_proxy.upload_file(
+        "photo.png", idempotency_key="photo-upload-1"
+    )
+
+    # Save the key, revision and inputs before create(), and the operation id after it.
+    created = client.model_proxy.create(
+        h3.contract_revision,
+        {
+            "prompt": "the photo comes alive",
+            "conditions": [{"type": "image", "artifact": photo.artifact}],
+            "duration_seconds": 5,
+            "aspect_ratio": "9:16",
+        },
+        idempotency_key="photo-video-1",
+    )
+
+    result = client.model_proxy.wait(
+        created.operation.operation_id,
+        contract_revision=h3.contract_revision,
+        timeout=3600,
+        poll_interval=5,
+        max_polls=720,
+        on_update=lambda operation: print(operation.status, operation.reason),
+    )
+    if result.status == "succeeded":
+        print(result.output["video"]["url"])
+```
+
+**Input.** `{prompt, conditions, duration_seconds?, aspect_ratio?, seed?}`. `prompt` is 1 to
+16000 characters. `conditions` is 1 to 12 `{"type": "image" | "audio", "artifact": ...}` in
+order, at most 9 images and 3 audio. `duration_seconds` is 5 or 10, `aspect_ratio` is `16:9`,
+`9:16`, `1:1`, `4:3`, `3:4` or `21:9`, and `seed` is 0 to 2147483647. The SDK sends your input
+whole: the bounds are the backend's, and a refusal names its code in
+`ModelProxyError.refusal_code`, such as `h3_references`. That request started nothing.
+
+**Files.** `artifact` is the exact reference of your own file. Pass it unchanged. A file id or
+URL is refused, and it is `None` when no reference can be built. No agent is needed. After a
+lost reply, call `upload_file` again with the same `idempotency_key` and file: it returns the
+same reference. `media_type` decides the kind of the reference, so it must be the file's real
+`image/` or `audio/` type; it defaults from the filename. One upload holds at most 96 MiB.
+
+**Waiting.** An operation with no capacity stays `queued`: `waiting_for_capacity` is true,
+`error_code` is `h3_capacity_not_ready`, `h3_model_busy`, `ds_capacity_not_ready` or
+`ds_model_busy`, and `reason` says it plainly. This is the model starting, not a failure. A cold
+start takes about 15 minutes for H3 and up to 50 for DeepSeek, and nothing is sent or charged
+meanwhile. Call `wait` or `get` on the same operation id and never call `create` for it again.
+A `wait` that ends earlier raises `ModelProxyError` with the same `operation_id` and what it
+last read in `last_status`, `waiting_code` and `reason`.
+
+**The ends.** `rejected` with one of those codes or `proxy_deadline` means the model did not
+start in time: the wait ran out with no charge. `failed` with `model_lease_deleted` or
+`model_http_<status>` means no result and no charge. `reason` says so on each.
+
 ## Neural Network Inference
 
 Run any model on the platform with `flymyai.async_run` (async) or `flymyai.run` (sync).

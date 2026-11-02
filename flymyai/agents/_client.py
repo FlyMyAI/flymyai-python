@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import os
+import re
 import time
 from typing import Any, Dict, Optional
 
@@ -20,6 +22,7 @@ from flymyai.agents._model_proxy import (
     ModelProxy,
     ModelProxyError,
     _MAX_RESPONSE_BYTES,
+    _UPLOAD_SECONDS,
 )
 
 from flymyai.agents._resources import (
@@ -49,6 +52,8 @@ _DEFAULT_BASE_URL = "https://backend.flymy.ai"
 # agents too.
 _AGENTS_BASE_URL_ENV = "FLYMYAI_AGENTS_BASE_URL"
 _DEFAULT_TIMEOUT = 60.0
+_REFUSAL_BYTES = 4096
+_REFUSAL_CODE = re.compile(r"[A-Za-z][A-Za-z0-9_]{0,127}\Z")
 
 
 class FlyMyAIAgentError(Exception):
@@ -280,7 +285,7 @@ def _raise_for_status(resp: httpx.Response) -> None:
     )
 
 
-def _model_proxy_budget(client, requested):
+def _model_proxy_budget(client, requested, ceiling=10.0):
     """Native calls cannot outlive the caller's configured request timeout."""
     if client._http.is_closed:
         raise ModelProxyError("client_closed")
@@ -296,18 +301,47 @@ def _model_proxy_budget(client, requested):
         for v in values
     ):
         raise ModelProxyError("invalid_timeout")
-    return min(10.0, *values)
+    return min(ceiling, *values)
 
 
-async def _model_proxy_exchange(client, method, path, *, timeout, query, body, key):
+async def _refusal_code(response):
+    """The backend's own fixed code of a refused request. Only the code crosses."""
+    status = response.status_code
+    if (
+        not 400 <= status < 500
+        or status in {401, 408}
+        or response.headers.get("content-type", "").split(";")[0].strip().lower()
+        != "application/json"
+    ):
+        return None
+    data = bytearray()
+    async for chunk in response.aiter_raw():
+        data.extend(chunk[: _REFUSAL_BYTES - len(data)])
+        if len(data) >= _REFUSAL_BYTES:
+            break
+    try:
+        body = json.loads(bytes(data))
+        # {code} on the model routes, {error: {code}} on the file route.
+        code = body["error"]["code"] if "error" in body else body.get("code")
+    except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
+        return None
+    return code if isinstance(code, str) and _REFUSAL_CODE.fullmatch(code) else None
+
+
+async def _model_proxy_exchange(
+    client, method, path, *, timeout, query, body, key, form=None
+):
     """One streamed exchange, independent of legacy reconnect/retry clients.
 
     The wall clock includes response headers and body, not just HTTPX's per-read
     inactivity timeout. Async cancellation closes this exchange; it does not
     cancel or resubmit a server operation. OS scheduling/cleanup can overrun the
     deadline. No response body, credential or underlying exception is logged.
+    A ``form`` (multipart ``files`` and ``data``) replaces the JSON body and may take
+    longer than a JSON exchange.
     """
-    budget = _model_proxy_budget(client, timeout)
+    ceiling = 10.0 if form is None else _UPLOAD_SECONDS
+    budget = _model_proxy_budget(client, timeout, ceiling)
     deadline = time.monotonic() + budget
     dispatched = False
     try:
@@ -324,8 +358,9 @@ async def _model_proxy_exchange(client, method, path, *, timeout, query, body, k
             "X-API-KEY": identity[0],
             "Accept": "application/json",
             "Accept-Encoding": "identity",
-            "Content-Type": "application/json",
         }
+        if form is None:
+            headers["Content-Type"] = "application/json"
         if key is not None:
             headers["Idempotency-Key"] = key
 
@@ -354,18 +389,26 @@ async def _model_proxy_exchange(client, method, path, *, timeout, query, body, k
                     params=query,
                     content=body,
                     timeout=min(budget, remaining),
+                    **(form or {}),
                 ) as response:
                     status = response.status_code
                     allowed = (
-                        {200, 202}
-                        if path.endswith("/operations/") and method == "POST"
-                        else {200}
+                        {200, 201}
+                        if form is not None
+                        else (
+                            {200, 202}
+                            if path.endswith("/operations/") and method == "POST"
+                            else {200}
+                        )
                     )
                     if status not in allowed:
+                        # A named refusal proves this request started nothing.
+                        refusal = await _refusal_code(response)
                         raise ModelProxyError(
                             "http_status",
                             status_code=status,
-                            outcome_unknown=method == "POST",
+                            outcome_unknown=method == "POST" and refusal is None,
+                            refusal_code=refusal,
                         )
                     if (
                         response.headers.get("content-encoding", "identity").lower()
@@ -478,7 +521,7 @@ class SyncAgentClient:
         self.model_proxy = ModelProxy(self)
 
     def _model_proxy_request(
-        self, method, path, *, timeout, query=None, body=None, key=None
+        self, method, path, *, timeout, query=None, body=None, key=None, form=None
     ):
         _model_proxy_budget(self, timeout)
         try:
@@ -489,7 +532,14 @@ class SyncAgentClient:
             raise ModelProxyError("use_async_client")
         return asyncio.run(
             _model_proxy_exchange(
-                self, method, path, timeout=timeout, query=query, body=body, key=key
+                self,
+                method,
+                path,
+                timeout=timeout,
+                query=query,
+                body=body,
+                key=key,
+                form=form,
             )
         )
 
@@ -581,10 +631,17 @@ class AsyncAgentClient:
         self.model_proxy = AsyncModelProxy(self)
 
     async def _model_proxy_request(
-        self, method, path, *, timeout, query=None, body=None, key=None
+        self, method, path, *, timeout, query=None, body=None, key=None, form=None
     ):
         return await _model_proxy_exchange(
-            self, method, path, timeout=timeout, query=query, body=body, key=key
+            self,
+            method,
+            path,
+            timeout=timeout,
+            query=query,
+            body=body,
+            key=key,
+            form=form,
         )
 
     async def _request(
