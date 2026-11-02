@@ -829,3 +829,440 @@ def test_integer_4096_digit_boundary_is_exact_both_directions(
     assert result.operation.output == native
     assert json.loads(route.calls[0].request.content)["inputs"] == native
     assert route.call_count == 1
+
+
+def queued(code):
+    return response({"operation": operation(status="queued", error={"code": code})})
+
+
+COLD_STARTS = [
+    ("h3_capacity_not_ready", "MiniMax-H3 is starting", "about 15 minutes"),
+    ("h3_model_busy", "MiniMax-H3 is busy", "about 15 minutes"),
+    ("ds_capacity_not_ready", "DeepSeek is starting", "up to 50 minutes"),
+    ("ds_model_busy", "DeepSeek is busy", "up to 50 minutes"),
+]
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("code,state,cold_start", COLD_STARTS)
+def test_queued_operation_says_plainly_why_it_waits(
+    mode, code, state, cold_start, isolated_http
+):
+    isolated_http.get(ROOT + "operations/" + OPERATION + "/").mock(
+        side_effect=lambda request: queued(code)
+    )
+    with native_client(mode) as (_, call):
+        result = call("get", OPERATION, contract_revision=REVISION)
+    assert result.status == "queued" and result.waiting_for_capacity is True
+    assert result.error_code == code and result.error == {"code": code}
+    assert state in result.reason and cold_start in result.reason
+    assert "not a failure" in result.reason
+    assert "never call create()" in result.reason
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("code,state,cold_start", COLD_STARTS)
+@pytest.mark.parametrize("case", ["deadline", "max-polls", "stopped"])
+def test_wait_ending_during_a_cold_start_keeps_the_operation_and_its_reason(
+    mode, code, state, cold_start, case, isolated_http
+):
+    route = isolated_http.get(ROOT + "operations/" + OPERATION + "/").mock(
+        side_effect=lambda request: queued(code)
+    )
+    seen = []
+    kwargs = {"timeout": 5, "poll_interval": 0.05, "max_polls": 3}
+    if case == "deadline":
+        # Long enough for the first read on a busy runner; more polls than time.
+        kwargs.update(timeout=1.5, poll_interval=0.2, max_polls=50)
+    elif case == "stopped":
+        kwargs["stopped"] = lambda: bool(seen)
+    with native_client(mode) as (_, call):
+        with pytest.raises(ModelProxyError) as raised:
+            call(
+                "wait",
+                OPERATION,
+                contract_revision=REVISION,
+                on_update=seen.append,
+                **kwargs,
+            )
+    error = raised.value
+    assert (
+        error.code
+        == {
+            "deadline": "wait_timeout",
+            "max-polls": "poll_limit",
+            "stopped": "wait_aborted",
+        }[case]
+    )
+    assert error.operation_id == OPERATION and error.contract_revision == REVISION
+    assert error.outcome_unknown is False
+    assert error.last_status == "queued" and error.waiting_code == code
+    assert state in error.reason and cold_start in error.reason
+    assert state in str(error) and cold_start in str(error)
+    assert OPERATION not in str(error) and OPERATION not in repr(error)
+    assert route.call_count >= 1
+    assert all(recorded.request.method == "GET" for recorded in isolated_http.calls)
+    assert [item.error_code for item in seen] == [code], "reported once per change"
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_wait_reports_each_change_on_the_same_operation(mode, isolated_http):
+    output = {"native": {"id": "job"}, "video": {"url": "https://storage.invalid/v"}}
+    answers = [
+        queued("h3_capacity_not_ready"),
+        queued("h3_capacity_not_ready"),
+        queued("h3_model_busy"),
+        response({"operation": operation(status="running", stage="poll")}),
+        response({"operation": operation(status="file_pending", stage="files")}),
+        response({"operation": operation(status="succeeded", output=output)}),
+    ]
+    route = isolated_http.get(ROOT + "operations/" + OPERATION + "/").mock(
+        side_effect=answers
+    )
+    seen = []
+    with native_client(mode) as (_, call):
+        result = call(
+            "wait",
+            OPERATION,
+            contract_revision=REVISION,
+            poll_interval=0.05,
+            on_update=lambda item: seen.append((item.status, item.error_code)),
+        )
+    assert result.status == "succeeded" and result.output == output
+    assert result.reason is None
+    assert seen == [
+        ("queued", "h3_capacity_not_ready"),
+        ("queued", "h3_model_busy"),
+        ("running", None),
+        ("file_pending", None),
+        ("succeeded", None),
+    ]
+    assert route.call_count == len(answers) and len(isolated_http.calls) == len(answers)
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize(
+    "status,code,words",
+    [
+        ("rejected", "h3_capacity_not_ready", "ran out"),
+        ("rejected", "h3_model_busy", "ran out"),
+        ("rejected", "ds_capacity_not_ready", "ran out"),
+        ("rejected", "ds_model_busy", "ran out"),
+        ("rejected", "proxy_deadline", "did not start in time"),
+        ("failed", "model_lease_deleted", "no result and no charge"),
+        ("failed", "model_http_500", "HTTP 500. There is no result and no charge"),
+        ("unknown", "lost_response", "no automatic resubmission"),
+    ],
+)
+def test_ends_of_a_wait_say_what_happened_to_the_result_and_the_money(
+    mode, status, code, words, isolated_http
+):
+    route = isolated_http.get(ROOT + "operations/" + OPERATION + "/").mock(
+        return_value=response(
+            {"operation": operation(status=status, error={"code": code})}
+        )
+    )
+    with native_client(mode) as (_, call):
+        result = call("wait", OPERATION, contract_revision=REVISION)
+    assert result.status == status and result.error_code == code
+    assert result.waiting_for_capacity is False
+    assert words in result.reason
+    if status == "rejected":
+        assert "nothing was charged" in result.reason
+    assert route.call_count == 1 and len(isolated_http.calls) == 1
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize(
+    "status,code",
+    [
+        ("failed", "other_reason"),
+        ("failed", "proxy_deadline"),
+        ("rejected", "other_reason"),
+        ("cancelled", "h3_capacity_not_ready"),
+    ],
+)
+def test_other_ends_claim_nothing_about_the_money(mode, status, code, isolated_http):
+    isolated_http.get(ROOT + "operations/" + OPERATION + "/").mock(
+        return_value=response(
+            {"operation": operation(status=status, error={"code": code})}
+        )
+    )
+    with native_client(mode) as (_, call):
+        result = call("get", OPERATION, contract_revision=REVISION)
+    assert result.reason is None and result.waiting_for_capacity is False
+
+
+def test_plain_unfinished_operation_is_not_called_a_capacity_wait(isolated_http):
+    isolated_http.get(ROOT + "operations/" + OPERATION + "/").mock(
+        return_value=response({"operation": operation(status="queued")})
+    )
+    with native_client("sync") as (_, call):
+        result = call("get", OPERATION, contract_revision=REVISION)
+    assert result.waiting_for_capacity is False and result.error_code is None
+    assert result.reason.startswith("Not finished yet.")
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize(
+    "failure",
+    [
+        httpx.Response(503, stream=Body(b"synthetic-private-error-body")),
+        httpx.Response(429, stream=Body(b"{}")),
+        httpx.ReadTimeout("private transport data"),
+        httpx.ConnectError("private transport data"),
+    ],
+)
+def test_one_lost_read_does_not_end_a_wait_once_a_state_is_known(
+    mode, failure, isolated_http
+):
+    route = isolated_http.get(ROOT + "operations/" + OPERATION + "/").mock(
+        side_effect=[
+            queued("h3_capacity_not_ready"),
+            failure,
+            response({"operation": operation(status="unknown")}),
+        ]
+    )
+    with native_client(mode) as (_, call):
+        result = call("wait", OPERATION, contract_revision=REVISION, poll_interval=0.05)
+    assert result.status == "unknown"
+    assert route.call_count == 3 and len(isolated_http.calls) == 3
+    assert all(recorded.request.method == "GET" for recorded in isolated_http.calls)
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_only_lost_reads_end_a_wait_with_the_last_state(mode, isolated_http):
+    route = isolated_http.get(ROOT + "operations/" + OPERATION + "/").mock(
+        side_effect=[queued("h3_model_busy")]
+        + [httpx.Response(503, stream=Body(b"{}")) for _ in range(5)]
+    )
+    with native_client(mode) as (_, call):
+        with pytest.raises(ModelProxyError) as raised:
+            call(
+                "wait",
+                OPERATION,
+                contract_revision=REVISION,
+                poll_interval=0.05,
+                max_polls=3,
+            )
+    assert raised.value.code == "poll_limit"
+    assert raised.value.waiting_code == "h3_model_busy"
+    assert route.call_count == 3
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize(
+    "answers,code",
+    [
+        ([httpx.Response(503, stream=Body(b"{}"))], "http_status"),
+        ([httpx.ReadTimeout("private transport data")], "transport_error"),
+        (
+            [
+                queued("h3_model_busy"),
+                httpx.Response(
+                    404,
+                    stream=Body(b'{"code":"proxy_operation_missing"}'),
+                    headers={"Content-Type": "application/json"},
+                ),
+            ],
+            "http_status",
+        ),
+        ([queued("h3_model_busy"), httpx.Response(200, stream=Body(b"[]"))], None),
+    ],
+)
+def test_a_wait_stops_when_nothing_is_known_or_the_answer_is_final(
+    mode, answers, code, isolated_http
+):
+    route = isolated_http.get(ROOT + "operations/" + OPERATION + "/").mock(
+        side_effect=answers
+    )
+    with native_client(mode) as (_, call):
+        with pytest.raises(ModelProxyError) as raised:
+            call("wait", OPERATION, contract_revision=REVISION, poll_interval=0.05)
+    error = raised.value
+    if code is not None and isinstance(answers[0], httpx.ReadTimeout):
+        assert error.code in {"transport_error", "request_timeout"}
+    elif code is not None:
+        assert error.code == code
+    else:
+        assert error.code == "invalid_response"
+    assert error.operation_id == OPERATION and error.outcome_unknown is False
+    assert route.call_count == len(answers)
+
+
+def h3_reference(index, kind):
+    return {
+        "schema": "flymyai.artifact/v1",
+        "id": "00000000-0000-4000-8000-" + str(index).zfill(12),
+        "version": {
+            "id": "00000000-0000-4000-9000-" + str(index).zfill(12),
+            "revision": 1,
+            "size": 2**53 + 1,
+            "sha256": "d" * 64,
+            "mime": "image/png" if kind == "image" else "audio/wav",
+        },
+        "kind": kind,
+        "name": "ref " + str(index),
+        "workspace": None,
+        "relations": {},
+        "legacy": {"agent_file_id": 2**53 + 1, "external_id": None},
+    }
+
+
+def h3_inputs(images, audio):
+    kinds = ["image"] * images + ["audio"] * audio
+    return {
+        "prompt": "a chef plates a dish",
+        "conditions": [
+            {"type": kind, "artifact": h3_reference(index, kind)}
+            for index, kind in enumerate(kinds)
+        ],
+        "duration_seconds": 5,
+        "aspect_ratio": "21:9",
+        "seed": 2147483647,
+    }
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_the_largest_h3_input_is_sent_whole_and_in_order(mode, isolated_http):
+    inputs = h3_inputs(9, 3)
+    route = isolated_http.post(ROOT + "operations/").mock(
+        return_value=response({"operation": operation(), "created": True}, status=202)
+    )
+    with native_client(mode) as (_, call):
+        call("create", REVISION, inputs, idempotency_key=KEY)
+    sent = json.loads(route.calls[0].request.content)["inputs"]
+    assert sent == inputs and len(sent["conditions"]) == 12
+    assert [item["type"] for item in sent["conditions"]] == ["image"] * 9 + [
+        "audio"
+    ] * 3
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize("images,audio", [(10, 0), (0, 4), (12, 1)])
+def test_bounds_stay_the_backends_and_its_refusal_is_named(
+    mode, images, audio, isolated_http
+):
+    inputs = h3_inputs(images, audio)
+    stream = Body(
+        b'{"code":"h3_references","detail":"synthetic-private-error-body"}',
+    )
+    route = isolated_http.post(ROOT + "operations/").mock(
+        return_value=httpx.Response(
+            400, stream=stream, headers={"Content-Type": "application/json"}
+        )
+    )
+    with native_client(mode) as (_, call):
+        with pytest.raises(ModelProxyError) as raised:
+            call("create", REVISION, inputs, idempotency_key=KEY)
+    error = raised.value
+    assert error.code == "http_status" and error.status_code == 400
+    assert error.refusal_code == "h3_references"
+    assert error.outcome_unknown is False, "a named refusal started nothing"
+    assert "h3_references" in str(error)
+    assert error.contract_revision == REVISION and error.idempotency_key == KEY
+    assert route.call_count == 1 and stream.closed
+    assert json.loads(route.calls[0].request.content)["inputs"] == inputs
+    for private in (KEY, API_KEY, "synthetic-private-error-body"):
+        assert private not in repr(error) and private not in str(error)
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize(
+    "status,code",
+    [
+        (403, "h3_input_authority"),
+        (403, "h3_team_unavailable"),
+        (409, "idempotency_key_reused"),
+        (429, "proxy_pending_limit"),
+    ],
+)
+def test_named_refusals_of_an_admission_are_known(mode, status, code, isolated_http):
+    route = isolated_http.post(ROOT + "operations/").mock(
+        return_value=httpx.Response(
+            status,
+            stream=Body(json.dumps({"code": code}).encode()),
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+    )
+    with native_client(mode) as (_, call):
+        with pytest.raises(ModelProxyError) as raised:
+            call("create", REVISION, {}, idempotency_key=KEY)
+    assert raised.value.refusal_code == code
+    assert raised.value.outcome_unknown is False
+    assert route.call_count == 1
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize(
+    "status,body,content_type",
+    [
+        (400, b'{"code":"Has Spaces And /private/path"}', "application/json"),
+        (400, b'{"code":7}', "application/json"),
+        (400, b"[]", "application/json"),
+        (400, b"not json", "application/json"),
+        (400, b'{"code":"h3_references"}', "text/plain"),
+        (401, b'{"code":"token_not_valid"}', "application/json"),
+        (408, b'{"code":"proxy_timeout"}', "application/json"),
+        (503, b'{"code":"proxy_signing_key"}', "application/json"),
+        (400, b" " * 4096 + b'{"code":"h3_references"}', "application/json"),
+    ],
+)
+def test_an_answer_naming_no_fixed_code_stays_unknown(
+    mode, status, body, content_type, isolated_http
+):
+    route = isolated_http.post(ROOT + "operations/").mock(
+        return_value=httpx.Response(
+            status, stream=Body(body), headers={"Content-Type": content_type}
+        )
+    )
+    with native_client(mode) as (_, call):
+        with pytest.raises(ModelProxyError) as raised:
+            call("create", REVISION, {}, idempotency_key=KEY)
+    assert raised.value.code == "http_status"
+    assert raised.value.refusal_code is None
+    assert raised.value.outcome_unknown is True
+    assert "private" not in str(raised.value) and route.call_count == 1
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+def test_catalog_selects_one_exact_model(mode, isolated_http):
+    summary = {
+        "contract_revision": REVISION,
+        "route_key": "broker/h3",
+        "model_version": "digest",
+        "operation": "generate",
+        "profile": "broker.h3-ref2va.v1",
+        "project": {"id": "9007199254740993", "owner": "flymyai", "name": "h3"},
+    }
+    route = isolated_http.get(ROOT + "catalog/").mock(
+        return_value=response({
+            "release": OPERATION,
+            "items": [summary],
+            "next_cursor": None,
+            "selection": {
+                "project": summary["project"],
+                "native_model_proxy": True,
+            },
+        })
+    )
+    with native_client(mode) as (_, call):
+        page = call("catalog", limit=2, endpoint_id="flymyai/h3")
+    assert dict(route.calls[0].request.url.params) == {
+        "limit": "2",
+        "prefix": "",
+        "endpoint_id": "flymyai/h3",
+    }
+    assert page.items[0].contract_revision == REVISION
+    assert page.items[0].profile == "broker.h3-ref2va.v1"
+
+
+@pytest.mark.parametrize("mode", ["sync", "async"])
+@pytest.mark.parametrize(
+    "endpoint_id", ["", "no-slash", "a/b/c", "/name", "owner/", 7, "o" * 151 + "/n"]
+)
+def test_catalog_refuses_a_bad_endpoint_before_http(mode, endpoint_id, isolated_http):
+    with native_client(mode) as (_, call):
+        with pytest.raises(ValueError):
+            call("catalog", endpoint_id=endpoint_id)
+    assert len(isolated_http.calls) == 0

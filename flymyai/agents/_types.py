@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
@@ -709,6 +710,66 @@ class SchemaSuggestion(BaseModel):
     output_description: Optional[str] = None
 
 
+# Waiting and no-result codes of the native wire contract. An operation with no
+# capacity keeps its place in the queue: it is the model starting, not a failure.
+_WAITING_MODELS = {
+    "h3": ("MiniMax-H3", "about 15 minutes"),
+    "ds": ("DeepSeek", "up to 50 minutes"),
+}
+_CAPACITY_CODE = re.compile(r"(h3|ds)_(capacity_not_ready|model_busy)\Z")
+_MODEL_HTTP_CODE = re.compile(r"model_http_([0-9]{3})\Z")
+_KEEP_READING = (
+    "Keep calling get() or wait() with this same operation_id; never call create()"
+    " for it again."
+)
+
+
+def _operation_reason(status: str, code: Optional[str]) -> Optional[str]:
+    capacity = _CAPACITY_CODE.match(code or "")
+    if capacity is not None and status == "queued":
+        name, cold_start = _WAITING_MODELS[capacity.group(1)]
+        state = (
+            f"{name} is busy with another job and this operation keeps its place. If"
+            f" the model has to start again, a cold start takes {cold_start}."
+            if capacity.group(2) == "model_busy"
+            else (
+                f"{name} is starting: no capacity is ready yet. A cold start takes"
+                f" {cold_start}."
+            )
+        )
+        return (
+            f"{state} This is waiting, not a failure: nothing has been sent and"
+            f" nothing is charged yet. {_KEEP_READING}"
+        )
+    if status == "rejected" and (capacity is not None or code == "proxy_deadline"):
+        ran_out = (
+            "The model did not start in time: the wait ran out"
+            if capacity is None
+            else f"The wait for {_WAITING_MODELS[capacity.group(1)][0]} ran out"
+        )
+        return (
+            f"{ran_out} before capacity was ready. Nothing was sent and nothing was"
+            " charged. The operation is finished; a new attempt needs a new create()"
+            " with a new idempotency key."
+        )
+    if status == "failed" and code == "model_lease_deleted":
+        return (
+            "The model's capacity was lost during this job. There is no result and no"
+            " charge."
+        )
+    model_http = _MODEL_HTTP_CODE.match(code or "") if status == "failed" else None
+    if model_http is not None:
+        return (
+            f"The model answered HTTP {model_http.group(1)}. There is no result and"
+            " no charge."
+        )
+    if status == "unknown":
+        return "Outcome unknown; no automatic resubmission or cancellation."
+    if status in {"queued", "claimed", "running", "file_pending"}:
+        return f"Not finished yet. {_KEEP_READING}"
+    return None
+
+
 class _ModelProxyMetadata(BaseModel):
     # Unknown envelope metadata is not authority. Native artifact/output JSON is
     # retained separately, without coercing integers, tool calls or usage.
@@ -749,7 +810,39 @@ class ModelProxyOperation(_ModelProxyMetadata):
     output: Any = Field(default=None, repr=False)
     error: Optional[Dict[str, Any]] = Field(default=None, repr=False)
 
+    @property
+    def error_code(self) -> Optional[str]:
+        """The backend's fixed code for this state, such as h3_capacity_not_ready."""
+        code = (self.error or {}).get("code")
+        return code if isinstance(code, str) else None
+
+    @property
+    def waiting_for_capacity(self) -> bool:
+        """The model is starting or busy. Keep reading it; never submit it again."""
+        return (
+            self.status == "queued"
+            and _CAPACITY_CODE.match(self.error_code or "") is not None
+        )
+
+    @property
+    def reason(self) -> Optional[str]:
+        """This state in plain words, or None when there is nothing to explain."""
+        return _operation_reason(self.status, self.error_code)
+
 
 class ModelProxyCreated(_ModelProxyMetadata):
     operation: ModelProxyOperation
     created: bool
+
+
+class ModelProxyFile(_ModelProxyMetadata):
+    """A stored file. ``artifact`` is its exact reference, for a model that takes
+    references such as MiniMax-H3: pass it unchanged. It is None when no reference
+    can be built, and then a model cannot use the file."""
+
+    id: str
+    name: str
+    version: int
+    created: bool
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    artifact: Optional[Dict[str, Any]] = None

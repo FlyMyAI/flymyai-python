@@ -302,6 +302,7 @@ from flymyai.agents._types import (
     ModelProxyCatalogPage,
     ModelProxyContract,
     ModelProxyCreated,
+    ModelProxyFile,
     ModelProxyOperation,
     ModelProxySummary,
 )
@@ -313,6 +314,7 @@ __all__ += [
     "ModelProxyContract",
     "ModelProxyCreated",
     "ModelProxyError",
+    "ModelProxyFile",
     "ModelProxyOperation",
     "ModelProxySummary",
 ]

@@ -16,9 +16,21 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import mimetypes
+import os
 import re
 import time
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from contextlib import contextmanager
+from typing import (
+    Any,
+    BinaryIO,
+    Callable,
+    Dict,
+    Iterator,
+    Optional,
+    TYPE_CHECKING,
+    Union,
+)
 from uuid import UUID
 
 from pydantic import ValidationError
@@ -27,6 +39,7 @@ from flymyai.agents._types import (
     ModelProxyCatalogPage,
     ModelProxyContract,
     ModelProxyCreated,
+    ModelProxyFile,
     ModelProxyOperation,
 )
 
@@ -34,6 +47,7 @@ if TYPE_CHECKING:
     from flymyai.agents._client import AsyncAgentClient, SyncAgentClient
 
 _ROOT = "/api/v1/model-proxy/"
+_FILES_ROUTE = "/api/v1/agents/files/"
 _MAX_INPUT_BYTES = 262_144
 _MAX_BODY_BYTES = 270_336
 _MAX_RESPONSE_BYTES = 2_097_152
@@ -41,9 +55,12 @@ _MAX_INTEGER_DIGITS = 4096
 _INTEGER_LIMIT = 10**_MAX_INTEGER_DIGITS
 _MAX_INTEGER_BITS = _INTEGER_LIMIT.bit_length()
 _REQUEST_SECONDS = 10.0
+_UPLOAD_SECONDS = 600.0
+_MAX_FILE_KEY = 200
 _MAX_WAIT_SECONDS = 7_200.0
 _MAX_POLLS = 900
 _REVISION = re.compile(r"[a-f0-9]{64}\Z")
+_ENDPOINT = re.compile(r"[^/\x00]{1,150}/[^/\x00]{1,255}\Z")
 _KEY = re.compile(r"[\x21-\x7e](?:[\x20-\x7e]*[\x21-\x7e])?\Z")
 _WAITING = frozenset({"queued", "claimed", "running", "file_pending"})
 _STOPPED = frozenset({"succeeded", "failed", "rejected", "cancelled", "unknown"})
@@ -55,7 +72,12 @@ class ModelProxyError(Exception):
     ``outcome_unknown`` means the write may have been accepted. No retry is
     performed. A known operation ID can be read again; before receiving an ID,
     only an explicit identical revision/input/key admission can reconcile it.
+    ``refusal_code`` is the backend's own fixed code when it named why it refused
+    this request, such as ``h3_references``: that request started nothing.
     Identity attributes are for caller recovery, not included in str/repr.
+
+    A wait that ended early also says what it last read: ``last_status``,
+    ``waiting_code`` while the model is starting or busy, and ``reason`` in plain words.
     """
 
     def __init__(
@@ -67,14 +89,27 @@ class ModelProxyError(Exception):
         operation_id: Optional[str] = None,
         contract_revision: Optional[str] = None,
         idempotency_key: Optional[str] = None,
+        refusal_code: Optional[str] = None,
+        last: Optional[ModelProxyOperation] = None,
     ) -> None:
-        super().__init__("Model proxy request did not complete: " + code)
+        self.last_status = None if last is None else last.status
+        self.waiting_code = (
+            last.error_code if last is not None and last.waiting_for_capacity else None
+        )
+        self.reason = None if last is None else last.reason
+        named = code if refusal_code is None else code + " " + refusal_code
+        super().__init__(
+            "Model proxy request did not complete: "
+            + named
+            + ("" if self.reason is None else ". " + self.reason)
+        )
         self.code = code
         self.status_code = status_code
         self.outcome_unknown = outcome_unknown
         self.operation_id = operation_id
         self.contract_revision = contract_revision
         self.idempotency_key = idempotency_key
+        self.refusal_code = refusal_code
 
 
 def _revision(value: str) -> str:
@@ -105,6 +140,43 @@ def _key(value: str) -> str:
             " spaces"
         )
     return value
+
+
+@contextmanager
+def _upload_form(
+    file: Union[str, "os.PathLike[str]", bytes, BinaryIO],
+    key: str,
+    filename: Optional[str],
+    media_type: Optional[str],
+) -> Iterator[Dict[str, Any]]:
+    """The multipart form of one file. A path is streamed and closed here; its size is
+    the backend's to refuse. A string is always a path, never the file's content."""
+    if len(_key(key)) > _MAX_FILE_KEY:
+        raise ValueError("idempotency_key of a file holds at most 200 characters")
+    opened: Optional[BinaryIO] = None
+    if isinstance(file, (str, os.PathLike)):
+        opened = open(file, "rb")
+        content: Any = opened
+        name = filename or os.path.basename(os.fspath(file))
+    elif isinstance(file, (bytes, bytearray)):
+        content, name = bytes(file), filename
+    else:
+        content = file
+        name = filename or os.path.basename(str(getattr(file, "name", "") or ""))
+    try:
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("filename is required for bytes or an unnamed stream")
+        # The type decides the kind of the reference, so it is never left to chance.
+        kind = media_type or mimetypes.guess_type(name)[0]
+        if not kind or (media_type is None and kind == "application/octet-stream"):
+            raise ValueError("media_type is required: the filename does not tell it")
+        yield {
+            "files": {"file": (name, content, kind)},
+            "data": {"idempotency_key": key},
+        }
+    finally:
+        if opened is not None:
+            opened.close()
 
 
 def _seconds(value: float, maximum: float) -> float:
@@ -218,7 +290,7 @@ def _model(cls, value):
         raise ModelProxyError("invalid_response") from None
 
 
-def _catalog_query(limit, cursor, prefix):
+def _catalog_query(limit, cursor, prefix, endpoint_id=None):
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("catalog limit must be an integer from 1 through 100")
     if not isinstance(prefix, str) or len(prefix) > 200:
@@ -227,10 +299,15 @@ def _catalog_query(limit, cursor, prefix):
         not isinstance(cursor, str) or not 1 <= len(cursor) <= 2048
     ):
         raise ValueError("catalog cursor exceeds the API bound")
+    if endpoint_id is not None and (
+        not isinstance(endpoint_id, str) or not _ENDPOINT.fullmatch(endpoint_id)
+    ):
+        raise ValueError("endpoint_id must be owner/name")
     return {
         "limit": str(limit),
         "prefix": prefix,
         **({} if cursor is None else {"cursor": cursor}),
+        **({} if endpoint_id is None else {"endpoint_id": endpoint_id}),
     }
 
 
@@ -310,17 +387,40 @@ def _wait_bounds(timeout, poll_interval, max_polls):
     return timeout, interval
 
 
-def _check_wait(deadline, stopped, operation_id, revision):
+def _check_wait(deadline, stopped, operation_id, revision, last=None):
     if stopped is not None and stopped():
         raise ModelProxyError(
-            "wait_aborted", operation_id=operation_id, contract_revision=revision
+            "wait_aborted",
+            operation_id=operation_id,
+            contract_revision=revision,
+            last=last,
         )
     remaining = deadline - time.monotonic()
     if remaining <= 0:
         raise ModelProxyError(
-            "wait_timeout", operation_id=operation_id, contract_revision=revision
+            "wait_timeout",
+            operation_id=operation_id,
+            contract_revision=revision,
+            last=last,
         )
     return remaining
+
+
+def _lost_read(error):
+    """A timeout, transport failure or busy backend says nothing about the operation."""
+    if error.code in {"request_timeout", "transport_error"}:
+        return True
+    return error.code == "http_status" and (
+        error.status_code >= 500 or error.status_code in {408, 429}
+    )
+
+
+def _report(on_update, seen, result):
+    """Tell the caller once per change of state. Returns what was last reported."""
+    state = (result.status, result.error_code)
+    if on_update is not None and state != seen:
+        on_update(result)
+    return state
 
 
 class ModelProxy:
@@ -330,6 +430,14 @@ class ModelProxy:
     ``wait`` returns UNKNOWN immediately, retaining the operation receipt. Its
     stop callback only ends local waiting; use explicit ``cancel`` to request
     server cancellation. Calls made from an event loop must use AsyncModelProxy.
+
+    An operation with no capacity stays ``queued``: ``waiting_for_capacity`` is true,
+    ``error_code`` names why and ``reason`` says it plainly. A cold start takes about
+    15 minutes for MiniMax-H3 and up to 50 for DeepSeek, more than ``wait``'s default
+    timeout, so pass a longer one or call ``wait`` again on the same UUID. Never call
+    ``create`` for it again. ``rejected`` with one of those codes or ``proxy_deadline``
+    means the model did not start in time: the wait ran out with no charge. ``failed``
+    with ``model_lease_deleted`` or ``model_http_<status>`` means no result and no charge.
     """
 
     def __init__(self, client: SyncAgentClient):
@@ -353,17 +461,21 @@ class ModelProxy:
         key=None,
         revision=None,
         operation_id=None,
+        form=None,
     ):
         received = False
         try:
             self._check_identity()
             status, raw = self._c._model_proxy_request(
                 method,
-                _ROOT + suffix,
-                timeout=_seconds(timeout, _REQUEST_SECONDS),
+                _ROOT + suffix if form is None else _FILES_ROUTE,
+                timeout=_seconds(
+                    timeout, _REQUEST_SECONDS if form is None else _UPLOAD_SECONDS
+                ),
                 query=query,
                 body=body,
                 key=key,
+                form=form,
             )
             received = True
             self._check_identity()
@@ -383,13 +495,46 @@ class ModelProxy:
             raise
 
     def catalog(
-        self, *, limit=50, cursor=None, prefix="", timeout=10.0
+        self, *, limit=50, cursor=None, prefix="", timeout=10.0, endpoint_id=None
     ) -> ModelProxyCatalogPage:
-        """Read ONE bounded page; retain its release/cursor, never hydrate all models."""
-        query = _catalog_query(limit, cursor, prefix)
+        """Read ONE bounded page; retain its release/cursor, never hydrate all models.
+
+        ``endpoint_id`` (``owner/name``) reads the rows of that exact model only.
+        """
+        query = _catalog_query(limit, cursor, prefix, endpoint_id)
         return _catalog(
             self._request("GET", "catalog/", query=query, timeout=timeout), limit
         )
+
+    def upload_file(
+        self,
+        file: Union[str, "os.PathLike[str]", bytes, BinaryIO],
+        *,
+        idempotency_key: str,
+        filename: Optional[str] = None,
+        media_type: Optional[str] = None,
+        timeout=120.0,
+    ) -> ModelProxyFile:
+        """Store your own file and return its exact reference, in ``artifact``.
+
+        ``file`` is a path, bytes or a binary stream, up to the backend's limit of 96
+        MiB. ``media_type`` decides the kind of the reference, so it must be the file's
+        real type; it defaults from the filename. After a lost reply, call again with
+        the same ``idempotency_key`` (at most 200 characters) and file: it returns the
+        same reference. ``timeout`` is also bounded by the client's own timeout.
+        """
+        with _upload_form(file, idempotency_key, filename, media_type) as form:
+            received = False
+            try:
+                data = self._request(
+                    "POST", "", form=form, key=idempotency_key, timeout=timeout
+                )
+                received = True
+                return _model(ModelProxyFile, data)
+            except ModelProxyError as error:
+                error.outcome_unknown |= received
+                error.idempotency_key = idempotency_key
+                raise
 
     def contract(self, revision: str, *, timeout=10.0) -> ModelProxyContract:
         revision = _revision(revision)
@@ -482,31 +627,49 @@ class ModelProxy:
         poll_interval=1.0,
         max_polls=300,
         stopped: Optional[Callable[[], bool]] = None,
+        on_update: Optional[Callable[[ModelProxyOperation], None]] = None,
     ) -> ModelProxyOperation:
-        """Bounded GET-only wait on a saved UUID. Timeout never cancels/resubmits."""
+        """Bounded GET-only wait on a saved UUID. Timeout never cancels/resubmits.
+
+        ``on_update`` is called with the operation each time its status or code
+        changes, so a caller can show why it waits. A wait that ends early raises
+        :class:`ModelProxyError` with the same identity and what it last read; once a
+        state is known, one lost read does not end the wait.
+        """
         operation_id, revision = _operation_id(operation_id), _revision(
             contract_revision
         )
         timeout, interval = _wait_bounds(timeout, poll_interval, max_polls)
         deadline = time.monotonic() + timeout
+        last, seen = None, None
         for attempt in range(max_polls):
-            remaining = _check_wait(deadline, stopped, operation_id, revision)
-            result = self.get(
-                operation_id,
-                contract_revision=revision,
-                timeout=min(_REQUEST_SECONDS, remaining),
-            )
-            _check_wait(deadline, stopped, operation_id, revision)
-            if result.status in _STOPPED:
-                return result
+            remaining = _check_wait(deadline, stopped, operation_id, revision, last)
+            try:
+                last = self.get(
+                    operation_id,
+                    contract_revision=revision,
+                    timeout=min(_REQUEST_SECONDS, remaining),
+                )
+            except ModelProxyError as error:
+                if last is None or not _lost_read(error):
+                    raise
+            else:
+                seen = _report(on_update, seen, last)
+            _check_wait(deadline, stopped, operation_id, revision, last)
+            if last is not None and last.status in _STOPPED:
+                return last
             if attempt + 1 < max_polls:
                 time.sleep(
                     min(
-                        interval, _check_wait(deadline, stopped, operation_id, revision)
+                        interval,
+                        _check_wait(deadline, stopped, operation_id, revision, last),
                     )
                 )
         raise ModelProxyError(
-            "poll_limit", operation_id=operation_id, contract_revision=revision
+            "poll_limit",
+            operation_id=operation_id,
+            contract_revision=revision,
+            last=last,
         )
 
 
@@ -527,17 +690,21 @@ class AsyncModelProxy(ModelProxy):
         key=None,
         revision=None,
         operation_id=None,
+        form=None,
     ):
         received = False
         try:
             self._check_identity()
             status, raw = await self._c._model_proxy_request(
                 method,
-                _ROOT + suffix,
-                timeout=_seconds(timeout, _REQUEST_SECONDS),
+                _ROOT + suffix if form is None else _FILES_ROUTE,
+                timeout=_seconds(
+                    timeout, _REQUEST_SECONDS if form is None else _UPLOAD_SECONDS
+                ),
                 query=query,
                 body=body,
                 key=key,
+                form=form,
             )
             received = True
             self._check_identity()
@@ -559,12 +726,34 @@ class AsyncModelProxy(ModelProxy):
             raise
 
     async def catalog(
-        self, *, limit=50, cursor=None, prefix="", timeout=10.0
+        self, *, limit=50, cursor=None, prefix="", timeout=10.0, endpoint_id=None
     ) -> ModelProxyCatalogPage:
-        query = _catalog_query(limit, cursor, prefix)
+        query = _catalog_query(limit, cursor, prefix, endpoint_id)
         return _catalog(
             await self._request("GET", "catalog/", query=query, timeout=timeout), limit
         )
+
+    async def upload_file(
+        self,
+        file: Union[str, "os.PathLike[str]", bytes, BinaryIO],
+        *,
+        idempotency_key: str,
+        filename: Optional[str] = None,
+        media_type: Optional[str] = None,
+        timeout=120.0,
+    ) -> ModelProxyFile:
+        with _upload_form(file, idempotency_key, filename, media_type) as form:
+            received = False
+            try:
+                data = await self._request(
+                    "POST", "", form=form, key=idempotency_key, timeout=timeout
+                )
+                received = True
+                return _model(ModelProxyFile, data)
+            except ModelProxyError as error:
+                error.outcome_unknown |= received
+                error.idempotency_key = idempotency_key
+                raise
 
     async def contract(self, revision: str, *, timeout=10.0) -> ModelProxyContract:
         revision = _revision(revision)
@@ -651,28 +840,40 @@ class AsyncModelProxy(ModelProxy):
         poll_interval=1.0,
         max_polls=300,
         stopped: Optional[Callable[[], bool]] = None,
+        on_update: Optional[Callable[[ModelProxyOperation], None]] = None,
     ) -> ModelProxyOperation:
         operation_id, revision = _operation_id(operation_id), _revision(
             contract_revision
         )
         timeout, interval = _wait_bounds(timeout, poll_interval, max_polls)
         deadline = time.monotonic() + timeout
+        last, seen = None, None
         for attempt in range(max_polls):
-            remaining = _check_wait(deadline, stopped, operation_id, revision)
-            result = await self.get(
-                operation_id,
-                contract_revision=revision,
-                timeout=min(_REQUEST_SECONDS, remaining),
-            )
-            _check_wait(deadline, stopped, operation_id, revision)
-            if result.status in _STOPPED:
-                return result
+            remaining = _check_wait(deadline, stopped, operation_id, revision, last)
+            try:
+                last = await self.get(
+                    operation_id,
+                    contract_revision=revision,
+                    timeout=min(_REQUEST_SECONDS, remaining),
+                )
+            except ModelProxyError as error:
+                if last is None or not _lost_read(error):
+                    raise
+            else:
+                seen = _report(on_update, seen, last)
+            _check_wait(deadline, stopped, operation_id, revision, last)
+            if last is not None and last.status in _STOPPED:
+                return last
             if attempt + 1 < max_polls:
                 await asyncio.sleep(
                     min(
-                        interval, _check_wait(deadline, stopped, operation_id, revision)
+                        interval,
+                        _check_wait(deadline, stopped, operation_id, revision, last),
                     )
                 )
         raise ModelProxyError(
-            "poll_limit", operation_id=operation_id, contract_revision=revision
+            "poll_limit",
+            operation_id=operation_id,
+            contract_revision=revision,
+            last=last,
         )
