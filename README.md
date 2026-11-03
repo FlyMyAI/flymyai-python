@@ -149,10 +149,13 @@ both = client.runs.list_prices(ids=[run.id, other_run.id])
 
 A call the balance cannot cover raises `InsufficientBalanceError` before anything
 runs. When the answer names them, `shortfall_usd` is how much the balance is short and
-`top_up_url` the page where the account owner adds funds.
-`client.billing.create_top_up_link(amount_usd)` makes a one-time payment link for any
-amount within the account's limits (`InvalidAmountError` names `minimum_usd` and
-`maximum_usd`). Show `checkout_url` to the owner; nothing is charged until they pay.
+`top_up_url` the page where the account owner adds funds (the web app's finances page,
+with no amount filled in). `client.billing.create_top_up_link(amount_usd)` makes a
+one-time payment link for whole US dollars (an `int`, no cents) within the account's
+limits (`InvalidAmountError` names `minimum_usd` and `maximum_usd`). Show
+`checkout_url` to the owner; nothing is charged until they pay. Too many links in an
+hour raise `RateLimitedError` with `retry_after_seconds`; its `response_body` names
+`top_up_url` too.
 
 `client.feedback.send(message, category=..., execution_id=..., tool=..., client=...)`
 tells the FlyMyAI team about a real problem: a call or run that failed in a way you
@@ -171,7 +174,7 @@ except InsufficientBalanceError as error:
     if error.top_up_url:
         print("Add funds:", error.top_up_url)
     else:
-        # at least the shortfall and the account minimum (InvalidAmountError says it)
+        # whole dollars: at least the shortfall rounded up, and the account minimum
         link = client.billing.create_top_up_link(10)
         print("Add funds:", link.checkout_url)
 

@@ -28,11 +28,13 @@ LINK = {
     "schema": "flymy.top-up-link.v1",
     "checkout_url": "https://checkout.example.test/pay/cs_1",
     "session_id": "5a0e4b4c-2f7b-4f0e-9f52-3c3f1f6f2a10",
-    "amount_usd": "7.25",
-    "minimum_usd": "5.00",
-    "maximum_usd": "1000.00",
+    "amount_usd": "7.00",
+    "minimum_usd": "1.00",
+    "maximum_usd": None,
     "expires_at": "2026-11-04T00:00:00Z",
 }
+# The web app's finances page: no amount is filled in there.
+FINANCES = "https://app.example.test/finances"
 RECEIPT = {
     "schema": "flymy.feedback.v1",
     "feedback_id": "0b7f6c1e-8d3a-4f55-a2c9-1e2d3c4b5a69",
@@ -41,7 +43,7 @@ RECEIPT = {
 }
 
 
-def test_a_top_up_link_sends_the_exact_amount_once_without_a_key():
+def test_a_top_up_link_sends_whole_dollars_once_without_a_key():
     seen = []
 
     def handler(request):
@@ -52,29 +54,28 @@ def test_a_top_up_link_sends_the_exact_amount_once_without_a_key():
         return response(LINK, 201)
 
     client = client_with(handler)
-    link = client.billing.create_top_up_link(7.25)
+    link = client.billing.create_top_up_link(7)
     assert isinstance(link, TopUpLink)
     assert link.checkout_url == LINK["checkout_url"]
-    assert link.amount_usd == Decimal("7.25")
-    assert link.minimum_usd == Decimal("5.00")
-    assert link.maximum_usd == Decimal("1000.00")
+    assert link.amount_usd == Decimal("7.00")
+    assert link.minimum_usd == Decimal("1.00")
+    assert link.maximum_usd is None
     assert link.schema_version == "flymy.top-up-link.v1"
     # a field added later in v1 is kept
     assert link.model_extra == {"expires_at": "2026-11-04T00:00:00Z"}
 
-    for amount in (Decimal("10"), 10, "12.50", 0.1):
-        client.billing.create_top_up_link(amount)
-    assert seen == [
-        {"amount_usd": "7.25"},
-        {"amount_usd": "10"},
-        {"amount_usd": "10"},
-        {"amount_usd": "12.50"},
-        {"amount_usd": "0.1"},
-    ]
+    client.billing.create_top_up_link(1)
+    client.billing.create_top_up_link(250)
+    assert seen == [{"amount_usd": "7"}, {"amount_usd": "1"}, {"amount_usd": "250"}]
 
 
-@pytest.mark.parametrize("amount", [0, -1, "ten", "", True, None, float("nan"), [5]])
-def test_a_top_up_amount_that_is_not_a_positive_number_is_refused_locally(amount):
+# Whole US dollars only, as the web app's add funds takes them: cents are refused
+# before anything is sent.
+@pytest.mark.parametrize(
+    "amount",
+    [0, -1, 7.25, 10.0, Decimal("10"), "12", "ten", "", True, None, float("nan"), [5]],
+)
+def test_a_top_up_amount_that_is_not_whole_dollars_is_refused_locally(amount):
     def handler(request):
         raise AssertionError("nothing is sent")
 
@@ -85,31 +86,35 @@ def test_a_top_up_amount_that_is_not_a_positive_number_is_refused_locally(amount
 def test_an_amount_outside_the_limits_names_them():
     body = {
         "code": "invalid_amount",
-        "detail": "The amount must be from $5.00 to $1000.00.",
+        "detail": (
+            "amount_usd must be whole US dollars within the bounds: at least 5.00."
+        ),
         "minimum_usd": "5.00",
         "maximum_usd": None,
     }
     client = client_with(lambda request: response(body, 400))
     with pytest.raises(InvalidAmountError) as raised:
-        client.billing.create_top_up_link(1)
+        client.billing.create_top_up_link(2)
     assert raised.value.status_code == 400
     assert raised.value.minimum_usd == Decimal("5.00")
     assert raised.value.maximum_usd is None
-    assert str(raised.value) == "HTTP 400: The amount must be from $5.00 to $1000.00."
+    assert str(raised.value) == f"HTTP 400: {body['detail']}"
     assert isinstance(raised.value, FlyMyAIAgentError)
 
 
-def test_too_many_links_wait_the_time_the_answer_gives():
+def test_too_many_links_wait_the_time_the_answer_gives_and_name_the_page():
     body = {
         "code": "rate_limited",
-        "detail": "Too many payment links.",
+        "detail": "Too many payment links this hour.",
         "retry_after_seconds": 60,
+        "top_up_url": FINANCES,
     }
     client = client_with(lambda request: response(body, 429))
     with pytest.raises(RateLimitedError) as raised:
         client.billing.create_top_up_link(5)
     assert raised.value.code == "rate_limited"
     assert raised.value.retry_after_seconds == 60
+    assert raised.value.response_body["top_up_url"] == FINANCES
     assert not isinstance(raised.value, FeedbackRateLimitedError)
 
 
@@ -122,7 +127,7 @@ def test_an_empty_balance_names_the_shortfall_and_the_top_up_page():
         ),
         "needed_usd": "0.50",
         "shortfall_usd": "0.35",
-        "top_up_url": "https://app.example.test/billing?top_up=5.00",
+        "top_up_url": FINANCES,
     }
 
     def handler(request):
@@ -133,7 +138,7 @@ def test_an_empty_balance_names_the_shortfall_and_the_top_up_page():
         client.feedback.send("anything")
     assert raised.value.status_code == 402
     assert raised.value.shortfall_usd == Decimal("0.35")
-    assert raised.value.top_up_url == "https://app.example.test/billing?top_up=5.00"
+    assert raised.value.top_up_url == FINANCES
     assert str(raised.value) == f"HTTP 402: {body['detail']}"
 
     # an older answer without them: the same error, with nothing to show
@@ -265,7 +270,7 @@ def test_the_async_client_has_the_same_billing_and_feedback():
             base_url="https://example.test", transport=httpx.MockTransport(handler)
         )
         try:
-            link = await client.billing.create_top_up_link("7.25")
+            link = await client.billing.create_top_up_link(7)
             sent = await client.feedback.send("Async report.", category="docs")
             with pytest.raises(ValueError):
                 await client.feedback.send("")
@@ -274,9 +279,9 @@ def test_the_async_client_has_the_same_billing_and_feedback():
         return link, sent
 
     link, sent = asyncio.run(go())
-    assert link.amount_usd == Decimal("7.25") and sent.status == "received"
+    assert link.amount_usd == Decimal("7.00") and sent.status == "received"
     assert bodies == [
-        {"amount_usd": "7.25"},
+        {"amount_usd": "7"},
         {"message": "Async report.", "category": "docs", "source": "sdk"},
     ]
 

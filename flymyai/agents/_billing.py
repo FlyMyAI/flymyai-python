@@ -1,21 +1,20 @@
 """Adding funds to the account (``flymy.top-up-link.v1``).
 
 ``client.billing.create_top_up_link(amount_usd)`` makes a one-time payment link for the
-account owner. Nothing is charged until the owner pays, and an unpaid link expires, so
-the call takes no idempotency key. Show ``checkout_url`` to the owner; a program never
-pays it. Unknown answer fields are kept on the models (``extra="allow"``).
+account owner in whole US dollars, as the web app's add funds takes them. Nothing is
+charged until the owner pays, and an unpaid link expires, so the call takes no
+idempotency key. Show ``checkout_url`` to the owner; a program never pays it. Unknown
+answer fields are kept on the models (``extra="allow"``).
 """
 
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
-from typing import Any, Optional, Union
+from decimal import Decimal
+from typing import Any, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
 _TOP_UP_LINK_PATH = "/api/v1/agents/billing/top-up-link/"
-
-Amount = Union[Decimal, int, float, str]
 
 
 class TopUpLink(BaseModel):
@@ -33,26 +32,18 @@ class TopUpLink(BaseModel):
     maximum_usd: Optional[Decimal] = None
 
 
-def top_up_amount(amount_usd: Amount) -> str:
-    """The amount as the exact decimal string the API parses (never a binary float)."""
-    if isinstance(amount_usd, bool) or not isinstance(
-        amount_usd, (Decimal, int, float, str)
-    ):
+def top_up_amount(amount_usd: int) -> str:
+    """Whole US dollars as the decimal string the API parses; cents are refused here."""
+    if isinstance(amount_usd, bool) or not isinstance(amount_usd, int):
         raise ValueError(
-            "amount_usd must be a number of US dollars, such as 10 or 7.25."
+            "amount_usd must be whole US dollars as an int, for example 10."
         )
-    try:
-        amount = Decimal(str(amount_usd).strip())
-    except (InvalidOperation, ValueError):
-        raise ValueError(
-            "amount_usd must be a number of US dollars, such as 10 or 7.25."
-        ) from None
-    if not amount.is_finite() or amount <= 0:
-        raise ValueError("amount_usd must be more than zero.")
-    return format(amount, "f")
+    if amount_usd < 1:
+        raise ValueError("amount_usd must be at least 1 US dollar.")
+    return str(amount_usd)
 
 
-def _body(amount_usd: Amount) -> dict:
+def _body(amount_usd: int) -> dict:
     return {"amount_usd": top_up_amount(amount_usd)}
 
 
@@ -62,13 +53,17 @@ class Billing:
     def __init__(self, client: Any) -> None:
         self._c = client
 
-    def create_top_up_link(self, amount_usd: Amount) -> TopUpLink:
-        """A one-time payment link that adds ``amount_usd`` US dollars to the balance.
+    def create_top_up_link(self, amount_usd: int) -> TopUpLink:
+        """A one-time payment link that adds ``amount_usd`` whole US dollars to the
+        balance (an ``int``, no cents).
 
         Raises :class:`~flymyai.agents.InvalidAmountError` (with ``minimum_usd`` and
         ``maximum_usd``) for an amount outside the account's limits. After an
         :class:`~flymyai.agents.InsufficientBalanceError`, ask for at least its
-        ``shortfall_usd``."""
+        ``shortfall_usd`` rounded up to whole dollars, or send the owner to its
+        ``top_up_url``. Too many links in an hour raise
+        :class:`~flymyai.agents.RateLimitedError`; its ``response_body`` names
+        ``top_up_url``, the page where the owner adds funds themselves."""
         return TopUpLink.model_validate(
             self._c._request("POST", _TOP_UP_LINK_PATH, json=_body(amount_usd))
         )
@@ -80,7 +75,7 @@ class AsyncBilling:
     def __init__(self, client: Any) -> None:
         self._c = client
 
-    async def create_top_up_link(self, amount_usd: Amount) -> TopUpLink:
+    async def create_top_up_link(self, amount_usd: int) -> TopUpLink:
         return TopUpLink.model_validate(
             await self._c._request("POST", _TOP_UP_LINK_PATH, json=_body(amount_usd))
         )
