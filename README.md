@@ -1126,10 +1126,38 @@ The API never returns the signing secret. Every SDK write requires a stable
 An empty signing secret is rejected. Paused deliveries are acknowledged and
 discarded. Deleting a webhook removes its receipts; already admitted runs continue.
 `execution_public_id` in a receipt can be passed to `client.runs.get`.
-Acceptance/admission is not agent completion. Only generic webhooks are supported.
+Acceptance/admission is not agent completion. Native subscriptions use the additional catalog/subscribe methods below.
 See [Webhook Triggers v1](https://docs.flymy.ai/agents/guides/webhook-triggers)
 for the exact HMAC format, limits and versioned REST contract. The namespace is
 in `flymyai` 1.2.0rc15 and later (released 2026-10-16 with the backend, the Agents
 MCP `triggers_v1_*` tools and the app's Webhooks panel); older packages do not
 have it, so require `flymyai>=1.2.0rc15`. `tests/test_triggers.py` pins the v1
 methods, arguments and answer fields (`V1_METHODS`); keep them when a v2 is added.
+
+
+### Native Granola and Telegram subscriptions
+
+Discover events with `triggers_v1_catalog` (SDK: `client.triggers_v1.catalog()`).
+Create a binding with `triggers_v1_subscribe`, an exact owned `connection_id`,
+`agent_id`, `events` and a persistent `operation_key`. In the SDK use
+`.subscribe(agent_id, connection_id, events=[...], idempotency_key=...)`. Granola
+requires `scopes=["personal"]`, `["public"]`, both, or exactly `["workspace"]` for
+a workspace key; optional `folder_ids` include subfolders. Telegram accepts
+optional `chat_ids` and `actor_ids`. Both sync and async SDK clients support it.
+
+A 201 creates a binding; inspect `source.status` until registration is `ready`.
+`conflict` preserves an existing provider registration; `unknown` must be
+reconciled before another registration attempt. One bot webhook feeds its agent
+subscriptions. Native records have `kind: mcp_event`, `webhook_url: null` and a
+secret-free `source`. The run receives `trigger.webhook` containing provider,
+type, provider_event_id, connection_id and the original provider object in data.
+Use the existing list/get/update/pause/activate/delete/events calls. Native
+secrets and event/chat/actor filters cannot be changed through update. Pausing
+discards events for that binding; deleting the final binding starts removal of
+only the owned provider webhook. Provider credentials are never returned.
+
+See [the full event and method matrix](https://docs.flymy.ai/agents/guides/native-events).
+Private approvals use an authenticated reply to the current review; reaction
+events require administrator rights and are not reliable for private bot chats.
+Native personal Telegram listening and polling are separate, unimplemented
+transports. Payment/callback events still need their own deadline-aware handler.

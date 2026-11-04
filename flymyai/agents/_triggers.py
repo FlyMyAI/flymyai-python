@@ -1,6 +1,6 @@
 """Versioned webhook management, ``client.triggers_v1``.
 
-Only generic webhooks are supported. A delivery admits the owner's Live frozen
+Generic webhooks and native subscriptions admit the owner's Live frozen
 version; acceptance is not successful agent completion. Keep these methods when
 a future API version is added. Unknown response fields are preserved.
 """
@@ -36,6 +36,7 @@ class TriggerV1(BaseModel):
     last_event_at: Optional[datetime] = None
     last_dispatch_at: Optional[datetime] = None
     created_at: datetime
+    source: Optional[Dict[str, Any]] = None
 
 
 class TriggerEventV1(BaseModel):
@@ -72,9 +73,76 @@ def _edit(
     }
 
 
+def _subscription(
+    agent_id,
+    connection_id,
+    events,
+    scopes,
+    folder_ids,
+    chat_ids,
+    actor_ids,
+    rate_limit_per_hour,
+):
+    return {
+        key: value
+        for key, value in {
+            "agent_id": str(UUID(str(agent_id))),
+            "connection_id": str(UUID(str(connection_id))),
+            "events": events,
+            "scopes": scopes,
+            "folder_ids": folder_ids,
+            "chat_ids": chat_ids,
+            "actor_ids": actor_ids,
+            "rate_limit_per_hour": rate_limit_per_hour,
+        }.items()
+        if value is not None
+    }
+
+
 class TriggersV1:
     def __init__(self, client: Any) -> None:
         self._c = client
+
+    def catalog(self) -> Dict[str, Any]:
+        """Native providers and event types; discovery does not register a source."""
+        return self._c._request("GET", f"{_ROOT}catalog/")
+
+    def subscribe(
+        self,
+        agent_id: Any,
+        connection_id: Any,
+        *,
+        events: List[str],
+        idempotency_key: str,
+        scopes: Optional[List[str]] = None,
+        folder_ids: Optional[List[str]] = None,
+        chat_ids: Optional[List[int]] = None,
+        actor_ids: Optional[List[int]] = None,
+        rate_limit_per_hour: Optional[int] = None,
+    ) -> TriggerV1:
+        """Subscribe on your exact owned connection, without passing credentials.
+
+        Inspect source.status: pending registration is not ready. Unknown provider
+        writes must be reconciled, not recreated with a different key. Granola
+        requires scopes; Telegram optionally filters chat and actor IDs.
+        """
+        return TriggerV1.model_validate(
+            self._c._request(
+                "POST",
+                f"{_ROOT}subscribe/",
+                json=_subscription(
+                    agent_id,
+                    connection_id,
+                    events,
+                    scopes,
+                    folder_ids,
+                    chat_ids,
+                    actor_ids,
+                    rate_limit_per_hour,
+                ),
+                headers=_idempotency_headers(idempotency_key),
+            )
+        )
 
     def list(self, *, agent_id: Any = None) -> List[TriggerV1]:
         """Your triggers, optionally restricted to an owned agent UUID."""
@@ -178,6 +246,42 @@ class TriggersV1:
 class AsyncTriggersV1:
     def __init__(self, client: Any) -> None:
         self._c = client
+
+    async def catalog(self) -> Dict[str, Any]:
+        """Native providers and event types; discovery does not register a source."""
+        return await self._c._request("GET", f"{_ROOT}catalog/")
+
+    async def subscribe(
+        self,
+        agent_id: Any,
+        connection_id: Any,
+        *,
+        events: List[str],
+        idempotency_key: str,
+        scopes: Optional[List[str]] = None,
+        folder_ids: Optional[List[str]] = None,
+        chat_ids: Optional[List[int]] = None,
+        actor_ids: Optional[List[int]] = None,
+        rate_limit_per_hour: Optional[int] = None,
+    ) -> TriggerV1:
+        """Create a native subscription; inspect source.status before claiming ready."""
+        return TriggerV1.model_validate(
+            await self._c._request(
+                "POST",
+                f"{_ROOT}subscribe/",
+                json=_subscription(
+                    agent_id,
+                    connection_id,
+                    events,
+                    scopes,
+                    folder_ids,
+                    chat_ids,
+                    actor_ids,
+                    rate_limit_per_hour,
+                ),
+                headers=_idempotency_headers(idempotency_key),
+            )
+        )
 
     async def list(self, *, agent_id: Any = None) -> List[TriggerV1]:
         params = {"task": str(UUID(str(agent_id)))} if agent_id is not None else {}

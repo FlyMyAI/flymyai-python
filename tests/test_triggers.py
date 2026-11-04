@@ -301,7 +301,7 @@ def test_the_v1_answer_models_know_every_field_and_require_no_more():
             if field.is_required()
         }
 
-    assert aliases(TriggerV1) == set(V1_RECORD)
+    assert aliases(TriggerV1) == set(V1_RECORD) | {"source"}
     assert aliases(TriggerEventV1) == set(V1_EVENT)
     assert required(TriggerV1) == {
         "schema",
