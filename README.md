@@ -145,6 +145,49 @@ spent = sum(p.total_price for p in client.runs.list_prices(limit=50))
 both = client.runs.list_prices(ids=[run.id, other_run.id])
 ```
 
+### Adding funds and sending feedback
+
+A call the balance cannot cover raises `InsufficientBalanceError` before anything
+runs. When the answer names them, `shortfall_usd` is how much the balance is short and
+`top_up_url` the page where the account owner adds funds (the web app's finances page,
+with no amount filled in). `client.billing.create_top_up_link(amount_usd)` makes a
+one-time payment link for whole US dollars (an `int`, no cents) within the account's
+limits (`InvalidAmountError` names `minimum_usd` and `maximum_usd`). Show
+`checkout_url` to the owner; nothing is charged until they pay. Too many links in an
+hour raise `RateLimitedError` with `retry_after_seconds`; its `response_body` names
+`top_up_url` too.
+
+`client.feedback.send(message, category=..., execution_id=..., tool=..., client=...)`
+tells the FlyMyAI team about a real problem: a call or run that failed in a way you
+cannot fix, a wrong result, something missing from the catalog, a charge that looks
+wrong or misleading docs. `category` is one of `FEEDBACK_CATEGORIES`. The same message
+within 10 minutes is not sent again (`deduplicated=True`); too much feedback raises
+`FeedbackRateLimitedError` with `retry_after_seconds`. Never put secrets or personal
+data in a message.
+
+```python
+from flymyai import InsufficientBalanceError
+
+try:
+    run = client.agents.run(agent.id, idempotency_key="nightly-report-42")
+except InsufficientBalanceError as error:
+    if error.top_up_url:
+        print("Add funds:", error.top_up_url)
+    else:
+        # whole dollars: at least the shortfall rounded up, and the account minimum
+        link = client.billing.create_top_up_link(10)
+        print("Add funds:", link.checkout_url)
+
+client.feedback.send(
+    "The weekly report run stopped at the Sheets step twice with a timeout.",
+    category="bug",
+    execution_id="abc-defg-hij",
+)
+```
+
+Both clients have these methods (`await` them on `AsyncAgentClient`); neither takes an
+idempotency key.
+
 ### Limits for automatic subagents
 
 Ordinary `client.agents.run(...)` calls use the same delegation runtime as chat.

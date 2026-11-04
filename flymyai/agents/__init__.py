@@ -318,3 +318,31 @@ __all__ += [
     "ModelProxyOperation",
     "ModelProxySummary",
 ]
+
+from flymyai.agents._billing import AsyncBilling, Billing, TopUpLink
+from flymyai.agents._client import (
+    FeedbackRateLimitedError,
+    InsufficientBalanceError,
+    InvalidAmountError,
+    RateLimitedError,
+)
+from flymyai.agents._feedback import (
+    FEEDBACK_CATEGORIES,
+    AsyncFeedback,
+    Feedback,
+    FeedbackReceipt,
+)
+
+__all__ += [
+    "AsyncBilling",
+    "AsyncFeedback",
+    "Billing",
+    "FEEDBACK_CATEGORIES",
+    "Feedback",
+    "FeedbackRateLimitedError",
+    "FeedbackReceipt",
+    "InsufficientBalanceError",
+    "InvalidAmountError",
+    "RateLimitedError",
+    "TopUpLink",
+]

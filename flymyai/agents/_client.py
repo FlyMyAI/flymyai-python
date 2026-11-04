@@ -6,12 +6,15 @@ import math
 import os
 import re
 import time
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Optional
 
 import httpx
 
 from flymyai.agents._apps import Apps, AsyncApps
 from flymyai.agents._artifacts import Artifacts, AsyncArtifacts
+from flymyai.agents._billing import AsyncBilling, Billing
+from flymyai.agents._feedback import AsyncFeedback, Feedback
 from flymyai.agents._triggers import TriggersV1, AsyncTriggersV1
 from flymyai.agents._projects import AsyncProjects, Projects
 from flymyai.agents._mcp_sharing import McpTeams, AsyncMcpTeams
@@ -169,6 +172,135 @@ class AppSecretLimitError(FlyMyAIAgentError):
     delete one with ``client.apps.secrets.delete`` first."""
 
 
+def _usd(value: Any) -> Optional[Decimal]:
+    """A dollar amount from an answer (a decimal string or a number), or ``None``."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return None
+    try:
+        amount = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        return None
+    return amount if amount.is_finite() else None
+
+
+class InsufficientBalanceError(FlyMyAIAgentError):
+    """The balance cannot cover the call (HTTP 402 ``insufficient_balance``); nothing ran.
+
+    :attr:`shortfall_usd` is how much it is short and :attr:`top_up_url` the page where
+    the account owner adds funds, when the answer names them. A program can also make a
+    payment link for an amount with ``client.billing.create_top_up_link``. Retry after
+    the owner has paid; a durable call takes a new idempotency key."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any,
+        shortfall_usd: Optional[Decimal] = None,
+        top_up_url: Optional[str] = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, response_body=response_body)
+        self.shortfall_usd = shortfall_usd
+        self.top_up_url = top_up_url
+
+
+class InvalidAmountError(FlyMyAIAgentError):
+    """A top-up amount outside the account's limits (HTTP 400 ``invalid_amount``):
+    :attr:`minimum_usd` and :attr:`maximum_usd` (``None`` when the answer has none)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any,
+        minimum_usd: Optional[Decimal] = None,
+        maximum_usd: Optional[Decimal] = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, response_body=response_body)
+        self.minimum_usd = minimum_usd
+        self.maximum_usd = maximum_usd
+
+
+class RateLimitedError(FlyMyAIAgentError):
+    """Too many requests of this kind for now (HTTP 429 ``rate_limited``); nothing ran.
+    Wait :attr:`retry_after_seconds` (``None`` when the answer gives no time) and try
+    again."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any,
+        code: str,
+        retry_after_seconds: Optional[int] = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, response_body=response_body)
+        self.code = code
+        self.retry_after_seconds = retry_after_seconds
+
+
+class FeedbackRateLimitedError(RateLimitedError):
+    """This account sent too much feedback for now (HTTP 429 ``feedback_rate_limited``)."""
+
+
+_RATE_LIMIT_CODES = {
+    "rate_limited": RateLimitedError,
+    "feedback_rate_limited": FeedbackRateLimitedError,
+}
+
+
+def _retry_after_seconds(body: Dict[str, Any], header: Optional[str]) -> Optional[int]:
+    value = body.get("retry_after_seconds")
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        value = header.strip() if isinstance(header, str) else None
+        if not value or not value.isdigit() or len(value) > 9:
+            return None
+    seconds = int(value)
+    return seconds if seconds >= 0 else None
+
+
+def _typed_refusal(resp: httpx.Response, body: Any) -> Optional[FlyMyAIAgentError]:
+    """Money and rate refusals that name what to do next, by their stable code."""
+    if not isinstance(body, dict) or not isinstance(body.get("code"), str):
+        return None
+    code = body["code"]
+    # The same message as an untyped refusal, so existing handling keeps working.
+    message = f"HTTP {resp.status_code}: {body.get('detail', body)}"
+    if resp.status_code == 402 and code == "insufficient_balance":
+        url = body.get("top_up_url")
+        return InsufficientBalanceError(
+            message,
+            status_code=402,
+            response_body=body,
+            shortfall_usd=_usd(body.get("shortfall_usd")),
+            top_up_url=(
+                url if isinstance(url, str) and url.startswith("https://") else None
+            ),
+        )
+    if resp.status_code == 400 and code == "invalid_amount":
+        return InvalidAmountError(
+            message,
+            status_code=400,
+            response_body=body,
+            minimum_usd=_usd(body.get("minimum_usd")),
+            maximum_usd=_usd(body.get("maximum_usd")),
+        )
+    if resp.status_code == 429 and code in _RATE_LIMIT_CODES:
+        return _RATE_LIMIT_CODES[code](
+            message,
+            status_code=429,
+            response_body=body,
+            code=code,
+            retry_after_seconds=_retry_after_seconds(
+                body, resp.headers.get("Retry-After")
+            ),
+        )
+    return None
+
+
 def _parse_variables_errors(body: Any) -> Optional[VariablesValidationError]:
     """Return a :class:`VariablesValidationError` if ``body`` looks like one."""
     if not isinstance(body, dict):
@@ -213,6 +345,10 @@ def _raise_for_status(resp: httpx.Response) -> None:
         err = _parse_variables_errors(body)
         if err is not None:
             raise err
+
+    refusal = _typed_refusal(resp, body)
+    if refusal is not None:
+        raise refusal
 
     if (
         resp.status_code == 409
@@ -519,6 +655,8 @@ class SyncAgentClient:
         self.projects = Projects(self)
         self.apps = Apps(self)
         self.model_proxy = ModelProxy(self)
+        self.billing = Billing(self)
+        self.feedback = Feedback(self)
 
     def _model_proxy_request(
         self, method, path, *, timeout, query=None, body=None, key=None, form=None
@@ -629,6 +767,8 @@ class AsyncAgentClient:
         self.projects = AsyncProjects(self)
         self.apps = AsyncApps(self)
         self.model_proxy = AsyncModelProxy(self)
+        self.billing = AsyncBilling(self)
+        self.feedback = AsyncFeedback(self)
 
     async def _model_proxy_request(
         self, method, path, *, timeout, query=None, body=None, key=None, form=None
