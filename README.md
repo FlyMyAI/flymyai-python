@@ -194,10 +194,11 @@ Ordinary `client.agents.run(...)` calls use the same delegation runtime as chat.
 Pass `message="..."` to send the first user request atomically with the start;
 `client.runs.create(...)` and both async methods accept it too. Keep the same
 message, variables and `idempotency_key` when retrying the same logical run.
-Pass `subagent_limits={"cap_usd": "3", "max_children": 6, "max_parallel": 3}`
+By default a run's helpers have no USD cap and no count limit. Pass
+`subagent_limits={"cap_usd": "3", "max_children": 6, "max_parallel": 3}`
 alongside the required `idempotency_key` to pin owner limits for a new run.
-`cap_usd=0` disables helpers. The cap covers subagents and their tools; lead
-charges remain separate. The server validates limits before starting work and
+`None` for `cap_usd` or `max_children` means no limit and `cap_usd=0` disables
+helpers. The cap covers subagents and their tools; lead charges remain separate. The server validates limits before starting work and
 rejects a changed request under a reused idempotency key.
 
 Sync and async clients support this option. Owner
