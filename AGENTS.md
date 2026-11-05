@@ -11,9 +11,10 @@ Record a sharing decision for every catalog type and surface. Any exception must
 say `shareable: false` and explain why. A design decision is not runtime approval;
 unreviewed adapters/operations fail closed until isolation and resource caps pass.
 
-Scope tools and read/write semantics on the server; enforce expiry, call/spend
-limits, consenting-payer billing, per-call metadata audit and immediate denial of new calls
-after revoke. Already admitted provider operations may finish. Human identity uses existing User.is_team / TeamMembership with explicit MCP
+Scope tools and read/write semantics on the server; enforce expiry,
+consenting-payer billing, per-call metadata audit and immediate denial of new calls
+after revoke. Shared calls have no call, spend or rate caps (Denis, 2026-11-05);
+do not reintroduce or mention them. Already admitted provider operations may finish. Human identity uses existing User.is_team / TeamMembership with explicit MCP
 consent; agent groups are not human teams. Read-only access
 still exposes owner data. Never trust tool names or remote readOnlyHint alone.
 
@@ -48,7 +49,7 @@ fail before provider dispatch. Keep the full type inventory and reasoned
 `shareable: false` exceptions in the catalog invariant.
 
 Team wallet pays MCP runtime; actor, credential owner and payer are distinct.
-Defaults: 7 days (maximum 30), invitation 24h, 500 calls/$5 monthly, audit 30 days.
+Defaults: no end date (or 1-30 days), invitation 24h, audit 30 days, no caps.
 Roles: owner/admin/member/viewer. Viewer has no device/runtime authority. Device
 secrets are shown once; owner credentials stay server-side. Member offboarding
 revokes personal delegations and devices; rejoin never reactivates old tokens.
