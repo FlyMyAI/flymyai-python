@@ -35,8 +35,9 @@ class McpTeam(_TeamModel):
     active: bool
     revision: int
     expires_at: datetime
-    call_limit: int
-    spend_limit: Decimal
+    # MCP sharing has no call or spend caps (2026-11-05): the API answers null.
+    call_limit: Optional[int] = None
+    spend_limit: Optional[Decimal] = None
     calls: int
     spent: Decimal
     reserved: Decimal
@@ -78,10 +79,11 @@ class McpTeamInvite(_TeamModel):
     state: str
     claimant: Optional[str] = None
     expires_at: datetime
-    call_limit: int
-    spend_limit: Decimal
+    # No call or spend caps (2026-11-05): the API answers null.
+    call_limit: Optional[int] = None
+    spend_limit: Optional[Decimal] = None
     email: str = ""
-    access_days: int = 7
+    access_days: int = 0
     token: Optional[SecretStr] = Field(default=None, repr=False)
 
 
@@ -287,21 +289,19 @@ class McpTeams:
         idempotency_key: str,
         email: str = "",
         role: str = "member",
-        access_days: int = 7,
-        call_limit: int = 500,
-        spend_limit: str = "5",
+        access_days: int = 0,
+        call_limit: Optional[int] = None,
+        spend_limit: Optional[str] = None,
     ) -> McpTeamInvite:
+        # MCP sharing has no call or spend caps (2026-11-05): call_limit and
+        # spend_limit stay for callers that still pass them and are not sent.
+        # access_days 0 shares with no end date, the API default.
+        del call_limit, spend_limit
         return McpTeamInvite.model_validate(
             self._request(
                 "POST",
                 _team_path(team_id, "invites/"),
-                {
-                    "email": email,
-                    "role": role,
-                    "access_days": access_days,
-                    "call_limit": call_limit,
-                    "spend_limit": spend_limit,
-                },
+                {"email": email, "role": role, "access_days": access_days},
                 key=idempotency_key,
             )
         )
@@ -577,21 +577,19 @@ class AsyncMcpTeams:
         idempotency_key: str,
         email: str = "",
         role: str = "member",
-        access_days: int = 7,
-        call_limit: int = 500,
-        spend_limit: str = "5",
+        access_days: int = 0,
+        call_limit: Optional[int] = None,
+        spend_limit: Optional[str] = None,
     ) -> McpTeamInvite:
+        # MCP sharing has no call or spend caps (2026-11-05): call_limit and
+        # spend_limit stay for callers that still pass them and are not sent.
+        # access_days 0 shares with no end date, the API default.
+        del call_limit, spend_limit
         return McpTeamInvite.model_validate(
             await self._request(
                 "POST",
                 _team_path(team_id, "invites/"),
-                {
-                    "email": email,
-                    "role": role,
-                    "access_days": access_days,
-                    "call_limit": call_limit,
-                    "spend_limit": spend_limit,
-                },
+                {"email": email, "role": role, "access_days": access_days},
                 key=idempotency_key,
             )
         )

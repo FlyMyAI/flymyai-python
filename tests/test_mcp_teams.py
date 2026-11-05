@@ -139,3 +139,36 @@ def test_async_surface_and_bounded_transport_match_sync():
             await client._http.aclose()
 
     asyncio.run(run())
+
+
+def test_teams_have_no_caps_and_invites_send_none():
+    """MCP sharing has no call or spend caps (2026-11-05): the API answers the
+    two fields as null, and an invite no longer sends them."""
+    team_id, member_id, invite_id = uuid4(), uuid4(), uuid4()
+    sent = []
+
+    def handler(request):
+        if request.method == "GET":
+            return response({
+                "id": str(team_id), "username": "design", "owner": 7, "payer": "design",
+                "role": "owner", "member_id": str(member_id), "active": True,
+                "revision": 2, "expires_at": "2100-01-01T00:00:00Z",
+                "call_limit": None, "spend_limit": None, "calls": 3,
+                "spent": "0.01", "reserved": "0", "team_user_id": 99,
+            })
+        sent.append(json.loads(request.content))
+        return response({
+            "id": str(invite_id), "role": "member", "state": "pending",
+            "expires_at": "2026-11-06T00:00:00Z", "access_days": 0,
+            "call_limit": None, "spend_limit": None, "email": "a@example.test",
+        }, status=201)
+
+    with client_with(handler) as client:
+        team = client.teams.get(team_id)
+        assert team.call_limit is None and team.spend_limit is None
+        invite = client.teams.invite(
+            team_id, idempotency_key="invite-no-caps-1", email="a@example.test",
+            call_limit=500, spend_limit="5",
+        )
+        assert invite.call_limit is None and invite.access_days == 0
+    assert sent == [{"email": "a@example.test", "role": "member", "access_days": 0}]
