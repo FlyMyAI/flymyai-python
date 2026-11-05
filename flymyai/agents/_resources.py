@@ -730,9 +730,11 @@ class Agents:
             Runtime values to substitute into the ``goal`` Jinja2 template.
             Must match the agent's ``input_schema`` when one is set.
         subagent_limits:
-            Owner limits pinned for this run: cap_usd (default 3, zero disables
-            delegation), max_children (1-6), max_parallel (1-3). The USD cap
-            covers helpers and their tools; ordinary lead charges are separate.
+            Owner limits pinned for this run: cap_usd (omitted or None: no cap,
+            the default; zero disables delegation), max_children (omitted or
+            None: no limit) and max_parallel (how many helpers run at once). The
+            USD cap covers helpers and their tools; ordinary lead charges are
+            separate.
         Returns
         -------
         RunDetail
