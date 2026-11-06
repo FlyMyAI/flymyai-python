@@ -537,6 +537,7 @@ class Agents:
         output_description: Optional[str] = None,
         status: Optional[str] = None,
         preview: Optional[str] = None,
+        engine: Optional[str] = None,
     ) -> Agent:
         """Create a new agent.
 
@@ -582,6 +583,10 @@ class Agents:
             What the agent does in one or two sentences (at most 280
             characters), shown where people copy it. Your own text is pinned;
             without it FlyMyAI writes one after each freeze.
+        engine:
+            The agent engine its next versions run on. ``"flymy/agent@1"`` is
+            the current engine and the default; a frozen version keeps the
+            engine it was frozen on.
         """
         if (goal is None) == (user_prompt_source is None):
             raise ValueError("Provide exactly one of goal or user_prompt_source")
@@ -610,6 +615,8 @@ class Agents:
             body["status"] = status
         if preview is not None:
             body["preview"] = preview
+        if engine is not None:
+            body["engine"] = engine
         data = self._c._request("POST", "/api/v1/agents/tasks/", json=body)
         return Agent(**data)
 
@@ -2214,6 +2221,7 @@ class AsyncAgents:
         output_description: Optional[str] = None,
         status: Optional[str] = None,
         preview: Optional[str] = None,
+        engine: Optional[str] = None,
     ) -> Agent:
         """Async variant of :meth:`Agents.create`. Same parameters."""
         if (goal is None) == (user_prompt_source is None):
@@ -2243,6 +2251,8 @@ class AsyncAgents:
             body["status"] = status
         if preview is not None:
             body["preview"] = preview
+        if engine is not None:
+            body["engine"] = engine
         data = await self._c._request("POST", "/api/v1/agents/tasks/", json=body)
         return Agent(**data)
 

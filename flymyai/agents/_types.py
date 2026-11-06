@@ -123,6 +123,9 @@ class Agent(BaseModel):
     # FlyMyAI writes it after each freeze; an owner's own text is pinned.
     preview: str = ""
     preview_pinned: bool = False
+    # The agent engine (runtime line) its next versions run on; flymy/agent@1 is
+    # the current engine. Older servers do not send it.
+    engine: str = "flymy/agent@1"
     created_at: datetime
     updated_at: datetime
 
@@ -451,6 +454,8 @@ class Compilation(BaseModel):
     id: ResourceID
     execution: ResourceID
     status: CompilationStatus = CompilationStatus.PENDING
+    # The engine this version was frozen on and keeps.
+    engine: str = "flymy/agent@1"
     script_code: str = ""
     instruction_md: str = ""
     cron_schedule: str = ""
