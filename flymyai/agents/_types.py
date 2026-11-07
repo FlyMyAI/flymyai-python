@@ -184,6 +184,8 @@ class Run(BaseModel):
     run_seq: int = 0
     error: Optional[str] = None
     agent_result: Optional[Dict[str, Any]] = None
+    # The agent engine this run runs on and keeps; older servers do not send it.
+    engine: str = "flymy/agent@1"
 
     @property
     def output(self) -> Optional[Dict[str, Any]]:

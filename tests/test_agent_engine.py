@@ -86,3 +86,17 @@ def test_async_agent_engine():
 
     asyncio.run(check())
     assert seen == EXPECTED
+
+
+def test_a_run_reads_its_engine_and_defaults_for_older_servers():
+    from flymyai.agents._types import Run
+
+    base = {
+        "id": "abc-defg-hij",
+        "user_agent_task": 1,
+        "original_prompt": "go",
+        "created_at": "2026-11-07T00:00:00Z",
+        "updated_at": "2026-11-07T00:00:00Z",
+    }
+    assert Run(**base).engine == "flymy/agent@1"
+    assert Run(**{**base, "engine": "flymy/agent@1"}).engine == "flymy/agent@1"
