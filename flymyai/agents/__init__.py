@@ -18,6 +18,7 @@ from flymyai.agents._types import (
     AgentCopy,
     AgentDetail,
     AgentStatus,
+    AgentUpdate,
     AgentVersion,
     AppendMessageResponse,
     AvailableTool,
@@ -44,6 +45,8 @@ from flymyai.agents._types import (
     McpResourceSetSummary,
     McpResourceSetStatus,
     McpResourceType,
+    NewVersion,
+    PinnedSkill,
     Run,
     RunDetail,
     RunInferencePrice,
@@ -53,6 +56,7 @@ from flymyai.agents._types import (
     RuntimeConnections,
     SchemaSuggestion,
     Tool,
+    VersionPins,
 )
 
 from flymyai.agents._triggers import (
@@ -90,6 +94,7 @@ __all__ = [
     "AgentCopy",
     "AgentDetail",
     "AgentStatus",
+    "AgentUpdate",
     "AgentVersion",
     "AppendMessageResponse",
     "AvailableTool",
@@ -116,6 +121,8 @@ __all__ = [
     "McpResourceSetSummary",
     "McpResourceSetStatus",
     "McpResourceType",
+    "NewVersion",
+    "PinnedSkill",
     "Run",
     "RunDetail",
     "RunInferencePrice",
@@ -125,6 +132,7 @@ __all__ = [
     "RuntimeConnections",
     "SchemaSuggestion",
     "Tool",
+    "VersionPins",
 ]
 
 from flymyai.agents._mcp_sharing import (
