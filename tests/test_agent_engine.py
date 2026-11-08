@@ -30,7 +30,9 @@ def handle(seen):
             # A backend before engines answers without the field.
             return httpx.Response(200, json=agent_row(engine=None))
         if request.method == "POST":
-            return httpx.Response(201, json=agent_row(body.get("engine", "flymy/agent@1")))
+            return httpx.Response(
+                201, json=agent_row(body.get("engine", "flymy/agent@1"))
+            )
         return httpx.Response(200, json=agent_row())
 
     return respond
@@ -40,7 +42,11 @@ EXPECTED = [
     (
         "POST",
         "/api/v1/agents/tasks/",
-        {"name": "Trend watch", "user_prompt": "Watch the creators.", "engine": "flymy/agent@1"},
+        {
+            "name": "Trend watch",
+            "user_prompt": "Watch the creators.",
+            "engine": "flymy/agent@1",
+        },
     ),
     ("PATCH", "/api/v1/agents/tasks/agent-1/", {"engine": "flymy/agent@1"}),
     ("GET", "/api/v1/agents/tasks/legacy/", None),
@@ -55,10 +61,16 @@ def test_sync_agent_engine():
         base_url="http://testserver", transport=httpx.MockTransport(handle(seen))
     )
     try:
-        assert client.agents.create(
-            name="Trend watch", goal="Watch the creators.", engine="flymy/agent@1"
-        ).engine == "flymy/agent@1"
-        assert client.agents.update("agent-1", engine="flymy/agent@1").engine == "flymy/agent@1"
+        assert (
+            client.agents.create(
+                name="Trend watch", goal="Watch the creators.", engine="flymy/agent@1"
+            ).engine
+            == "flymy/agent@1"
+        )
+        assert (
+            client.agents.update("agent-1", engine="flymy/agent@1").engine
+            == "flymy/agent@1"
+        )
         assert client.agents.get("legacy").engine == "flymy/agent@1"
     finally:
         client._http.close()
@@ -79,7 +91,9 @@ def test_async_agent_engine():
                 name="Trend watch", goal="Watch the creators.", engine="flymy/agent@1"
             )
             assert created.engine == "flymy/agent@1"
-            assert (await client.agents.update("agent-1", engine="flymy/agent@1")).engine == "flymy/agent@1"
+            assert (
+                await client.agents.update("agent-1", engine="flymy/agent@1")
+            ).engine == "flymy/agent@1"
             assert (await client.agents.get("legacy")).engine == "flymy/agent@1"
         finally:
             await client._http.aclose()
