@@ -144,6 +144,32 @@ class AgentDetail(Agent):
     available_tools: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class NewVersion(BaseModel):
+    """The version :meth:`Agents.update` saved next to the agent's live one.
+
+    An agent with a live version is the draft: a change of a setting its versions
+    pin (model, effort, web search, tools, MCP servers, resource sets, access mode)
+    saves the live version again with the new settings, not live. The live version,
+    its schedule and deployments run as before until you make this one live: test
+    it with ``compilations.run_instruction(id, ...)``, then
+    ``compilations.set_live(id)``. ``next`` says the same in words."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    live: bool = False
+    #: The live version this one was saved from.
+    source_version_id: Optional[int] = None
+    next: str = ""
+
+
+class AgentUpdate(Agent):
+    """The agent after :meth:`Agents.update`. ``new_version`` is set only when the
+    change saved a new version next to the live one (see :class:`NewVersion`)."""
+
+    new_version: Optional[NewVersion] = None
+
+
 class AgentCopy(AgentDetail):
     """An agent copied into your account: the copy's detail, ``execution_id`` - the
     chat it opens with (an official template's welcome chat, else its latest copied
@@ -450,6 +476,37 @@ class AvailableTool(BaseModel):
     configuration_steps: List[Dict[str, Any]] = Field(default_factory=list)
 
 
+class PinnedSkill(BaseModel):
+    """A skill a version runs with, at the skill version its code blocks run."""
+
+    model_config = ConfigDict(extra="allow")
+
+    id: int
+    slug: str = ""
+    version: Optional[int] = None
+
+
+class VersionPins(BaseModel):
+    """What a frozen version runs with besides its instruction, recorded when the
+    version is made. Its runs read these, never the agent's later settings."""
+
+    model_config = ConfigDict(extra="allow")
+
+    #: The model its runs use; an agent without one pinned the top model of that day.
+    llm_model: str = ""
+    effort: str = ""
+    #: The web search engine; None is auto, ``"off"`` leaves web search out.
+    web_search: Optional[str] = None
+    mcp_access_mode: McpAccessMode = McpAccessMode.LEGACY
+    #: Ids of the attached connections (:class:`Tool`).
+    tools: List[int] = Field(default_factory=list)
+    #: Ids of the attached custom MCP servers.
+    custom_mcp_servers: List[int] = Field(default_factory=list)
+    #: Public ids of the MCP resource sets granted to the agent directly.
+    mcp_resource_sets: List[str] = Field(default_factory=list)
+    skills: List[PinnedSkill] = Field(default_factory=list)
+
+
 class Compilation(BaseModel):
     """A compiled/frozen script or instruction derived from an agent execution."""
 
@@ -458,6 +515,10 @@ class Compilation(BaseModel):
     status: CompilationStatus = CompilationStatus.PENDING
     # The engine this version was frozen on and keeps.
     engine: str = "flymy/agent@1"
+    #: What this version runs with: model, effort, web search, tools, MCP servers,
+    #: resource sets and skills. None for a version made before pins were recorded
+    #: (and on older servers): it runs on its agent's current settings.
+    pins: Optional[VersionPins] = None
     script_code: str = ""
     instruction_md: str = ""
     cron_schedule: str = ""

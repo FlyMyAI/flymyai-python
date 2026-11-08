@@ -32,6 +32,7 @@ from flymyai.agents._types import (
     AgentDeploymentPreflight,
     AgentCopy,
     AgentDetail,
+    AgentUpdate,
     AgentVersion,
     AppendMessageResponse,
     AvailableTool,
@@ -671,13 +672,23 @@ class Agents:
         *,
         mcp_access_mode: Optional[_McpAccessModeLike] = None,
         **kwargs: Any,
-    ) -> Agent:
+    ) -> AgentUpdate:
         """Partial update (PATCH).
 
         Use ``goal=`` to update ``user_prompt``. ``preview=`` sets what the
         agent does in one or two sentences (at most 280 characters) and pins
         it, so later freezes keep it; ``preview=""`` hands it back to FlyMyAI,
         which writes it again from the live version.
+
+        The agent is the draft: its frozen versions keep the model, effort, web
+        search, tools and skills they pinned. When the agent has a live version
+        and this changes one of those settings (``model``, ``effort``,
+        ``web_search``, ``available_tools``, ``available_custom_mcp_servers``,
+        ``mcp_resource_set_ids``, ``mcp_access_mode``), the live version is saved
+        again with the new settings as a version that is not live, named in
+        ``new_version``; the live one runs as before. Test it with
+        :meth:`Compilations.run_instruction`, then make it live with
+        :meth:`Compilations.set_live`.
         """
         if "goal" in kwargs:
             kwargs["user_prompt"] = kwargs.pop("goal")
@@ -686,7 +697,7 @@ class Agents:
         data = self._c._request(
             "PATCH", f"/api/v1/agents/tasks/{agent_id}/", json=kwargs
         )
-        return Agent(**data)
+        return AgentUpdate(**data)
 
     def delete(self, agent_id: str) -> None:
         """Soft-delete (archive) an agent."""
@@ -2306,8 +2317,9 @@ class AsyncAgents:
         *,
         mcp_access_mode: Optional[_McpAccessModeLike] = None,
         **kwargs: Any,
-    ) -> Agent:
-        """Async variant of :meth:`Agents.update`, ``preview=`` included."""
+    ) -> AgentUpdate:
+        """Async variant of :meth:`Agents.update`, ``preview=`` and
+        ``new_version`` included."""
         if "goal" in kwargs:
             kwargs["user_prompt"] = kwargs.pop("goal")
         if mcp_access_mode is not None:
@@ -2315,7 +2327,7 @@ class AsyncAgents:
         data = await self._c._request(
             "PATCH", f"/api/v1/agents/tasks/{agent_id}/", json=kwargs
         )
-        return Agent(**data)
+        return AgentUpdate(**data)
 
     async def delete(self, agent_id: str) -> None:
         await self._c._request("DELETE", f"/api/v1/agents/tasks/{agent_id}/")

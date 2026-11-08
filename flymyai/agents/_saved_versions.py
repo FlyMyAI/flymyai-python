@@ -54,6 +54,10 @@ class SavedVersionSummary(BaseModel):
     schedule_paused_reason_truncated: bool = Field(strict=True)
     schedule_ready: bool = Field(strict=True)
     source_compilation: Optional[int] = Field(strict=True, ge=1)
+    #: The model and effort this version runs on (``Compilation.pins``). None for
+    #: a version made before pins (and from older servers): it runs on its agent's.
+    model: Optional[str] = Field(default=None, strict=True, max_length=128)
+    effort: Optional[str] = Field(default=None, strict=True, max_length=16)
     created_at: datetime
     updated_at: datetime
 
