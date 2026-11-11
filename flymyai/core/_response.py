@@ -19,12 +19,33 @@ class FlyMyAIResponse(httpx.Response):
         )
 
     def json(self, **kwargs) -> typing.Any:
-        if self.content.startswith(b"data"):
-            return json.loads(self.content.removeprefix(b"data"))
-        elif self.content.startswith(b"event"):
-            return json.loads(self.content.removeprefix(b"event"))
-        else:
-            return super().json(**kwargs)
+        content = self.content.lstrip()
+        if content.startswith(b"data") or content.startswith(b"event"):
+            # A body in SSE form ("data: {...}", maybe after "event: error"), as the
+            # gateway sends its errors on the SSE routes: the JSON of the first data line.
+            try:
+                return _sse_data_json(content)
+            except ValueError:
+                pass
+            # The bare form "data{...}" that older code paths produced.
+            for field in (b"data", b"event"):
+                if content.startswith(field):
+                    return json.loads(content[len(field) :])
+        return super().json(**kwargs)
+
+
+def _sse_data_json(content: bytes) -> typing.Any:
+    for raw in content.splitlines():
+        line = raw.strip()
+        if not line.startswith(b"data"):
+            continue
+        value = line[len(b"data") :]
+        if value[:1] == b":":
+            value = value[1:]
+        value = value.strip()
+        if value:
+            return json.loads(value)
+    raise ValueError("no data line")
 
 
 @dataclass
@@ -43,10 +64,12 @@ class ChatResponseData:
             text=data.get("text"),
             tool_used=data.get("tool_used"),
             file_url=(
-                "".join([
-                    os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/"),
-                    data.get("file_url"),
-                ])
+                "".join(
+                    [
+                        os.getenv("FLYMYAI_M1_DSN", "https://api.chat.flymy.ai/"),
+                        data.get("file_url"),
+                    ]
+                )
                 if data.get("file_url")
                 else None
             ),

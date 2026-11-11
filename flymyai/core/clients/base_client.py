@@ -1,3 +1,4 @@
+import json as _json
 import os
 import uuid
 from typing import Generic, Optional, overload, AsyncIterator, Iterator, Callable
@@ -15,7 +16,7 @@ from flymyai.core.response_factory.async_task_result_factory import (
 from flymyai.core.response_factory.plain_inference_response_factory import (
     SSEInferenceResponseFactory,
 )
-from flymyai.core._response import FlyMyAIResponse
+from flymyai.core._response import FlyMyAIResponse, _sse_data_json
 from flymyai.core.authorizations import APIKeyClientInfo
 from flymyai.core.exceptions import (
     ImproperlyConfiguredClientException,
@@ -108,15 +109,35 @@ class _StreamState:
 
 
 def _status_error(stream: httpx.Response, content: bytes) -> BaseFlyMyAIException:
-    """The FlyMyAI error for a response whose HTTP status is an error, headers kept."""
-    return BaseFlyMyAIException.from_response(
-        FlyMyAIResponse(
-            status_code=stream.status_code,
-            content=content,
-            request=stream.request,
-            headers=stream.headers,
-        )
+    """The FlyMyAI error for a response whose HTTP status is an error, headers kept.
+
+    A body that cannot be read as an error (a proxy page, a broken SSE line) still
+    becomes a FlyMyAI error with the status and the start of the body, never a
+    JSONDecodeError."""
+    body = content or b""
+    if body.lstrip().startswith((b"data", b"event")):
+        # The gateway answers errors on its SSE routes as "data: {...}": the error
+        # classes read plain JSON, as they got it from the SSE factory before.
+        try:
+            body = _json.dumps(_sse_data_json(body.lstrip())).encode()
+        except ValueError:
+            pass
+    response = FlyMyAIResponse(
+        status_code=stream.status_code,
+        content=body,
+        request=stream.request,
+        headers=stream.headers,
     )
+    try:
+        error = BaseFlyMyAIException.from_response(response)
+    except ValueError:
+        error = None
+    if error is None:
+        text = (content or b"")[:500].decode("utf-8", errors="replace")
+        error = BaseFlyMyAIException(
+            f"HTTP {stream.status_code}: {text}", False, response
+        )
+    return error
 
 
 def _is_reconnectable_error(exc: BaseException) -> bool:

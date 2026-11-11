@@ -1,12 +1,10 @@
 {
   "address_fixture": "https://api.flymy.ai",
   "stream_payload": {
-    "model": "MiniMax-M1",
-    "messages": "[{\"role\": \"system\", \"content\": \"You are a helpful assistant.\"}, {\"role\": \"user\", \"content\": \"What is 2+2? Answer briefly.\"}]",
-    "is_stream": true
+    "prompt": "Count from 1 to 40, one number per line."
   },
   "auth": {
-    "model": "flymyai/minimax-m1",
+    "model": "flymyai/google-gemini-31-flash-lite-preview",
     "apikey_environ": "FMA_APIKEY"
   },
   "output_field": "output"
