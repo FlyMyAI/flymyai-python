@@ -723,6 +723,42 @@ async def main():
 asyncio.run(main())
 ```
 
+#### Retries and broken streams
+
+The prediction clients send a request again the way the official OpenAI and Anthropic
+SDKs do (since 1.2.0rc28):
+
+- Only before the answer started: when the connection failed, was reset or timed out
+  before a response arrived (up to `FMA_RECONNECT_RETRIES`, default 3), or when the
+  response's status allows it (`FLYMYAI_MAX_RETRIES` or `max_retries`, default 2
+  attempts): 408, 409, 429 and every status from 500.
+- The server decides when it says so: `x-should-retry: true|false` wins over the status,
+  and a JSON error body with `"retry_safe": false` stops it.
+- The wait honours `retry-after-ms` / `retry-after` up to two minutes, otherwise
+  exponential backoff from 0.5 s to 8 s with jitter.
+- A stream that has delivered an event is never sent again: the model may still be
+  running, and a second run would repeat the answer and its cost. A broken connection
+  raises `FlyMyAIStreamInterrupted` and an error event inside the stream raises
+  `FlyMyAIStreamError`; both carry `prediction_id` (when the stream announced it) and
+  `events_received`, and both are `FlyMyAIPredictException`s.
+- `predict_async_task` sends one `Idempotency-Key` on every attempt (yours via
+  `idempotency_key=`, or one made for the call), so a submit sent again after a lost
+  answer replays the first job instead of starting a second paid one.
+
+```python
+import flymyai
+from flymyai import FlyMyAIStreamInterrupted
+
+client = flymyai.client(apikey="fly-secret-key", model="flymyai/llama-v3-8b")
+text = []
+try:
+    for chunk in client.stream({"prompt": "a haiku about the sea"}):
+        text.append(chunk.output_data["output"][0])
+except FlyMyAIStreamInterrupted as error:
+    # Part of the answer arrived; retry the whole call yourself if a second run is fine.
+    print(f"cut after {error.events_received} events of {error.prediction_id}")
+```
+
 ## Custom MCP servers and OAuth
 
 `client.mcp_servers` adds an MCP server by URL - a service that is not in the

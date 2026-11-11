@@ -1,4 +1,6 @@
+import json as _json
 import os
+import uuid
 from typing import Generic, Optional, overload, AsyncIterator, Iterator, Callable
 from typing import (
     TypeVar,
@@ -14,6 +16,7 @@ from flymyai.core.response_factory.async_task_result_factory import (
 from flymyai.core.response_factory.plain_inference_response_factory import (
     SSEInferenceResponseFactory,
 )
+from flymyai.core._response import FlyMyAIResponse, _sse_data_json
 from flymyai.core.authorizations import APIKeyClientInfo
 from flymyai.core.exceptions import (
     ImproperlyConfiguredClientException,
@@ -24,27 +27,117 @@ from flymyai.core.models.successful_responses import (
     PredictionResponse,
     OpenAPISchemaResponse,
     PredictionPartial,
+    PredictionEvent,
     AsyncPredictionTask,
     AsyncPredictionResponseList,
 )
+from flymyai.core.types.event_types import EventType
 from flymyai.multipart import MultipartPayload
 
-DEFAULT_RETRY_COUNT = os.getenv("FLYMYAI_MAX_RETRIES", 2)
+# Attempts for a request whose status allows another one (flymyai.core._retry).
+# An environment value is a string: read it as a number, or every retry loop that
+# compares the count with it would never stop.
+DEFAULT_RETRY_COUNT = int(os.getenv("FLYMYAI_MAX_RETRIES", 2))
 
 _PossibleClients = TypeVar(
     "_PossibleClients", bound=Union[httpx.Client, httpx.AsyncClient]
 )
 
-# Connection-style errors that warrant one reconnect + retry (high RPS / HTTP2 drops)
+# Transport errors before a response arrived: the request is sent again (after a
+# reconnect and a backoff), as the official OpenAI and Anthropic SDKs do. A stream
+# that has delivered an event is never sent again (FlyMyAIStreamInterrupted).
 _CONNECT_RECONNECT_EXC = (
     httpx.RemoteProtocolError,
     httpx.WriteError,
     httpx.ReadError,
     httpx.ConnectError,
+    httpx.NetworkError,
+    httpx.TimeoutException,
 )
 
 # How many times to reconnect and retry on connection/stream errors (1 initial + this many retries)
 _RECONNECT_RETRIES = int(os.getenv("FMA_RECONNECT_RETRIES", "3"))
+
+# The header that makes a repeated async submit one job (the gateway's
+# apps/inference/idempotency.py): one key per logical call, the same on every attempt.
+IDEMPOTENCY_HEADER = "Idempotency-Key"
+
+
+class StreamEndedBeforeFirstEvent(httpx.RemoteProtocolError):
+    """An HTTP 200 stream that closed before it delivered any event: nothing reached
+    the caller, so the request is sent again like any cut before a response."""
+
+
+def _new_idempotency_key() -> str:
+    return f"flymyai-python-{uuid.uuid4()}"
+
+
+def _rewind_files(serialized: dict) -> dict:
+    """The same multipart form for another attempt: file objects back at their start.
+
+    A form serialized once keeps its file names, so a repeated async submit carries
+    the same fingerprint as the first and the gateway replays the first job.
+    """
+    files = serialized.get("files") or []
+    for item in files:
+        try:
+            _name, field = item
+            io_obj = field[1]
+            io_obj.seek(0)
+        except (TypeError, ValueError, AttributeError, IndexError):
+            continue
+    return serialized
+
+
+class _StreamState:
+    """How far a stream got: events delivered, and the prediction id it announced."""
+
+    def __init__(self):
+        self.events = 0
+        self.prediction_id: Optional[str] = None
+
+    def saw(self, response) -> None:
+        self.events += 1
+        if self.prediction_id is not None or not getattr(response, "is_event", False):
+            return
+        try:
+            event = PredictionEvent.from_response(response)
+        except Exception:  # noqa: BLE001 - an event of another shape
+            return
+        if event.event_type == EventType.STREAM_ID:
+            self.prediction_id = event.prediction_id
+
+
+def _status_error(stream: httpx.Response, content: bytes) -> BaseFlyMyAIException:
+    """The FlyMyAI error for a response whose HTTP status is an error, headers kept.
+
+    A body that cannot be read as an error (a proxy page, a broken SSE line) still
+    becomes a FlyMyAI error with the status and the start of the body, never a
+    JSONDecodeError."""
+    body = content or b""
+    if body.lstrip().startswith((b"data", b"event")):
+        # The gateway answers errors on its SSE routes as "data: {...}": the error
+        # classes read plain JSON, as they got it from the SSE factory before.
+        try:
+            body = _json.dumps(_sse_data_json(body.lstrip())).encode()
+        except ValueError:
+            pass
+    response = FlyMyAIResponse(
+        status_code=stream.status_code,
+        content=body,
+        request=stream.request,
+        headers=stream.headers,
+    )
+    try:
+        error = BaseFlyMyAIException.from_response(response)
+    except ValueError:
+        error = None
+    if error is None:
+        text = (content or b"")[:500].decode("utf-8", errors="replace")
+        error = BaseFlyMyAIException(
+            f"HTTP {stream.status_code}: {text}", False, response
+        )
+    return error
 
 
 def _is_reconnectable_error(exc: BaseException) -> bool:
@@ -125,16 +218,28 @@ class BaseClient(Generic[_PossibleClients]):
 
     @overload
     async def predict_async_task(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        idempotency_key: Optional[str] = None,
     ) -> AsyncPredictionTask: ...
 
     @overload
     def predict_async_task(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        idempotency_key: Optional[str] = None,
     ) -> AsyncPredictionTask: ...
 
     def predict_async_task(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        idempotency_key: Optional[str] = None,
     ) -> AsyncPredictionTask: ...
 
     @classmethod

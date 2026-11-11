@@ -1,16 +1,28 @@
 import os
+import time
 from typing import Callable, Iterator, Optional
 
 import httpx
 
+from flymyai.core._retry import (
+    exception_retry_delay,
+    exception_should_retry,
+    retry_delay,
+)
 from flymyai.core._streaming import SSEDecoder
 from flymyai.core.authorizations import APIKeyClientInfo
 from flymyai.core.clients.base_client import (
     BaseClient,
+    IDEMPOTENCY_HEADER,
+    StreamEndedBeforeFirstEvent,
+    _StreamState,
+    _new_idempotency_key,
     _predict_timeout,
     _http2,
     _limits,
     _is_reconnectable_error,
+    _rewind_files,
+    _status_error,
     _RECONNECT_RETRIES,
 )
 from flymyai.core.exceptions import (
@@ -19,6 +31,8 @@ from flymyai.core.exceptions import (
     FlyMyAIPredictException,
     FlyMyAIExceptionGroup,
     FlyMyAIAsyncTaskException,
+    FlyMyAIStreamError,
+    FlyMyAIStreamInterrupted,
 )
 from flymyai.core.models.successful_responses import (
     PredictionResponse,
@@ -44,6 +58,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         )
 
     def _with_reconnect(self, fn):
+        """Send again after a transport error before any response: reconnect, back off."""
         last_exc = None
         for attempt in range(1 + _RECONNECT_RETRIES):
             try:
@@ -53,6 +68,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
                 if not _is_reconnectable_error(e):
                     raise
                 if attempt < _RECONNECT_RETRIES:
+                    time.sleep(retry_delay(attempt))
                     self._reconnect_client()
                     continue
                 raise
@@ -74,8 +90,19 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         """
         with stream_iter_func() as stream:
             stream: httpx.Response
+            if stream.status_code >= 400:
+                # An error before the answer (a proxy page, a rate limit): its status
+                # and headers (x-should-retry, retry-after) decide another attempt.
+                stream.read()
+                raise _status_error(stream, stream.content)
+            try:
+                sse = next(SSEDecoder().iter(stream.iter_lines()))
+            except StopIteration:
+                raise StreamEndedBeforeFirstEvent(
+                    "The response ended before its first event"
+                ) from None
             response = SSEInferenceResponseFactory(
-                sse=next(SSEDecoder().iter(stream.iter_lines())),
+                sse=sse,
                 httpx_request=stream.request,
                 httpx_response=stream,
             ).construct()
@@ -117,23 +144,51 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         return PredictionResponse.from_response(response, exc_history=history)
 
     def predict_async_task(
-        self, payload: dict, model: Optional[str] = None, max_retries=None
+        self,
+        payload: dict,
+        model: Optional[str] = None,
+        max_retries=None,
+        idempotency_key: Optional[str] = None,
     ):
+        """
+        Submit an async prediction. Every attempt carries one ``Idempotency-Key``
+        (yours, or one made for this call), so a submit sent again after a lost answer
+        replays the first job instead of starting a second paid one.
+        """
         payload = MultipartPayload(input_data=payload)
         client_info = self.amend_client_info(model)
+        # Serialized once: the same file names on every attempt keep the gateway's
+        # fingerprint of the request, which the key is bound to.
+        serialized = payload.serialize()
+        headers = {IDEMPOTENCY_HEADER: idempotency_key or _new_idempotency_key()}
+
+        def submit():
+            response = self._with_reconnect(
+                lambda: self._client.post(
+                    client_info.prediction_async_path,
+                    **_rewind_files(serialized),
+                    headers=headers,
+                )
+            )
+            try:
+                return SSEInferenceResponseFactory(response).construct()
+            except BaseFlyMyAIException as e:
+                raise FlyMyAIAsyncTaskException.from_base_exception(e)
+
         try:
             _, response = retryable_callback(
-                lambda: self._with_reconnect(
-                    lambda: self._client.post(
-                        client_info.prediction_async_path, **payload.serialize()
-                    )
-                ),
+                submit,
                 max_retries or self.max_retries,
                 FlyMyAIAsyncTaskException,
                 FlyMyAIExceptionGroup,
             )
-            response = SSEInferenceResponseFactory(response).construct()
             return self._async_prediction_task_construct(response, client_info)
+        except FlyMyAIExceptionGroup as group:
+            # The submit's own error, as before; the attempts stay in __cause__.
+            last = group.errors[-1] if group.errors else None
+            if isinstance(last, FlyMyAIAsyncTaskException):
+                raise last from group
+            raise
         except BaseFlyMyAIException as e:
             raise FlyMyAIAsyncTaskException.from_base_exception(e)
 
@@ -165,42 +220,70 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         return res
 
     def _stream(self, client_info: APIKeyClientInfo, payload: dict):
+        """
+        The stream's responses. Sent again only before its first event (a transport
+        error, or a status that allows it); after that, a broken connection raises
+        FlyMyAIStreamInterrupted and an error event FlyMyAIStreamError: the stream is
+        never started a second time behind the caller's back (that repeated the
+        beginning of the answer and its cost).
+        """
         payload = MultipartPayload(payload)
-        try:
-            response_iterator = self._stream_iterator(
-                client_info, payload, is_long_stream=True
-            )
-            decoder = SSEDecoder()
-            with response_iterator as sse_stream:
-                for sse_partial in decoder.iter(sse_stream.iter_lines()):
-                    try:
-                        response = SSEInferenceResponseFactory(
-                            sse=sse_partial,
-                            httpx_request=sse_stream.request,
-                            httpx_response=sse_stream,
-                        ).construct()
-                    except BaseFlyMyAIException as e:
-                        raise FlyMyAIPredictException.from_base_exception(e)
-                    yield response
-        except BaseException as e:
-            if not _is_reconnectable_error(e):
+        state = _StreamState()
+        transport_retries = 0
+        status_attempts = 0
+        max_attempts = int(self.max_retries or 1)
+        while True:
+            try:
+                with self._stream_iterator(
+                    client_info, payload, is_long_stream=True
+                ) as sse_stream:
+                    if sse_stream.status_code >= 400:
+                        sse_stream.read()
+                        raise _status_error(sse_stream, sse_stream.content)
+                    decoder = SSEDecoder()
+                    for sse_partial in decoder.iter(sse_stream.iter_lines()):
+                        try:
+                            response = SSEInferenceResponseFactory(
+                                sse=sse_partial,
+                                httpx_request=sse_stream.request,
+                                httpx_response=sse_stream,
+                            ).construct()
+                        except BaseFlyMyAIException as e:
+                            raise FlyMyAIStreamError.from_base_exception(
+                                e, state.prediction_id, state.events
+                            ) from e
+                        state.saw(response)
+                        yield response
+                    if not state.events:
+                        raise StreamEndedBeforeFirstEvent(
+                            "The stream ended before its first event"
+                        )
+                return
+            except FlyMyAIStreamError:
                 raise
-            self._reconnect_client()
-            response_iterator = self._stream_iterator(
-                client_info, payload, is_long_stream=True
-            )
-            decoder = SSEDecoder()
-            with response_iterator as sse_stream:
-                for sse_partial in decoder.iter(sse_stream.iter_lines()):
-                    try:
-                        response = SSEInferenceResponseFactory(
-                            sse=sse_partial,
-                            httpx_request=sse_stream.request,
-                            httpx_response=sse_stream,
-                        ).construct()
-                    except BaseFlyMyAIException as e:
-                        raise FlyMyAIPredictException.from_base_exception(e)
-                    yield response
+            except BaseFlyMyAIException as e:
+                # An error status before the first event.
+                status_attempts += 1
+                if status_attempts < max_attempts and exception_should_retry(e):
+                    time.sleep(exception_retry_delay(status_attempts - 1, e))
+                    continue
+                raise FlyMyAIPredictException.from_base_exception(e) from e
+            except Exception as e:
+                if not _is_reconnectable_error(e):
+                    raise
+                if state.events:
+                    raise FlyMyAIStreamInterrupted(
+                        f"The stream broke after {state.events} event(s): {e!r}."
+                        " It is not sent again automatically.",
+                        prediction_id=state.prediction_id,
+                        events_received=state.events,
+                    ) from e
+                if transport_retries >= _RECONNECT_RETRIES:
+                    # Nothing arrived on any attempt: the connection error itself.
+                    raise
+                time.sleep(retry_delay(transport_retries))
+                transport_retries += 1
+                self._reconnect_client()
 
     def stream(self, payload: dict, model: Optional[str] = None):
         full_client_info = self.amend_client_info(model)

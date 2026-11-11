@@ -22,9 +22,15 @@ class SSEInferenceResponseFactory(ResponseFactory):
         self.sse = sse
 
     def get_sse_status_code(self):
-        return self.sse.json().get(
-            "status", self.httpx_response.status_code if self.httpx_response else 200
-        )
+        data = self.sse.json()
+        status = data.get("status") if isinstance(data, dict) else None
+        if not isinstance(status, int) and isinstance(data, dict):
+            # The gateway's error events say "status_code" (with "detail").
+            code = data.get("status_code")
+            status = code if isinstance(code, int) else None
+        if not isinstance(status, int):
+            status = self.httpx_response.status_code if self.httpx_response else 200
+        return status
 
     def _base_construct_from_sse(self):
         sse_status = self.get_sse_status_code()
