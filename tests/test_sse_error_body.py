@@ -8,7 +8,10 @@ from flymyai.core._response import FlyMyAIResponse
 from flymyai.core.clients.base_client import _status_error
 from flymyai.core.exceptions import BaseFlyMyAIException
 
-BODY = b'data: {"detail":[{"loc":["prompt"],"msg":"Field required","type":"missing"}],"status_code":422}\n\n'
+BODY = (
+    b'data: {"detail":[{"loc":["prompt"],"msg":"Field'
+    b' required","type":"missing"}],"status_code":422}\n\n'
+)
 
 
 def _response(status: int, content: bytes) -> httpx.Response:
