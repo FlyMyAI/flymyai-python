@@ -86,3 +86,24 @@ class FlyMyAI422Response(Base4xxResponse):
 @dataclasses.dataclass
 class FlyMyAI425Response(Base4xxResponse):
     requires_retry: bool = True
+
+
+@dataclasses.dataclass
+class FlyMyAIRetryable4xxResponse(Base4xxResponse):
+    """
+    408 (request timeout), 409 (conflict, e.g. the same Idempotency-Key still in
+    flight) and 429 (rate limited): sent again with backoff, as the official OpenAI
+    and Anthropic SDKs do, unless the server says otherwise (``x-should-retry``).
+    """
+
+    requires_retry: bool = True
+
+    def to_msg(self):
+        msg = super().to_msg()
+        try:
+            detail = json.loads(self.content).get("detail")
+        except (TypeError, ValueError, AttributeError):
+            detail = None
+        if detail:
+            msg += f"\nDetail: {detail}"
+        return msg

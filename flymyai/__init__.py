@@ -1,7 +1,12 @@
 import httpx
 
 from flymyai.core.client import FlyMyAI, AsyncFlyMyAI, FlyMyAIM1, AsyncFlymyAIM1
-from flymyai.core.exceptions import FlyMyAIPredictException, FlyMyAIExceptionGroup
+from flymyai.core.exceptions import (
+    FlyMyAIPredictException,
+    FlyMyAIExceptionGroup,
+    FlyMyAIStreamError,
+    FlyMyAIStreamInterrupted,
+)
 from flymyai.agents import (
     AgentGroup,
     AgentClient,
@@ -42,6 +47,8 @@ __all__ = [
     "AsyncFlyMyAI",
     "FlyMyAIExceptionGroup",
     "FlyMyAIPredictException",
+    "FlyMyAIStreamError",
+    "FlyMyAIStreamInterrupted",
     # Agent clients
     "AgentClient",
     "AsyncAgentClient",

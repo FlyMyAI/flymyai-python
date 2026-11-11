@@ -78,21 +78,29 @@ class AsyncPredictionStream:
                 if evt.event_type == EventType.STREAM_ID:
                     self.prediction_id = evt.prediction_id
 
+    def _keep_stream_details(self, response) -> None:
+        if not response:
+            return
+        try:
+            marshalled = response.json().get("stream_details")
+        except Exception:  # noqa: BLE001 - a body that is not JSON carries none
+            return
+        if marshalled:
+            self.stream_details = StreamDetails.model_validate(marshalled)
+
     async def __anext__(self):
-        response_end = None
+        # The end of the stream is the only quiet stop. An error is raised, never
+        # turned into StopAsyncIteration: a broken stream must not look finished.
         try:
             response_end = await self.loop_iter()
-            return PredictionPartial.from_response(response_end)
+        except StopAsyncIteration:
+            raise
         except BaseFlyMyAIException as e:
-            response_end = e.response
-            raise e
-        except Exception as e:
-            raise e
-        finally:
-            if not response_end:
-                raise StopAsyncIteration()
-            stream_details_marshalled = response_end.json().get("stream_details")
-            if stream_details_marshalled:
-                self.stream_details = StreamDetails.model_validate(
-                    stream_details_marshalled
-                )
+            if getattr(e, "prediction_id", "") is None:
+                e.prediction_id = getattr(self, "prediction_id", None)
+            self._keep_stream_details(e.response)
+            raise
+        if not response_end:
+            raise StopAsyncIteration()
+        self._keep_stream_details(response_end)
+        return PredictionPartial.from_response(response_end)
