@@ -726,7 +726,7 @@ asyncio.run(main())
 #### Retries and broken streams
 
 The prediction clients send a request again the way the official OpenAI and Anthropic
-SDKs do (since 1.2.0rc27):
+SDKs do (since 1.2.0rc28):
 
 - Only before the answer started: when the connection failed, was reset or timed out
   before a response arrived (up to `FMA_RECONNECT_RETRIES`, default 3), or when the
