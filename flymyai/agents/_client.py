@@ -15,6 +15,7 @@ from flymyai.agents._apps import Apps, AsyncApps
 from flymyai.agents._artifacts import Artifacts, AsyncArtifacts
 from flymyai.agents._billing import AsyncBilling, Billing
 from flymyai.agents._feedback import AsyncFeedback, Feedback
+from flymyai.agents._webhooks import AsyncWebhooks, Webhooks
 from flymyai.agents._triggers import TriggersV1, AsyncTriggersV1
 from flymyai.agents._projects import AsyncProjects, Projects
 from flymyai.agents._mcp_sharing import McpTeams, AsyncMcpTeams
@@ -172,6 +173,27 @@ class AppSecretLimitError(FlyMyAIAgentError):
     delete one with ``client.apps.secrets.delete`` first."""
 
 
+class InvalidWebhookError(FlyMyAIAgentError):
+    """The webhook was refused (HTTP 400 ``invalid_webhook``): :attr:`field` names the
+    input to fix (``url``, ``events``, ``description``, ``is_active``)."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status_code: int,
+        response_body: Any,
+        field: Optional[str] = None,
+    ) -> None:
+        super().__init__(message, status_code=status_code, response_body=response_body)
+        self.field = field
+
+
+class WebhookLimitError(FlyMyAIAgentError):
+    """An account has at most 10 webhooks (HTTP 409 ``webhook_limit``): delete one with
+    ``client.webhooks.delete`` first."""
+
+
 def _usd(value: Any) -> Optional[Decimal]:
     """A dollar amount from an answer (a decimal string or a number), or ``None``."""
     if isinstance(value, bool) or not isinstance(value, (str, int, float)):
@@ -288,6 +310,16 @@ def _typed_refusal(resp: httpx.Response, body: Any) -> Optional[FlyMyAIAgentErro
             minimum_usd=_usd(body.get("minimum_usd")),
             maximum_usd=_usd(body.get("maximum_usd")),
         )
+    if resp.status_code == 400 and code == "invalid_webhook":
+        field = body.get("field")
+        return InvalidWebhookError(
+            message,
+            status_code=400,
+            response_body=body,
+            field=field if isinstance(field, str) else None,
+        )
+    if resp.status_code == 409 and code == "webhook_limit":
+        return WebhookLimitError(message, status_code=409, response_body=body)
     if resp.status_code == 429 and code in _RATE_LIMIT_CODES:
         return _RATE_LIMIT_CODES[code](
             message,
@@ -657,6 +689,7 @@ class SyncAgentClient:
         self.model_proxy = ModelProxy(self)
         self.billing = Billing(self)
         self.feedback = Feedback(self)
+        self.webhooks = Webhooks(self)
 
     def _model_proxy_request(
         self, method, path, *, timeout, query=None, body=None, key=None, form=None
@@ -769,6 +802,7 @@ class AsyncAgentClient:
         self.model_proxy = AsyncModelProxy(self)
         self.billing = AsyncBilling(self)
         self.feedback = AsyncFeedback(self)
+        self.webhooks = AsyncWebhooks(self)
 
     async def _model_proxy_request(
         self, method, path, *, timeout, query=None, body=None, key=None, form=None

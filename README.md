@@ -188,6 +188,56 @@ client.feedback.send(
 Both clients have these methods (`await` them on `AsyncAgentClient`); neither takes an
 idempotency key.
 
+### Webhooks: events to your own endpoint
+
+`client.webhooks` sends platform events to a public `https://` endpoint of yours, as
+Composio's webhooks do. The first event is `connection.expired`: a connected account
+stopped accepting FlyMyAI's access, its owner got an email, and `data` names the
+connection, its `reconnect_url` and the agents that use it (once a day per connection).
+`client.webhooks.list().event_types` lists every event type with its description.
+
+Each event is one POST of `{"id", "type", "created_at", "schema", "data"}`, signed the
+Standard Webhooks way (`webhook-id`, `webhook-timestamp`, `webhook-signature`). The
+signing secret (`whsec_...`) is in the answer of `create` and `rotate_secret` only;
+store it where your receiver reads it. `verify_webhook(body, headers, secret)` checks a
+delivery (the raw body, before you parse it) and returns its event, or raises
+`WebhookSignatureError` (answer 400). `event.id` is the same on every retry, so use it
+to skip a repeat. Answer 2xx quickly: network errors, 408, 429 and 5xx are retried for
+about two hours, any other answer ends the delivery as `failed`.
+
+```python
+created = client.webhooks.create(
+    "https://example.com/flymyai/events",
+    events=["connection.expired"],
+    description="Reconnect alerts",
+    idempotency_key="webhook-reconnect-alerts",
+)
+secret = created.secret  # shown once
+client.webhooks.send_test(created.webhook.id)  # one webhook.test event
+for delivery in client.webhooks.list_deliveries(created.webhook.id):
+    print(delivery.event_type, delivery.status, delivery.last_status_code)
+```
+
+```python
+from flymyai import WebhookSignatureError, verify_webhook
+
+def receive(body: bytes, headers) -> int:
+    try:
+        event = verify_webhook(body, headers, WEBHOOK_SECRET)
+    except WebhookSignatureError:
+        return 400
+    if event.type == "connection.expired":
+        tell_the_user(event.data["connection"]["name"], event.data["reconnect_url"])
+    return 204
+```
+
+`update(webhook_id, url=..., events=..., description=..., is_active=False)` changes or
+pauses a webhook, `delete(webhook_id)` removes it, `rotate_secret(webhook_id)` replaces
+the secret at once. Writes take an optional `idempotency_key`; a replayed `create` or
+`rotate_secret` answers with `secret=None`. A refused URL, event or field raises
+`InvalidWebhookError` (`field` names it); an account has at most 10 webhooks
+(`WebhookLimitError`). Both clients have these methods.
+
 ### Limits for automatic subagents
 
 Ordinary `client.agents.run(...)` calls use the same delegation runtime as chat.
