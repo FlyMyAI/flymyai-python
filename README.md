@@ -809,6 +809,22 @@ except FlyMyAIStreamInterrupted as error:
     print(f"cut after {error.events_received} events of {error.prediction_id}")
 ```
 
+### Reading a saved tool response
+
+When a tool call returns a `memory_key`, read one UTF-8 page at a time.
+Use the same owner client. For a result from a run, also pass its
+`execution_id`. The synchronous and asynchronous clients use the same arguments.
+
+```python
+offset = 0
+while True:
+    page = client.tools.read_tool_response(memory_key, offset=offset, limit=6000)
+    consume(page.chunk)
+    if page.is_complete:
+        break
+    offset = page.next_offset
+```
+
 ## Custom MCP servers and OAuth
 
 `client.mcp_servers` adds an MCP server by URL - a service that is not in the

@@ -56,6 +56,7 @@ from flymyai.agents._types import (
     RuntimeConnections,
     SchemaSuggestion,
     Tool,
+    ToolResponseChunk,
     VersionPins,
 )
 
@@ -132,6 +133,7 @@ __all__ = [
     "RuntimeConnections",
     "SchemaSuggestion",
     "Tool",
+    "ToolResponseChunk",
     "VersionPins",
 ]
 
