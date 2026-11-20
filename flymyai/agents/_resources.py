@@ -54,6 +54,7 @@ from flymyai.agents._types import (
     RunPrice,
     SchemaSuggestion,
     Tool,
+    ToolResponseChunk,
 )
 
 if TYPE_CHECKING:
@@ -1120,6 +1121,24 @@ def _tool_call_payload(
     return payload
 
 
+def _tool_response_request(
+    memory_key: str, offset: int, limit: int, execution_id: Optional[str]
+) -> Tuple[str, Dict[str, Union[str, int]]]:
+    key = _validate_public_uuid(memory_key, field_name="memory_key")
+    if type(offset) is not int or not 0 <= offset <= 2**53 - 1:
+        raise ValueError("offset must be a non-negative safe integer.")
+    if type(limit) is not int or not 256 <= limit <= 12000:
+        raise ValueError("limit must be between 256 and 12000 bytes.")
+    params: Dict[str, Union[str, int]] = {"offset": offset, "limit": limit}
+    if execution_id is not None:
+        if not isinstance(execution_id, str) or not re.fullmatch(
+            r"[a-z-]{12}", execution_id
+        ):
+            raise ValueError("execution_id must be the original run's public ID.")
+        params["execution_id"] = execution_id
+    return f"/api/v1/agents/tool-responses/{key}/", params
+
+
 class Tools:
     """Manage MCP tools. Maps to ``/api/v1/agents/tools/``."""
 
@@ -1198,6 +1217,19 @@ class Tools:
             body["alias"] = _validate_alias(alias)
         data = self._c._request("POST", "/api/v1/agents/tools/", json=body)
         return Tool(**data)
+
+    def read_tool_response(
+        self,
+        memory_key: str,
+        *,
+        offset: int = 0,
+        limit: int = 6000,
+        execution_id: Optional[str] = None,
+    ) -> ToolResponseChunk:
+        """Read one page. Continue with next_offset until is_complete."""
+        path, params = _tool_response_request(memory_key, offset, limit, execution_id)
+        data = self._c._request("GET", path, params=params)
+        return ToolResponseChunk(**data)
 
     def get(self, tool_id: int) -> Tool:
         data = self._c._request("GET", f"/api/v1/agents/tools/{tool_id}/")
@@ -2648,6 +2680,19 @@ class AsyncTools:
             body["alias"] = _validate_alias(alias)
         data = await self._c._request("POST", "/api/v1/agents/tools/", json=body)
         return Tool(**data)
+
+    async def read_tool_response(
+        self,
+        memory_key: str,
+        *,
+        offset: int = 0,
+        limit: int = 6000,
+        execution_id: Optional[str] = None,
+    ) -> ToolResponseChunk:
+        """Read one page. Continue with next_offset until is_complete."""
+        path, params = _tool_response_request(memory_key, offset, limit, execution_id)
+        data = await self._c._request("GET", path, params=params)
+        return ToolResponseChunk(**data)
 
     async def get(self, tool_id: int) -> Tool:
         data = await self._c._request("GET", f"/api/v1/agents/tools/{tool_id}/")

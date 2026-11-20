@@ -488,6 +488,27 @@ class TestSyncRuns:
 
 
 class TestSyncTools:
+    def test_read_tool_response_uses_the_returned_byte_offset(self):
+        key = "550e8400-e29b-41d4-a716-446655440000"
+        payload = {
+            "memory_key": key,
+            "scope_type": "task",
+            "chunk": "é",
+            "offset": 6000,
+            "next_offset": 6002,
+            "total_bytes": 9000,
+            "sha256": "a" * 64,
+            "is_complete": False,
+        }
+        http = MagicMock()
+        http.request.return_value = _make_response(payload)
+        client = _sync_client(http)
+        page = client.tools.read_tool_response(key, offset=6000)
+        assert page.next_offset == 6002 and page.chunk == "é"
+        args, kwargs = http.request.call_args
+        assert args[0] == "GET" and args[1].endswith(f"/tool-responses/{key}/")
+        assert kwargs["params"] == {"offset": 6000, "limit": 6000}
+
     def test_list_tools(self):
         mock_http = MagicMock()
         mock_http.request.return_value = _make_response([_tool_payload()])
@@ -789,6 +810,15 @@ class TestAsyncRuns:
 
 @pytest.mark.asyncio
 class TestAsyncTools:
+    async def test_read_tool_response_validates_before_transport(self):
+        http = AsyncMock()
+        client = _async_client(http)
+        with pytest.raises(ValueError):
+            await client.tools.read_tool_response(
+                "550e8400-e29b-41d4-a716-446655440000", limit=12001
+            )
+        http.request.assert_not_awaited()
+
     async def test_list(self):
         mock_http = AsyncMock()
         mock_http.request.return_value = _make_response([_tool_payload()])

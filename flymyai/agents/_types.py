@@ -4,7 +4,7 @@ import re
 from datetime import datetime
 from decimal import Decimal
 from enum import Enum
-from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, cast
+from typing import Any, Dict, List, Literal, Mapping, Optional, Sequence, Union, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -353,6 +353,19 @@ class BrowserUseProfileBinding(BaseModel):
     code: Optional[str] = None
     detail: Optional[str] = None
     recovery_intent_id: Optional[str] = None
+
+
+class ToolResponseChunk(BaseModel):
+    """A single UTF-8 range of a saved tool response."""
+
+    memory_key: str
+    scope_type: Literal["task", "execution"]
+    chunk: str
+    offset: int
+    next_offset: Optional[int]
+    total_bytes: int
+    sha256: str
+    is_complete: bool
 
 
 class Tool(BaseModel):
