@@ -22,8 +22,9 @@ from flymyai.multipart.large_files import (
 )
 
 MB = 1024 * 1024
-PUT = "https://storage.googleapis.com/prediction-result-prod/prediction/1935/7/a1?X-Goog-Signature=put"
-GET = "https://storage.googleapis.com/prediction-result-prod/prediction/1935/7/a1?X-Goog-Signature=get"
+OBJECT = "https://storage.googleapis.com/prediction-result-prod/prediction/1935/7/a1"
+PUT = OBJECT + "?X-Goog-Signature=put"
+GET = OBJECT + "?X-Goog-Signature=get"
 UPLOAD_URL = "/api/v1/flymyai/bytedance-video-upscaler/upload_url"
 KEY = {"X-API-KEY": "fixture-key"}
 
@@ -151,7 +152,9 @@ def test_a_stream_is_sent_from_its_start_and_rewound_when_kept():
         Gateway(
             status=403,
             body={
-                "detail": "Failed to generate the url: No File URL field found on model!"
+                "detail": (
+                    "Failed to generate the url: No File URL field found on model!"
+                )
             },
         ),
         # a gateway before download_url: only a file link field's PUT link
