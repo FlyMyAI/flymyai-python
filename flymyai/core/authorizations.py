@@ -72,6 +72,11 @@ class APIKeyClientInfo(ClientInfo):
     def openapi_schema_path(self):
         return self._project_path.join(httpx.URL("openapi.json"))
 
+    @property
+    def upload_url_path(self):
+        """Where a large input file gets its storage links (multipart/large_files)."""
+        return self._project_path.join(httpx.URL("upload_url"))
+
     def copy_for_model(self, model: str):
         copied = copy.deepcopy(self)
         if not model:
