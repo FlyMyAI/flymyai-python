@@ -44,6 +44,7 @@ from flymyai.core.response_factory.plain_inference_response_factory import (
 )
 from flymyai.core.stream_iterators.PredictionStream import PredictionStream
 from flymyai.multipart import MultipartPayload
+from flymyai.multipart.large_files import upload_large_files
 from flymyai.utils.utils import retryable_callback
 
 
@@ -55,6 +56,15 @@ class BaseSyncClient(BaseClient[httpx.Client]):
             headers=self.client_info.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://api.flymy.ai/"),
             timeout=_predict_timeout,
+        )
+
+    def _upload_large_files(self, payload: dict, client_info: APIKeyClientInfo):
+        """The payload with its files over 8 MB in storage (multipart/large_files)."""
+        return upload_large_files(
+            payload,
+            self._client,
+            client_info.upload_url_path,
+            client_info.authorization_headers,
         )
 
     def _with_reconnect(self, fn):
@@ -134,9 +144,11 @@ class BaseSyncClient(BaseClient[httpx.Client]):
                 output_data - dict with prediction output
         """
 
-        payload = MultipartPayload(payload)
+        client_info = self.amend_client_info(model)
+        # a file over 8 MB goes to storage first, the request carries its link
+        payload = MultipartPayload(self._upload_large_files(payload, client_info))
         history, response = retryable_callback(
-            lambda: self._predict(payload, self.amend_client_info(model)),
+            lambda: self._predict(payload, client_info),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
@@ -155,8 +167,10 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         (yours, or one made for this call), so a submit sent again after a lost answer
         replays the first job instead of starting a second paid one.
         """
-        payload = MultipartPayload(input_data=payload)
         client_info = self.amend_client_info(model)
+        payload = MultipartPayload(
+            input_data=self._upload_large_files(payload, client_info)
+        )
         # Serialized once: the same file names on every attempt keep the gateway's
         # fingerprint of the request, which the key is bound to.
         serialized = payload.serialize()
@@ -227,7 +241,7 @@ class BaseSyncClient(BaseClient[httpx.Client]):
         never started a second time behind the caller's back (that repeated the
         beginning of the answer and its cost).
         """
-        payload = MultipartPayload(payload)
+        payload = MultipartPayload(self._upload_large_files(payload, client_info))
         state = _StreamState()
         transport_retries = 0
         status_attempts = 0

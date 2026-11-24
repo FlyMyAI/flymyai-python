@@ -44,6 +44,7 @@ from flymyai.core.models.successful_responses import (
 )
 from flymyai.core.stream_iterators.AsyncPredictionStream import AsyncPredictionStream
 from flymyai.multipart import MultipartPayload
+from flymyai.multipart.large_files import aupload_large_files
 from flymyai.utils.utils import aretryable_callback
 
 
@@ -55,6 +56,15 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
             headers=self.client_info.authorization_headers,
             base_url=os.getenv("FLYMYAI_DSN", "https://api.flymy.ai/"),
             timeout=_predict_timeout,
+        )
+
+    async def _upload_large_files(self, payload: dict, client_info: APIKeyClientInfo):
+        """The payload with its files over 8 MB in storage (multipart/large_files)."""
+        return await aupload_large_files(
+            payload,
+            self._client,
+            client_info.upload_url_path,
+            client_info.authorization_headers,
         )
 
     async def _reconnect_client(self):
@@ -207,9 +217,13 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
                 exc_history - list of exception history during prediction
                 output_data - dict with prediction output
         """
-        payload = MultipartPayload(input_data=payload)
+        client_info = self.amend_client_info(model)
+        # a file over 8 MB goes to storage first, the request carries its link
+        payload = MultipartPayload(
+            input_data=await self._upload_large_files(payload, client_info)
+        )
         history, response = await aretryable_callback(
-            lambda: self._predict(self.amend_client_info(model), payload),
+            lambda: self._predict(client_info, payload),
             max_retries or self.max_retries,
             FlyMyAIPredictException,
             FlyMyAIExceptionGroup,
@@ -228,8 +242,10 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         (yours, or one made for this call), so a submit sent again after a lost answer
         replays the first job instead of starting a second paid one.
         """
-        payload = MultipartPayload(input_data=payload)
         client_info = self.amend_client_info(model)
+        payload = MultipartPayload(
+            input_data=await self._upload_large_files(payload, client_info)
+        )
         # Serialized once: the same file names on every attempt keep the gateway's
         # fingerprint of the request, which the key is bound to.
         serialized = payload.serialize()
@@ -299,7 +315,7 @@ class BaseAsyncClient(BaseClient[httpx.AsyncClient]):
         never started a second time behind the caller's back (that repeated the
         beginning of the answer and its cost).
         """
-        payload = MultipartPayload(payload)
+        payload = MultipartPayload(await self._upload_large_files(payload, client_info))
         state = _StreamState()
         transport_retries = 0
         status_attempts = 0
